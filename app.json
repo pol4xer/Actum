@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "Actum",
+    "slug": "actum",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "actum",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#090B14",
+    "ios": {
+      "icon": "./assets/images/icon.png",
+      "bundleIdentifier": "com.actum.liferpg",
+      "supportsTablet": false
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#090B14",
+        "foregroundImage": "./assets/images/icon.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.actum.liferpg"
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#090B14"
+        }
+      ],
+      "expo-sqlite",
+      "expo-notifications",
+      "expo-dev-client"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

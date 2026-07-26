@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="40%" r="72%">
+      <stop offset="0%" stop-color="#242044"/>
+      <stop offset="58%" stop-color="#101421"/>
+      <stop offset="100%" stop-color="#090B14"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFE29A"/>
+      <stop offset="52%" stop-color="#E6B85C"/>
+      <stop offset="100%" stop-color="#9A6B27"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="20" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <circle cx="512" cy="500" r="308" fill="none" stroke="#E6B85C" stroke-opacity=".2" stroke-width="4"/>
+  <circle cx="512" cy="500" r="246" fill="#FFFFFF" fill-opacity=".025" stroke="#FFFFFF" stroke-opacity=".12" stroke-width="3"/>
+  <rect x="338" y="326" width="348" height="348" rx="54" transform="rotate(45 512 500)" fill="none" stroke="#8E7CFF" stroke-opacity=".38" stroke-width="4"/>
+  <circle cx="512" cy="500" r="150" fill="#090B14" fill-opacity=".72" stroke="url(#gold)" stroke-width="8"/>
+  <path d="M393 526 L470 447 L470 500 L553 416 L553 484 L631 484 L532 584 L532 526 Z"
+        fill="url(#gold)" filter="url(#glow)" stroke="#FFF1C2" stroke-opacity=".45" stroke-width="3" stroke-linejoin="round"/>
+  <circle cx="512" cy="500" r="342" fill="none" stroke="#FFFFFF" stroke-opacity=".07" stroke-width="2" stroke-dasharray="9 18"/>
+</svg>
