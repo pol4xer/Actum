@@ -40,7 +40,7 @@ xcodebuild -version
 ## Открыть в VS Code
 
 ```bash
-cd /Users/pol4xer/Documents/Actum
+cd /Users/pol4xer/Actum
 code .
 ```
 
@@ -48,8 +48,25 @@ code .
 
 ## Установка и запуск
 
+В новом терминале активируйте закреплённую для проекта версию Node.js и pnpm:
+
 ```bash
+nvm use
+corepack enable pnpm
 pnpm install
+```
+
+Для быстрой проверки интерфейса в браузере:
+
+```bash
+pnpm web
+```
+
+Web-режим использует `localStorage`; SQLite, нативные уведомления и haptics проверяются только на iOS/Android.
+
+Для полноценного запуска на iPhone Simulator:
+
+```bash
 pnpm ios
 ```
 
@@ -61,13 +78,30 @@ pnpm ios
 pnpm start
 ```
 
-Для быстрой проверки интерфейса в браузере:
+Затем нажмите `i` в терминале Expo, чтобы открыть установленный development build в iOS Simulator.
+
+## Expo Application Services
+
+Локальный проект связан с EAS-проектом `@pol4xer/actum`. Конфигурация сборок находится в `eas.json`:
+
+- `development` — development client для внутреннего тестирования;
+- `preview` — production-подобная внутренняя сборка;
+- `production` — App Store-сборка с автоматическим увеличением build number.
+
+Проверить аккаунт и привязку:
 
 ```bash
-pnpm web
+npx eas-cli@latest whoami
+npx eas-cli@latest project:info
 ```
 
-Web-режим использует `localStorage`; iOS/Android используют SQLite. Уведомления в браузере намеренно отключены.
+Создать первую облачную development-сборку для iOS:
+
+```bash
+npx eas-cli@latest build --platform ios --profile development
+```
+
+`eas init` и `eas build:configure` только привязывают и настраивают проект. Облачная сборка начинается исключительно после явного запуска `eas build`.
 
 ## Проверки
 
