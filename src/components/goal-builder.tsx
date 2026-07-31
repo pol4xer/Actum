@@ -16,6 +16,7 @@ import { Palette, Radius, Spacing } from '@/constants/theme';
 import { buildGoal, checkGoalRisk } from '@/domain/goal-engine';
 import { GeneratedGoal, GoalInput, Mission } from '@/domain/types';
 import { AIPlannerError, generateGoalWithAI } from '@/lib/ai-planner';
+import type { AIPlannerErrorCode } from '@/lib/ai-planner';
 import { useApp } from '@/state/app-context';
 
 type Stage = 'intent' | 'details' | 'generating' | 'review' | 'error';
@@ -37,6 +38,7 @@ export function GoalBuilder() {
   const [researchMode, setResearchMode] = useState<NonNullable<GoalInput['researchMode']>>('web');
   const [preview, setPreview] = useState<GeneratedGoal>();
   const [generationError, setGenerationError] = useState('');
+  const [generationErrorCode, setGenerationErrorCode] = useState<AIPlannerErrorCode>();
   const risk = useMemo(() => checkGoalRisk(prompt), [prompt]);
   const input = useMemo(
     () => ({ prompt, dailyMinutes, horizonDays, currentLevel, researchMode }),
@@ -46,11 +48,13 @@ export function GoalBuilder() {
   const continueFromIntent = () => setStage('details');
   const generate = async () => {
     setGenerationError('');
+    setGenerationErrorCode(undefined);
     setStage('generating');
     try {
       setPreview(await generateGoalWithAI(input));
       setStage('review');
     } catch (error) {
+      setGenerationErrorCode(error instanceof AIPlannerError ? error.code : 'UPSTREAM_ERROR');
       setGenerationError(
         error instanceof AIPlannerError ? error.message : 'Не удалось получить план от GPT.',
       );
@@ -91,7 +95,9 @@ export function GoalBuilder() {
                 : stage === 'generating'
                   ? 'Отправляем цель в OpenAI и ждём структурированный план.'
                   : stage === 'error'
-                    ? 'Можно повторить запрос или продолжить с локальным шаблоном.'
+                    ? generationErrorCode === 'INVALID_RESPONSE'
+                      ? 'OpenAI закончил план, но приложение не смогло прочитать одно из полей.'
+                      : 'Можно повторить запрос или продолжить с локальным шаблоном.'
                     : preview?.plan.research.method === 'openai-web-research-v1'
                       ? 'OpenAI изучил источники и превратил выводы в главы и исполняемые миссии.'
                       : preview?.plan.research.method === 'openai-responses-v1'
@@ -255,8 +261,24 @@ export function GoalBuilder() {
 
         {stage === 'error' ? (
           <Card style={styles.errorCard}>
-            <Pill tone="warning">AI недоступен</Pill>
-            <ThemedText type="subtitle">Не удалось получить план</ThemedText>
+            <Pill tone="warning">
+              {generationErrorCode === 'INVALID_RESPONSE'
+                ? 'Ответ не прочитан'
+                : generationErrorCode === 'TIMEOUT' || generationErrorCode === 'UPSTREAM_TIMEOUT'
+                  ? 'Долгая генерация'
+                  : generationErrorCode === 'CONNECTION_INTERRUPTED'
+                    ? 'Связь прервана'
+                    : generationErrorCode === 'GATEWAY_UNREACHABLE'
+                      ? 'Сервер недоступен'
+                      : 'Ошибка OpenAI'}
+            </Pill>
+            <ThemedText type="subtitle">
+              {generationErrorCode === 'INVALID_RESPONSE'
+                ? 'План получен, но формат не совпал'
+                : generationErrorCode === 'TIMEOUT' || generationErrorCode === 'UPSTREAM_TIMEOUT'
+                  ? 'План ещё не завершён'
+                  : 'Не удалось получить план'}
+            </ThemedText>
             <ThemedText style={styles.muted}>{generationError}</ThemedText>
             <AppButton label="Повторить запрос к GPT" onPress={generate} />
             <AppButton label="Использовать локальный план" variant="secondary" onPress={useLocalFallback} />

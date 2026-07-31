@@ -45,12 +45,14 @@
   "scripts": {
     "start": "expo start --dev-client",
     "start:go": "expo start",
+    "dev:ios": "bash scripts/dev-ios.sh",
     "ai:server": "node --env-file-if-exists=.env.local scripts/ai-server.mjs",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "check": "pnpm typecheck && expo export --platform web"
+    "test:ai": "node --test test/ai-server.integration.test.mjs",
+    "check": "pnpm typecheck && pnpm test:ai && expo export --platform web"
   },
   "private": true
 }
