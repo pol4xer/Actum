@@ -30,20 +30,64 @@ const missionType = z.enum([
   'check',
 ]);
 
-const executionSchema = z
+const routineUnit = z.enum([
+  'reps',
+  'seconds',
+  'minutes',
+  'pages',
+  'items',
+  'words',
+  'meters',
+  'attempts',
+  'custom',
+]);
+
+const routineActionSchema = z
   .object({
-    kind: z.enum(['manual', 'timer']),
-    durationSeconds: z.number().int().min(1).max(7200).nullable(),
+    title: contractText(2, 100),
+    instruction: contractText(8, 300),
+    sets: z.number().int().min(1).max(20),
+    quantity: z.number().int().min(1).max(10000),
+    unit: routineUnit,
+    unitLabel: contractText(1, 40).nullable(),
+    restSeconds: z.number().int().min(0).max(1800),
+    tempo: contractText(2, 100).nullable(),
+    successCriterion: contractText(5, 240),
   })
-  .superRefine((execution, context) => {
-    if (execution.kind === 'timer' && execution.durationSeconds == null) {
+  .superRefine((action, context) => {
+    if (action.unit === 'custom' && action.unitLabel == null) {
       context.addIssue({
         code: 'custom',
-        message: 'Timer execution requires durationSeconds.',
-        path: ['durationSeconds'],
+        message: 'Custom routine units require unitLabel.',
+        path: ['unitLabel'],
+      });
+    }
+    if (action.unit !== 'custom' && action.unitLabel != null) {
+      context.addIssue({
+        code: 'custom',
+        message: 'unitLabel is only allowed for custom routine units.',
+        path: ['unitLabel'],
       });
     }
   });
+
+const executionSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('manual'),
+    durationSeconds: z.null(),
+    successCriterion: contractText(5, 300),
+  }),
+  z.object({
+    kind: z.literal('timer'),
+    durationSeconds: z.number().int().min(1).max(7200),
+    successCriterion: contractText(5, 300),
+  }),
+  z.object({
+    kind: z.literal('routine'),
+    actions: z.array(routineActionSchema).min(1).max(8),
+    successCriterion: contractText(5, 300),
+  }),
+]);
 
 const aiPlanSchema = z.object({
   title: contractText(3, 120),
@@ -66,9 +110,11 @@ const aiPlanSchema = z.object({
               description: contractText(5, 500),
               type: missionType,
               estimatedMinutes: z.number().int().min(1).max(120),
+              repeatCount: z.number().int().min(1).max(28),
               xp: z.number().int().min(10).max(60),
               steps: z.array(contractText(2, 260)).min(1).max(6),
               execution: executionSchema,
+              progressionRule: contractText(8, 360),
               warning: contractText(3, 300).nullable(),
             }),
           )
@@ -214,6 +260,13 @@ function mapServerErrorCode(raw: unknown, status: number): AIPlannerErrorCode {
       : undefined;
   if (code === 'refusal' || status === 422) return 'REFUSAL';
   if (code === 'upstream_timeout' || status === 504) return 'UPSTREAM_TIMEOUT';
+  if (
+    code === 'upstream_invalid_plan_contract' ||
+    code === 'upstream_invalid_plan_json' ||
+    code === 'upstream_missing_plan'
+  ) {
+    return 'INVALID_RESPONSE';
+  }
   if (status === 400) return 'INVALID_REQUEST';
   return 'UPSTREAM_ERROR';
 }
@@ -260,23 +313,44 @@ function toGeneratedGoal(
   }));
   let missionSequence = 0;
   const missions: Mission[] = planDraft.chapters.flatMap((chapter, chapterIndex) =>
-    chapter.missions.map((mission) => ({
-      id: id('mission'),
-      chapterId: chapterIds[chapterIndex],
-      sequence: ++missionSequence,
-      title: mission.title,
-      description: mission.description,
-      type: mission.type,
-      estimatedMinutes: Math.min(input.dailyMinutes, mission.estimatedMinutes),
-      xp: mission.xp,
-      outcome: 'pending',
-      steps: mission.steps,
-      execution:
-        mission.execution.kind === 'timer' && mission.execution.durationSeconds != null
-          ? { kind: 'timer' as const, durationSeconds: mission.execution.durationSeconds }
-          : { kind: 'manual' as const },
-      warning: mission.warning ?? undefined,
-    })),
+    chapter.missions.flatMap((mission) =>
+      Array.from({ length: mission.repeatCount }, (_, repeatIndex) => ({
+        id: id('mission'),
+        chapterId: chapterIds[chapterIndex],
+        sequence: ++missionSequence,
+        title: mission.title,
+        description: mission.description,
+        type: mission.type,
+        estimatedMinutes: mission.estimatedMinutes,
+        xp: mission.xp,
+        outcome: 'pending' as const,
+        repeatIndex: repeatIndex + 1,
+        repeatTotal: mission.repeatCount,
+        steps: mission.steps,
+        execution:
+          mission.execution.kind === 'timer'
+            ? { kind: 'timer' as const, durationSeconds: mission.execution.durationSeconds }
+            : mission.execution.kind === 'routine'
+              ? {
+                  kind: 'routine' as const,
+                  actions: mission.execution.actions.map((action) => ({
+                    title: action.title,
+                    instruction: action.instruction,
+                    sets: action.sets,
+                    quantity: action.quantity,
+                    unit: action.unit,
+                    unitLabel: action.unitLabel ?? undefined,
+                    restSeconds: action.restSeconds,
+                    tempo: action.tempo ?? undefined,
+                    successCriterion: action.successCriterion,
+                  })),
+                }
+              : { kind: 'manual' as const },
+        completionCriterion: mission.execution.successCriterion,
+        progressionRule: mission.progressionRule,
+        warning: mission.warning ?? undefined,
+      })),
+    ),
   );
   const targetDate = new Date(now.getTime() + input.horizonDays * 86_400_000);
 

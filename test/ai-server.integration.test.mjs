@@ -60,6 +60,15 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
     const body = JSON.parse(options.body);
     assert.equal(body.background, true);
     const kind = Array.isArray(body.tools) ? 'research' : 'planning';
+    if (kind === 'planning') {
+      const missionProperties =
+        body.text.format.schema.properties.chapters.items.properties.missions.items.properties;
+      assert.equal(missionProperties.estimatedMinutes.maximum, 20);
+      assert.equal(
+        missionProperties.execution.anyOf[1].properties.durationSeconds.maximum,
+        1200,
+      );
+    }
     const input = JSON.parse(body.input);
     apiCalls.push({ kind, input });
 
@@ -76,6 +85,12 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
     }
     if (input.goal === 'Cache invalid completed output') {
       return jsonResponse(invalidPlanPayload());
+    }
+    if (input.goal === 'Reject vague completed output') {
+      return jsonResponse(vaguePlanPayload());
+    }
+    if (input.goal === 'Normalize schedule completed output') {
+      return jsonResponse(scheduleMismatchPlanPayload());
     }
     if (input.goal === 'Join one active request') {
       markBlockedPlanningStarted();
@@ -197,6 +212,38 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
     1,
   );
 
+  const vagueInput = goalInput('Reject vague completed output', 'quick');
+  const vagueFirst = await postPlan(vagueInput, 'actum_test_vague_016');
+  assert.equal(vagueFirst.status, 502);
+  assert.equal(vagueFirst.body.code, 'upstream_invalid_plan_contract');
+  assert.match(vagueFirst.body.error, /chapters\.0\.missions\.0\.steps/);
+  const vagueSecond = await postPlan(vagueInput, 'actum_test_vague_017');
+  assert.equal(vagueSecond.status, 502);
+  assert.equal(vagueSecond.body.code, 'upstream_invalid_plan_contract');
+  assert.equal(
+    apiCalls.filter(
+      (call) => call.kind === 'planning' && call.input.goal === 'Reject vague completed output',
+    ).length,
+    1,
+  );
+
+  const scheduleInput = goalInput('Normalize schedule completed output', 'quick');
+  const normalizedSchedule = await postPlan(scheduleInput, 'actum_test_schedule_018');
+  assert.equal(normalizedSchedule.status, 200);
+  assert.equal(
+    normalizedSchedule.body.plan.chapters
+      .flatMap((chapter) => chapter.missions)
+      .reduce((sum, mission) => sum + mission.repeatCount, 0),
+    14,
+  );
+  const normalizedAction =
+    normalizedSchedule.body.plan.chapters[0].missions[0].execution.actions[0];
+  assert.ok(
+    normalizedAction.sets * normalizedAction.quantity +
+      (normalizedAction.sets - 1) * normalizedAction.restSeconds <=
+      1200,
+  );
+
   const concurrentInput = goalInput('Join one active request');
   const handlerBeforeInterruptedRestart = gatewayHandler;
   const activeRequest = postPlan(concurrentInput, 'actum_test_active_004');
@@ -276,6 +323,9 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   assert.match(joinedLogs, /resume_pending response=resp_plan_resume_test/);
   assert.match(joinedLogs, /retry_guarded=true/);
   assert.match(joinedLogs, /actum_test_invalid_009 stage=planning stage_result_cache_hit/);
+  assert.match(joinedLogs, /actum_test_vague_017 stage=planning stage_result_cache_hit/);
+  assert.match(joinedLogs, /contract_path=chapters\.0\.missions\.0\.steps/);
+  assert.match(joinedLogs, /actum_test_schedule_018 plan_normalized duration_missions=1/);
   assert.match(joinedLogs, /actum_test_cache_003 cache_hit/);
   assert.doesNotMatch(joinedLogs, /actum_test_cache_003 inflight_join/);
   assert.match(joinedLogs, /inflight_join/);
@@ -409,6 +459,46 @@ function invalidPlanPayload() {
   };
 }
 
+function vaguePlanPayload() {
+  const plan = validPlan();
+  plan.chapters[0].missions[0].steps = ['Подготовься.'];
+  plan.chapters[0].missions[0].execution = {
+    kind: 'manual',
+    durationSeconds: null,
+    successCriterion: 'Подготовка якобы завершена.',
+  };
+  return {
+    id: 'resp_vague_plan_test',
+    status: 'completed',
+    output: [
+      {
+        type: 'message',
+        content: [{ type: 'output_text', text: JSON.stringify(plan), annotations: [] }],
+      },
+    ],
+  };
+}
+
+function scheduleMismatchPlanPayload() {
+  const plan = validPlan();
+  plan.chapters[0].missions[0].repeatCount += 1;
+  const action = plan.chapters[0].missions[0].execution.actions[0];
+  action.sets = 3;
+  action.quantity = 600;
+  action.unit = 'seconds';
+  action.restSeconds = 60;
+  return {
+    id: 'resp_schedule_plan_test',
+    status: 'completed',
+    output: [
+      {
+        type: 'message',
+        content: [{ type: 'output_text', text: JSON.stringify(plan), annotations: [] }],
+      },
+    ],
+  };
+}
+
 function validPlan() {
   return {
     title: 'Test route',
@@ -426,9 +516,31 @@ function validPlan() {
         description: 'Perform a small, measurable practice step.',
         type: 'practice',
         estimatedMinutes: 10,
+        repeatCount: chapterIndex === 0 ? 3 : 2,
         xp: 20,
-        steps: ['Prepare the test step.', 'Complete the test step.'],
-        execution: { kind: 'manual', durationSeconds: null },
+        steps: [
+          'Place a mat on a flat surface and keep the test counter visible.',
+          'Keep the prescribed tempo for every repetition.',
+        ],
+        execution: {
+          kind: 'routine',
+          actions: [
+            {
+              title: 'Controlled test repetitions',
+              instruction: 'Complete each repetition with the same range of motion.',
+              sets: 3,
+              quantity: 8,
+              unit: 'reps',
+              unitLabel: null,
+              restSeconds: 30,
+              tempo: '2 seconds out, 2 seconds back',
+              successCriterion: 'All eight repetitions keep the prescribed tempo.',
+            },
+          ],
+          successCriterion: 'All three sets are completed with eight controlled repetitions.',
+        },
+        progressionRule:
+          'If all sets meet the criterion, add 1 repetition next time; otherwise repeat 3 sets of 8.',
         warning: null,
       })),
     })),

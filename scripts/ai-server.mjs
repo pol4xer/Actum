@@ -4,7 +4,12 @@ import { createServer } from 'node:http';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { PLAN_CONTRACT_VERSION, PLAN_SCHEMA } from './ai/contracts/plan-v1.mjs';
+import { createPlanSchema, PLAN_CONTRACT_VERSION } from './ai/contracts/plan-v1.mjs';
+import {
+  normalizePlanDurations,
+  normalizePlanSchedule,
+  validatePlanActionability,
+} from './ai/contracts/validate-plan.mjs';
 import {
   buildPlanInstructions,
   PROMPT_VERSION,
@@ -167,6 +172,7 @@ export async function handleRequest(request, response) {
         `code=${safeLogToken(providerCode) || 'local_error'}`,
         `response=${safeLogToken(error?.providerResponseId) || 'unknown'}`,
         `openai_request=${safeLogToken(error?.providerRequestId) || 'unknown'}`,
+        `contract_path=${safeLogToken(error?.validationPath) || 'none'}`,
         `cause=${formatDiagnostics(diagnostics)}`,
         `research_preserved=${researchPreserved}`,
         `retry_guarded=${retryGuarded}`,
@@ -259,7 +265,14 @@ async function createPlan(input, requestId, startedAt, cacheKey) {
     );
   }
   try {
-    validateMissionExecution(plan, input.dailyMinutes);
+    normalizePlanSchedule(plan, input.horizonDays);
+    const normalizedDurations = normalizePlanDurations(plan, input.dailyMinutes);
+    if (normalizedDurations > 0) {
+      console.warn(
+        `[actum-ai] ${requestId} plan_normalized duration_missions=${normalizedDurations}`,
+      );
+    }
+    validatePlanActionability(plan, input.dailyMinutes, input.horizonDays);
   } catch (cause) {
     throw invalidProviderOutput(
       cause instanceof Error ? cause.message : 'План не прошёл локальную проверку.',
@@ -361,12 +374,12 @@ async function requestStructuredPlan(input, research, requestId, stageKey) {
         verifiedSources: research.sources,
       }),
       text: {
-        verbosity: 'low',
+        verbosity: 'medium',
         format: {
           type: 'json_schema',
           name: 'actum_goal_plan',
           strict: true,
-          schema: PLAN_SCHEMA,
+          schema: createPlanSchema(input.dailyMinutes),
         },
       },
     },
@@ -447,28 +460,6 @@ async function executeProviderStage({ stageKey, stage, timeoutMs, requestId, bod
       }
     }
     throw error;
-  }
-}
-
-function validateMissionExecution(plan, dailyMinutes) {
-  if (!Array.isArray(plan?.chapters)) throw new Error('План не содержит главы.');
-  for (const chapter of plan.chapters) {
-    if (!Array.isArray(chapter?.missions)) throw new Error('Глава не содержит миссии.');
-    for (const mission of chapter.missions) {
-      const execution = mission?.execution;
-      if (execution?.kind === 'timer') {
-        if (!Number.isInteger(execution.durationSeconds) || execution.durationSeconds < 1) {
-          throw new Error('Таймерная миссия пришла без корректной длительности.');
-        }
-        if (execution.durationSeconds > dailyMinutes * 60) {
-          throw new Error('Таймерная миссия превышает выбранный дневной лимит.');
-        }
-      } else if (execution?.kind === 'manual') {
-        execution.durationSeconds = null;
-      } else {
-        throw new Error('Миссия пришла с неизвестным способом выполнения.');
-      }
-    }
   }
 }
 
@@ -661,7 +652,7 @@ function isTerminalProviderFailure(error) {
 
 function invalidProviderOutput(message, code, stage, payload, cause) {
   const meta = responseMeta(payload);
-  return new OpenAIRequestError(message, {
+  const error = new OpenAIRequestError(message, {
     status: 502,
     code,
     stage,
@@ -670,6 +661,10 @@ function invalidProviderOutput(message, code, stage, payload, cause) {
     providerResponseId: meta.providerResponseId,
     cause,
   });
+  if (code === 'upstream_invalid_plan_contract') {
+    error.validationPath = /^([A-Za-z0-9.]+):/.exec(message)?.[1];
+  }
+  return error;
 }
 
 function requestIdFromRequest(request) {

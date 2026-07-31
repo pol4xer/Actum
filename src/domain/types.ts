@@ -14,9 +14,33 @@ export type MissionType =
   | 'check';
 export type MissionOutcome = 'pending' | 'completed' | 'partial' | 'skipped';
 
+export type RoutineUnit =
+  | 'reps'
+  | 'seconds'
+  | 'minutes'
+  | 'pages'
+  | 'items'
+  | 'words'
+  | 'meters'
+  | 'attempts'
+  | 'custom';
+
+export type RoutineAction = {
+  title: string;
+  instruction: string;
+  sets: number;
+  quantity: number;
+  unit: RoutineUnit;
+  unitLabel?: string;
+  restSeconds: number;
+  tempo?: string;
+  successCriterion: string;
+};
+
 export type MissionExecution =
   | { kind: 'manual' }
-  | { kind: 'timer'; durationSeconds: number };
+  | { kind: 'timer'; durationSeconds: number }
+  | { kind: 'routine'; actions: RoutineAction[] };
 
 export type Profile = {
   name: string;
@@ -82,8 +106,12 @@ export type Mission = {
   estimatedMinutes: number;
   xp: number;
   outcome: MissionOutcome;
+  repeatIndex?: number;
+  repeatTotal?: number;
   steps?: string[];
   execution?: MissionExecution;
+  completionCriterion?: string;
+  progressionRule?: string;
   warning?: string;
 };
 

@@ -1,4 +1,40 @@
-export const PLAN_CONTRACT_VERSION = 'plan-v2';
+export const PLAN_CONTRACT_VERSION = 'plan-v3';
+
+const ROUTINE_ACTION_REQUIRED = [
+  'title',
+  'instruction',
+  'sets',
+  'quantity',
+  'unit',
+  'unitLabel',
+  'restSeconds',
+  'tempo',
+  'successCriterion',
+];
+
+const ROUTINE_ACTION_PROPERTIES = {
+  title: { type: 'string', minLength: 2, maxLength: 100 },
+  instruction: { type: 'string', minLength: 8, maxLength: 300 },
+  sets: { type: 'integer', minimum: 1, maximum: 20 },
+  quantity: { type: 'integer', minimum: 1, maximum: 10000 },
+  restSeconds: { type: 'integer', minimum: 0, maximum: 1800 },
+  tempo: {
+    anyOf: [
+      { type: 'string', minLength: 2, maxLength: 100 },
+      { type: 'null' },
+    ],
+  },
+  successCriterion: { type: 'string', minLength: 5, maxLength: 240 },
+};
+
+function routineActionVariant(unit, unitLabel) {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ROUTINE_ACTION_REQUIRED,
+    properties: { ...ROUTINE_ACTION_PROPERTIES, unit, unitLabel },
+  };
+}
 
 export const PLAN_SCHEMA = {
   type: 'object',
@@ -61,9 +97,11 @@ export const PLAN_SCHEMA = {
                 'description',
                 'type',
                 'estimatedMinutes',
+                'repeatCount',
                 'xp',
                 'steps',
                 'execution',
+                'progressionRule',
                 'warning',
               ],
               properties: {
@@ -85,6 +123,7 @@ export const PLAN_SCHEMA = {
                   ],
                 },
                 estimatedMinutes: { type: 'integer', minimum: 1, maximum: 120 },
+                repeatCount: { type: 'integer', minimum: 1, maximum: 28 },
                 xp: { type: 'integer', minimum: 10, maximum: 60 },
                 steps: {
                   type: 'array',
@@ -93,19 +132,84 @@ export const PLAN_SCHEMA = {
                   items: { type: 'string', minLength: 2, maxLength: 260 },
                 },
                 execution: {
-                  type: 'object',
-                  additionalProperties: false,
-                  required: ['kind', 'durationSeconds'],
-                  properties: {
-                    kind: { type: 'string', enum: ['manual', 'timer'] },
-                    durationSeconds: {
-                      anyOf: [
-                        { type: 'integer', minimum: 1, maximum: 7200 },
-                        { type: 'null' },
-                      ],
+                  anyOf: [
+                    {
+                      type: 'object',
+                      additionalProperties: false,
+                      required: ['kind', 'durationSeconds', 'successCriterion'],
+                      properties: {
+                        kind: { type: 'string', enum: ['manual'] },
+                        durationSeconds: { type: 'null' },
+                        successCriterion: {
+                          type: 'string',
+                          minLength: 5,
+                          maxLength: 300,
+                        },
+                      },
                     },
-                  },
+                    {
+                      type: 'object',
+                      additionalProperties: false,
+                      required: ['kind', 'durationSeconds', 'successCriterion'],
+                      properties: {
+                        kind: { type: 'string', enum: ['timer'] },
+                        durationSeconds: {
+                          type: 'integer',
+                          minimum: 1,
+                          maximum: 7200,
+                        },
+                        successCriterion: {
+                          type: 'string',
+                          minLength: 5,
+                          maxLength: 300,
+                        },
+                      },
+                    },
+                    {
+                      type: 'object',
+                      additionalProperties: false,
+                      required: ['kind', 'actions', 'successCriterion'],
+                      properties: {
+                        kind: { type: 'string', enum: ['routine'] },
+                        actions: {
+                          type: 'array',
+                          minItems: 1,
+                          maxItems: 8,
+                          items: {
+                            anyOf: [
+                              routineActionVariant(
+                                {
+                                  type: 'string',
+                                  enum: [
+                                    'reps',
+                                    'seconds',
+                                    'minutes',
+                                    'pages',
+                                    'items',
+                                    'words',
+                                    'meters',
+                                    'attempts',
+                                  ],
+                                },
+                                { type: 'null' },
+                              ),
+                              routineActionVariant(
+                                { type: 'string', enum: ['custom'] },
+                                { type: 'string', minLength: 1, maxLength: 40 },
+                              ),
+                            ],
+                          },
+                        },
+                        successCriterion: {
+                          type: 'string',
+                          minLength: 5,
+                          maxLength: 300,
+                        },
+                      },
+                    },
+                  ],
                 },
+                progressionRule: { type: 'string', minLength: 8, maxLength: 360 },
                 warning: {
                   anyOf: [
                     { type: 'string', minLength: 3, maxLength: 300 },
@@ -120,3 +224,14 @@ export const PLAN_SCHEMA = {
     },
   },
 };
+
+export function createPlanSchema(dailyMinutes) {
+  const maximumMinutes = Math.max(1, Math.min(120, Math.round(dailyMinutes)));
+  const schema = structuredClone(PLAN_SCHEMA);
+  const missionProperties =
+    schema.properties.chapters.items.properties.missions.items.properties;
+  missionProperties.estimatedMinutes.maximum = maximumMinutes;
+  missionProperties.execution.anyOf[1].properties.durationSeconds.maximum =
+    maximumMinutes * 60;
+  return schema;
+}

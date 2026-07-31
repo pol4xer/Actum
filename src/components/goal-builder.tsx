@@ -13,8 +13,8 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { AppButton, Card, Pill, Screen, ScreenHeader } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
-import { buildGoal, checkGoalRisk } from '@/domain/goal-engine';
-import { GeneratedGoal, GoalInput, Mission } from '@/domain/types';
+import { checkGoalRisk } from '@/domain/goal-engine';
+import { GeneratedGoal, GoalInput, Mission, RoutineUnit } from '@/domain/types';
 import { AIPlannerError, generateGoalWithAI } from '@/lib/ai-planner';
 import type { AIPlannerErrorCode } from '@/lib/ai-planner';
 import { useApp } from '@/state/app-context';
@@ -61,10 +61,6 @@ export function GoalBuilder() {
       setStage('error');
     }
   };
-  const useLocalFallback = () => {
-    setPreview(buildGoal(input));
-    setStage('review');
-  };
   const save = () => {
     if (preview) createGoal(preview);
   };
@@ -96,13 +92,13 @@ export function GoalBuilder() {
                   ? 'Отправляем цель в OpenAI и ждём структурированный план.'
                   : stage === 'error'
                     ? generationErrorCode === 'INVALID_RESPONSE'
-                      ? 'OpenAI закончил план, но приложение не смогло прочитать одно из полей.'
-                      : 'Можно повторить запрос или продолжить с локальным шаблоном.'
+                      ? 'Сохранённый ответ не прошёл контракт. Простой повтор вернёт тот же ответ и не создаст новый платный запрос.'
+                      : 'Можно повторить тот же запрос: уже завершённые платные этапы будут переиспользованы.'
                     : preview?.plan.research.method === 'openai-web-research-v1'
                       ? 'OpenAI изучил источники и превратил выводы в главы и исполняемые миссии.'
                       : preview?.plan.research.method === 'openai-responses-v1'
                         ? 'GPT вернул план, который уже превращён в главы и миссии Actum.'
-                      : 'Локальный fallback собрал план без сети.'
+                      : 'План собран и готов к проверке.'
           }
         />
 
@@ -280,8 +276,9 @@ export function GoalBuilder() {
                   : 'Не удалось получить план'}
             </ThemedText>
             <ThemedText style={styles.muted}>{generationError}</ThemedText>
-            <AppButton label="Повторить запрос к GPT" onPress={generate} />
-            <AppButton label="Использовать локальный план" variant="secondary" onPress={useLocalFallback} />
+            {generationErrorCode !== 'INVALID_RESPONSE' ? (
+              <AppButton label="Повторить запрос к GPT" onPress={generate} />
+            ) : null}
             <AppButton label="Изменить параметры" variant="ghost" onPress={() => setStage('details')} />
           </Card>
         ) : null}
@@ -322,6 +319,20 @@ export function GoalBuilder() {
                     <ThemedText type="small" style={styles.muted}>
                       {missionDurationLabel(mission)} · {mission.xp} XP
                     </ThemedText>
+                    {mission.execution?.kind === 'routine' ? (
+                      <ThemedText type="small" style={styles.prescriptionPreview} numberOfLines={3}>
+                        {mission.execution.actions
+                          .slice(0, 2)
+                          .map(
+                            (action) =>
+                              `${action.title}: ${action.sets}×${action.quantity} ${routineUnitLabel(action.unit, action.unitLabel)}`,
+                          )
+                          .join(' → ')}
+                        {mission.execution.actions.length > 2
+                          ? ` → ещё ${mission.execution.actions.length - 2}`
+                          : ''}
+                      </ThemedText>
+                    ) : null}
                   </View>
                 </View>
               ))}
@@ -452,6 +463,10 @@ function Meta({ value, label }: { value: string; label: string }) {
 }
 
 function missionDurationLabel(mission: Mission) {
+  if (mission.execution?.kind === 'routine') {
+    const sets = mission.execution.actions.reduce((total, action) => total + action.sets, 0);
+    return `${mission.execution.actions.length} действий · ${sets} подходов · ≈ ${mission.estimatedMinutes} мин`;
+  }
   if (mission.execution?.kind === 'timer') {
     const seconds = mission.execution.durationSeconds;
     const timer = seconds >= 60 && seconds % 60 === 0 ? `${seconds / 60} мин` : `${seconds} сек`;
@@ -460,9 +475,25 @@ function missionDurationLabel(mission: Mission) {
   return `${mission.estimatedMinutes} мин`;
 }
 
+function routineUnitLabel(unit: RoutineUnit, custom?: string) {
+  if (unit === 'custom') return custom || 'ед.';
+  const labels: Record<Exclude<RoutineUnit, 'custom'>, string> = {
+    reps: 'повт.',
+    seconds: 'сек',
+    minutes: 'мин',
+    pages: 'стр.',
+    items: 'элем.',
+    words: 'слов',
+    meters: 'м',
+    attempts: 'попыток',
+  };
+  return labels[unit];
+}
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   lead: { color: Palette.textMuted, lineHeight: 24 },
+  prescriptionPreview: { color: Palette.cyan, lineHeight: 20 },
   muted: { color: Palette.textMuted },
   gold: { color: Palette.goldBright },
   warning: { color: Palette.warning },

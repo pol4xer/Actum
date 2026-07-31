@@ -71,6 +71,15 @@ export function CheckInModal({
             </Pressable>
           </View>
 
+          {mission?.completionCriterion ? (
+            <View style={styles.criterionCard}>
+              <ThemedText type="eyebrow" style={styles.muted}>
+                критерий полного выполнения
+              </ThemedText>
+              <ThemedText type="smallBold">{mission.completionCriterion}</ThemedText>
+            </View>
+          ) : null}
+
           <View style={styles.options}>
             <OutcomeChoice
               icon="✓"
@@ -200,6 +209,14 @@ const styles = StyleSheet.create({
   closeText: { color: Palette.textMuted, fontSize: 27, lineHeight: 29 },
   muted: { color: Palette.textMuted },
   center: { textAlign: 'center' },
+  criterionCard: {
+    gap: Spacing.one,
+    borderRadius: Radius.medium,
+    borderWidth: 1,
+    borderColor: '#4A432E',
+    backgroundColor: '#262316',
+    padding: Spacing.twoHalf,
+  },
   options: { gap: Spacing.two },
   option: {
     minHeight: 74,

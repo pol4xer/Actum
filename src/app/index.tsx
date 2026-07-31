@@ -137,7 +137,13 @@ export default function HomeScreen() {
               </View>
             </View>
             <AppButton
-              label={currentMission.execution?.kind === 'timer' ? 'Открыть таймер' : 'Начать миссию'}
+              label={
+                currentMission.execution?.kind === 'timer'
+                  ? 'Открыть таймер'
+                  : currentMission.execution?.kind === 'routine'
+                    ? 'Открыть комплекс'
+                    : 'Начать миссию'
+              }
               onPress={() => setRunnerVisible(true)}
               icon="→"
             />
@@ -212,6 +218,10 @@ export default function HomeScreen() {
 }
 
 function missionDurationLabel(mission: Mission) {
+  if (mission.execution?.kind === 'routine') {
+    const sets = mission.execution.actions.reduce((total, action) => total + action.sets, 0);
+    return `${mission.execution.actions.length} действий · ${sets} подходов · ≈ ${mission.estimatedMinutes} мин`;
+  }
   if (mission.execution?.kind === 'timer') {
     const seconds = mission.execution.durationSeconds;
     const timer = seconds >= 60 && seconds % 60 === 0 ? `${seconds / 60} мин` : `${seconds} сек`;

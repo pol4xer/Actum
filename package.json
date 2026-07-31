@@ -51,7 +51,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "test:ai": "node --test test/ai-server.integration.test.mjs",
+    "test:ai": "node --test test/*.test.mjs",
     "check": "pnpm typecheck && pnpm test:ai && expo export --platform web"
   },
   "private": true
