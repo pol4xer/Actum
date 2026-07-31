@@ -14,6 +14,10 @@ export type MissionType =
   | 'check';
 export type MissionOutcome = 'pending' | 'completed' | 'partial' | 'skipped';
 
+export type MissionExecution =
+  | { kind: 'manual' }
+  | { kind: 'timer'; durationSeconds: number };
+
 export type Profile = {
   name: string;
   archetype: Archetype;
@@ -43,11 +47,22 @@ export type Goal = {
 };
 
 export type ResearchDossier = {
-  method: 'local-curated-v1' | 'openai-responses-v1';
+  method: 'local-curated-v1' | 'openai-responses-v1' | 'openai-web-research-v1';
   confidence: 'high' | 'medium';
   safetyNotes: string[];
   assumptions: string[];
   sourceLabels: string[];
+  sources?: Array<{ title: string; url: string }>;
+  request?: {
+    requestId: string;
+    providerResponseId?: string;
+    model: string;
+    promptVersion: string;
+    durationMs: number;
+    webSearchCount: number;
+    inputTokens?: number;
+    outputTokens?: number;
+  };
 };
 
 export type QuestChapter = {
@@ -67,6 +82,9 @@ export type Mission = {
   estimatedMinutes: number;
   xp: number;
   outcome: MissionOutcome;
+  steps?: string[];
+  execution?: MissionExecution;
+  warning?: string;
 };
 
 export type PlanVersion = {
@@ -122,6 +140,7 @@ export type GoalInput = {
   currentLevel: 'starting' | 'some-experience' | 'returning';
   dailyMinutes: number;
   horizonDays: number;
+  researchMode?: 'quick' | 'web';
 };
 
 export type RiskGateResult =

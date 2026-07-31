@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   StyleSheet,
@@ -13,11 +14,11 @@ import { ThemedText } from '@/components/themed-text';
 import { AppButton, Card, Pill, Screen, ScreenHeader } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import { buildGoal, checkGoalRisk } from '@/domain/goal-engine';
-import { GeneratedGoal, GoalInput } from '@/domain/types';
+import { GeneratedGoal, GoalInput, Mission } from '@/domain/types';
 import { AIPlannerError, generateGoalWithAI } from '@/lib/ai-planner';
 import { useApp } from '@/state/app-context';
 
-type Stage = 'intent' | 'details' | 'generating' | 'review' | 'error' | 'blocked';
+type Stage = 'intent' | 'details' | 'generating' | 'review' | 'error';
 
 const MINUTES = [10, 20, 30];
 const HORIZONS = [
@@ -33,15 +34,16 @@ export function GoalBuilder() {
   const [dailyMinutes, setDailyMinutes] = useState(20);
   const [horizonDays, setHorizonDays] = useState(14);
   const [currentLevel, setCurrentLevel] = useState<GoalInput['currentLevel']>('starting');
+  const [researchMode, setResearchMode] = useState<NonNullable<GoalInput['researchMode']>>('web');
   const [preview, setPreview] = useState<GeneratedGoal>();
   const [generationError, setGenerationError] = useState('');
   const risk = useMemo(() => checkGoalRisk(prompt), [prompt]);
   const input = useMemo(
-    () => ({ prompt, dailyMinutes, horizonDays, currentLevel }),
-    [currentLevel, dailyMinutes, horizonDays, prompt],
+    () => ({ prompt, dailyMinutes, horizonDays, currentLevel, researchMode }),
+    [currentLevel, dailyMinutes, horizonDays, prompt, researchMode],
   );
 
-  const continueFromIntent = () => setStage(risk.safe ? 'details' : 'blocked');
+  const continueFromIntent = () => setStage('details');
   const generate = async () => {
     setGenerationError('');
     setStage('generating');
@@ -62,31 +64,6 @@ export function GoalBuilder() {
   const save = () => {
     if (preview) createGoal(preview);
   };
-
-  if (stage === 'blocked') {
-    return (
-      <Screen>
-        <View style={styles.blocked}>
-          <View style={styles.blockedIcon}>
-            <ThemedText style={styles.blockedGlyph}>!</ThemedText>
-          </View>
-          <Pill tone="danger">safety gate</Pill>
-          <ThemedText type="title" style={styles.center}>
-            {!risk.safe ? risk.title : 'Нужна другая формулировка'}
-          </ThemedText>
-          <ThemedText style={[styles.lead, styles.center]}>
-            {!risk.safe
-              ? risk.message
-              : 'Переформулируй намерение как небольшой безопасный шаг.'}
-          </ThemedText>
-          <AppButton label="Изменить цель" onPress={() => setStage('intent')} style={styles.fullWidth} />
-          <ThemedText type="small" style={[styles.muted, styles.center]}>
-            Если есть непосредственная опасность для тебя или другого человека, обратись в местную экстренную службу.
-          </ThemedText>
-        </View>
-      </Screen>
-    );
-  }
 
   return (
     <KeyboardAvoidingView
@@ -115,8 +92,10 @@ export function GoalBuilder() {
                   ? 'Отправляем цель в OpenAI и ждём структурированный план.'
                   : stage === 'error'
                     ? 'Можно повторить запрос или продолжить с локальным шаблоном.'
-                    : preview?.plan.research.method === 'openai-responses-v1'
-                      ? 'GPT вернул план, который уже превращён в главы и миссии Actum.'
+                    : preview?.plan.research.method === 'openai-web-research-v1'
+                      ? 'OpenAI изучил источники и превратил выводы в главы и исполняемые миссии.'
+                      : preview?.plan.research.method === 'openai-responses-v1'
+                        ? 'GPT вернул план, который уже превращён в главы и миссии Actum.'
                       : 'Локальный fallback собрал план без сети.'
           }
         />
@@ -151,14 +130,16 @@ export function GoalBuilder() {
                 )}
               </View>
             </View>
-            <Card style={styles.notice}>
-              <ThemedText style={styles.noticeIcon}>⌁</ThemedText>
+            <Card style={[styles.notice, !risk.safe && styles.noticeWarning]}>
+              <ThemedText style={[styles.noticeIcon, !risk.safe && styles.warning]}>⌁</ThemedText>
               <ThemedText type="small" style={styles.noticeText}>
-                Опасные, медицинские и экстремальные запросы не превращаются в actionable-план.
+                {risk.safe
+                  ? 'Actum показывает допущения и предупреждения, но не решает за тебя, какую цель выбирать.'
+                  : risk.message}
               </ThemedText>
             </Card>
             <AppButton
-              label="Проверить намерение"
+              label={risk.safe ? 'Продолжить' : 'Продолжить с предупреждением'}
               disabled={prompt.trim().length < 5}
               onPress={continueFromIntent}
             />
@@ -213,9 +194,47 @@ export function GoalBuilder() {
               </View>
             </Question>
 
+            <Question title="Насколько глубоко исследовать цель?">
+              <ChoiceRow>
+                <Choice
+                  label="Web research"
+                  selected={researchMode === 'web'}
+                  onPress={() => setResearchMode('web')}
+                />
+                <Choice
+                  label="Быстрый GPT"
+                  selected={researchMode === 'quick'}
+                  onPress={() => setResearchMode('quick')}
+                />
+              </ChoiceRow>
+              <ThemedText type="small" style={styles.muted}>
+                {researchMode === 'web'
+                  ? 'OpenAI сначала изучит web-источники, затем отдельным шагом соберёт структурированный маршрут. Это дольше и дороже одного запроса.'
+                  : 'Один запрос без web-поиска. Подходит для быстрой проверки идеи.'}
+              </ThemedText>
+            </Question>
+
+            {!risk.safe ? (
+              <Card style={[styles.notice, styles.noticeWarning]}>
+                <ThemedText style={[styles.noticeIcon, styles.warning]}>!</ThemedText>
+                <View style={styles.flex}>
+                  <ThemedText type="smallBold" style={styles.warning}>
+                    {risk.title}
+                  </ThemedText>
+                  <ThemedText type="small" style={styles.noticeText}>
+                    Это предупреждение остаётся видимым, но не отключает кнопку создания плана.
+                  </ThemedText>
+                </View>
+              </Card>
+            ) : null}
+
             <View style={styles.buttonRow}>
               <AppButton label="Назад" variant="ghost" onPress={() => setStage('intent')} />
-              <AppButton label="Собрать план с GPT" onPress={generate} style={styles.flex} />
+              <AppButton
+                label={researchMode === 'web' ? 'Исследовать и собрать' : 'Собрать с GPT'}
+                onPress={generate}
+                style={styles.flex}
+              />
             </View>
           </>
         ) : null}
@@ -227,7 +246,9 @@ export function GoalBuilder() {
               Разбираем цель на реальные шаги…
             </ThemedText>
             <ThemedText style={[styles.muted, styles.center]}>
-              Обычно это занимает несколько секунд. Не закрывай development build.
+              {researchMode === 'web'
+                ? 'Сначала идёт web-поиск, затем отдельная сборка плана. Это может занять несколько минут.'
+                : 'Обычно это занимает несколько секунд. Не закрывай development build.'}
             </ThemedText>
           </Card>
         ) : null}
@@ -247,7 +268,9 @@ export function GoalBuilder() {
           <>
             <Card accent>
               <View style={styles.cardTop}>
-                <Pill tone="success">проверено · low-risk</Pill>
+                <Pill tone={risk.safe ? 'success' : 'warning'}>
+                  {risk.safe ? 'план готов' : 'предупреждение показано'}
+                </Pill>
                 <ThemedText type="small" style={styles.muted}>
                   v1
                 </ThemedText>
@@ -275,7 +298,7 @@ export function GoalBuilder() {
                   <View style={styles.missionCopy}>
                     <ThemedText type="smallBold">{mission.title}</ThemedText>
                     <ThemedText type="small" style={styles.muted}>
-                      {mission.estimatedMinutes} мин · {mission.xp} XP
+                      {missionDurationLabel(mission)} · {mission.xp} XP
                     </ThemedText>
                   </View>
                 </View>
@@ -286,14 +309,36 @@ export function GoalBuilder() {
               <View style={styles.methodHeader}>
                 <ThemedText type="smallBold">Методология MVP</ThemedText>
                 <Pill tone="violet">
-                  {preview.plan.research.method === 'openai-responses-v1' ? 'GPT · Responses API' : 'local fallback'}
+                  {preview.plan.research.method === 'openai-web-research-v1'
+                    ? 'Web research · Responses API'
+                    : preview.plan.research.method === 'openai-responses-v1'
+                      ? 'GPT · Responses API'
+                      : 'local fallback'}
                 </Pill>
               </View>
               <ThemedText type="small" style={styles.muted}>
-                {preview.plan.research.method === 'openai-responses-v1'
-                  ? 'План создан GPT по твоей формулировке и ограничениям. Это быстрый MVP без глубокого web-research.'
+                {preview.plan.research.method === 'openai-web-research-v1'
+                  ? `Сделано ${preview.plan.research.request?.webSearchCount ?? 0} web-поисков; найдено ${preview.plan.research.sources?.length ?? 0} цитируемых источников.`
+                  : preview.plan.research.method === 'openai-responses-v1'
+                    ? 'План создан GPT по твоей формулировке и ограничениям без web-поиска.'
                   : 'Это контролируемый локальный шаблон на случай, если AI-сервер недоступен.'}
               </ThemedText>
+              {preview.plan.research.sources?.slice(0, 3).map((source) => (
+                <Pressable
+                  accessibilityRole="link"
+                  key={source.url}
+                  onPress={() => Linking.openURL(source.url).catch(() => undefined)}
+                  style={({ pressed }) => [styles.sourceLink, pressed && styles.pressed]}>
+                  <ThemedText type="small" numberOfLines={2} style={styles.sourceText}>
+                    ↗ {source.title}
+                  </ThemedText>
+                </Pressable>
+              ))}
+              {preview.plan.research.request ? (
+                <ThemedText type="small" selectable style={styles.requestId}>
+                  OpenAI {preview.plan.research.request.model} · {preview.plan.research.request.requestId}
+                </ThemedText>
+              ) : null}
             </Card>
 
             <View style={styles.buttonRow}>
@@ -384,11 +429,21 @@ function Meta({ value, label }: { value: string; label: string }) {
   );
 }
 
+function missionDurationLabel(mission: Mission) {
+  if (mission.execution?.kind === 'timer') {
+    const seconds = mission.execution.durationSeconds;
+    const timer = seconds >= 60 && seconds % 60 === 0 ? `${seconds / 60} мин` : `${seconds} сек`;
+    return `${timer} таймер · ≈ ${mission.estimatedMinutes} мин всего`;
+  }
+  return `${mission.estimatedMinutes} мин`;
+}
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   lead: { color: Palette.textMuted, lineHeight: 24 },
   muted: { color: Palette.textMuted },
   gold: { color: Palette.goldBright },
+  warning: { color: Palette.warning },
   center: { textAlign: 'center' },
   fullWidth: { width: '100%' },
   pressed: { opacity: 0.7 },
@@ -420,6 +475,7 @@ const styles = StyleSheet.create({
     padding: Spacing.twoHalf,
     gap: Spacing.two,
   },
+  noticeWarning: { borderColor: '#6A4A29', backgroundColor: '#261E18' },
   noticeIcon: { color: Palette.violetSoft, fontSize: 22 },
   noticeText: { flex: 1, color: Palette.textMuted },
   question: { gap: Spacing.two, marginBottom: Spacing.two },
@@ -493,22 +549,11 @@ const styles = StyleSheet.create({
   missionCopy: { flex: 1, gap: 2 },
   methodCard: { borderRadius: Radius.medium },
   methodHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  blocked: {
-    flex: 1,
-    minHeight: 580,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: Spacing.three,
+  sourceLink: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Palette.line,
+    paddingTop: Spacing.two,
   },
-  blockedIcon: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#331B24',
-    borderWidth: 1,
-    borderColor: '#6C3142',
-  },
-  blockedGlyph: { color: Palette.danger, fontSize: 40, fontWeight: 300 },
+  sourceText: { color: Palette.violetSoft },
+  requestId: { color: Palette.textDim, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
 });

@@ -126,9 +126,9 @@ export function checkGoalRisk(prompt: string): RiskGateResult {
   if (BLOCKED_PATTERNS.some((pattern) => pattern.test(prompt))) {
     return {
       safe: false,
-      title: 'Эта цель требует другого уровня поддержки',
+      title: 'У этой цели есть заметный риск',
       message:
-        'Actum не составляет инструкции для опасных, медицинских или связанных с самоповреждением целей. Переформулируй цель в безопасный шаг самоподдержки или обратись к подходящему специалисту.',
+        'Actum покажет предупреждения и передаст цель планировщику без локальной блокировки. Проверь допущения и сам реши, подходит ли тебе предложенная прогрессия; OpenAI при этом может применить собственные ограничения.',
     };
   }
 
@@ -161,6 +161,8 @@ export function buildGoal(input: GoalInput): GeneratedGoal {
     estimatedMinutes: Math.max(5, Math.round(input.dailyMinutes * (seed.minutesFactor ?? 1))),
     xp: 18 + index * 2,
     outcome: 'pending',
+    steps: [seed.description],
+    execution: { kind: 'manual' },
   }));
 
   const title = input.prompt.trim().replace(/[.!?]+$/, '');

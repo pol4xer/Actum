@@ -1,4 +1,4 @@
-import { StyleSheet, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Card, Pill, ProgressBar, Screen, ScreenHeader } from '@/components/ui/primitives';
@@ -10,7 +10,7 @@ const OUTCOME_META: Record<MissionOutcome, { icon: string; color: string; label:
   pending: { icon: '', color: Palette.textDim, label: 'Впереди' },
   completed: { icon: '✓', color: Palette.success, label: 'Выполнено' },
   partial: { icon: '≈', color: Palette.warning, label: 'Частично' },
-  skipped: { icon: '—', color: Palette.danger, label: 'Пропущено' },
+  skipped: { icon: '—', color: Palette.danger, label: 'Не выполнено' },
 };
 
 export default function JourneyScreen() {
@@ -125,7 +125,11 @@ export default function JourneyScreen() {
             <ThemedText type="subtitle">Почему план выглядит так</ThemedText>
           </View>
           <Pill tone="neutral">
-            {state.activePlan.research.method === 'openai-responses-v1' ? 'GPT v1' : 'local v1'}
+            {state.activePlan.research.method === 'openai-web-research-v1'
+              ? 'web research v1'
+              : state.activePlan.research.method === 'openai-responses-v1'
+                ? 'GPT v1'
+                : 'local v1'}
           </Pill>
         </View>
         {state.activePlan.research.assumptions.map((assumption) => (
@@ -136,6 +140,31 @@ export default function JourneyScreen() {
             {note}
           </Bullet>
         ))}
+        {state.activePlan.research.sources?.length ? (
+          <View style={styles.sources}>
+            <ThemedText type="eyebrow" style={styles.muted}>
+              Использованные источники
+            </ThemedText>
+            {state.activePlan.research.sources.map((source) => (
+              <Pressable
+                accessibilityRole="link"
+                key={source.url}
+                onPress={() => Linking.openURL(source.url).catch(() => undefined)}
+                style={({ pressed }) => [styles.sourceLink, pressed && styles.pressed]}>
+                <ThemedText type="small" numberOfLines={2} style={styles.sourceText}>
+                  ↗ {source.title}
+                </ThemedText>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+        {state.activePlan.research.request ? (
+          <ThemedText type="small" selectable style={styles.requestMeta}>
+            OpenAI {state.activePlan.research.request.model} ·{' '}
+            {state.activePlan.research.request.webSearchCount} search ·{' '}
+            {state.activePlan.research.request.requestId}
+          </ThemedText>
+        ) : null}
       </Card>
 
       {state.checkIns.length ? (
@@ -183,11 +212,20 @@ function MissionRow({ mission, isCurrent }: { mission: Mission; isCurrent: boole
           {mission.title}
         </ThemedText>
         <ThemedText type="small" style={styles.muted}>
-          {mission.estimatedMinutes} мин · {mission.xp} XP
+          {missionDurationLabel(mission)} · {mission.xp} XP
         </ThemedText>
       </View>
     </View>
   );
+}
+
+function missionDurationLabel(mission: Mission) {
+  if (mission.execution?.kind === 'timer') {
+    const seconds = mission.execution.durationSeconds;
+    const timer = seconds >= 60 && seconds % 60 === 0 ? `${seconds / 60} мин` : `${seconds} сек`;
+    return `${timer} таймер · ≈ ${mission.estimatedMinutes} мин всего`;
+  }
+  return `${mission.estimatedMinutes} мин`;
 }
 
 function Bullet({ children, tone = 'neutral' }: { children: string; tone?: 'neutral' | 'warning' }) {
@@ -207,6 +245,15 @@ const styles = StyleSheet.create({
   violet: { color: Palette.violetSoft },
   questHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
   questCopy: { flex: 1, gap: 4 },
+  pressed: { opacity: 0.7 },
+  sources: { gap: Spacing.two, paddingTop: Spacing.two },
+  sourceLink: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Palette.line,
+    paddingTop: Spacing.two,
+  },
+  sourceText: { color: Palette.violetSoft },
+  requestMeta: { color: Palette.textDim, paddingTop: Spacing.two },
   percentCircle: {
     width: 54,
     height: 54,

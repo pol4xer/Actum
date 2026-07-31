@@ -1,4 +1,3 @@
-import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { PropsWithChildren, ReactNode } from 'react';
 import {
@@ -15,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { BottomTabInset, MaxContentWidth, Palette, Radius, Shadow, Spacing } from '@/constants/theme';
+import { impact, ImpactFeedbackStyle } from '@/lib/haptics';
 
 export function Screen({
   children,
@@ -152,9 +152,7 @@ export function AppButton({
 }) {
   const handlePress = async () => {
     if (disabled || loading) return;
-    await Haptics.impactAsync(
-      variant === 'primary' ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light,
-    ).catch(() => undefined);
+    await impact(variant === 'primary' ? ImpactFeedbackStyle.Medium : ImpactFeedbackStyle.Light);
     await onPress();
   };
 

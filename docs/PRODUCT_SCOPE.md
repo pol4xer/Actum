@@ -23,7 +23,8 @@
 |---|---|
 | Клиент | Expo SDK 57, React Native, Expo Router |
 | Goal intake | Свободный текст, время на миссию, горизонт, точка старта |
-| AI plan | Локальный Node proxy → OpenAI Responses API → structured JSON |
+| AI plan | Локальный Node gateway → research → structured JSON |
+| Research | Responses API `web_search`, реальные URL-цитаты и быстрый режим без web |
 | Fallback | Контролируемые локальные шаблоны, если GPT недоступен |
 | Game loop | Миссии, check-in, XP, энергия, серия, свет, buffs/debuffs |
 | Recovery | Микро-шаг после пропуска |
@@ -36,16 +37,17 @@
 Для локального MVP используются два процесса:
 
 ```text
-Expo app → http://127.0.0.1:8787/plan → scripts/ai-server.mjs → OpenAI
+Expo app → http://127.0.0.1:8787/plan → research prompt → OpenAI web_search
+                                                   → plan prompt → strict JSON
 ```
 
 API key находится только в `.env.local` на компьютере и не включается в мобильный bundle. Это ещё не production backend: сервер работает на Mac разработчика и нужен только во время тестирования GPT-функции.
 
-Ответ GPT ограничен JSON-схемой и сразу преобразуется в существующие сущности `Goal`, `PlanVersion`, `QuestChapter` и `Mission`. Пользователь сохраняет именно тот план, который увидел на review-экране.
+Research и планирование разделены. Первый Responses-вызов возвращает фактический бриф и URL-цитаты, второй ограничен JSON-схемой и преобразуется в `Goal`, `PlanVersion`, `QuestChapter` и `Mission`. Миссия может быть ручной или таймерной и содержит видимые шаги. Пользователь сохраняет именно тот план, который увидел на review-экране.
 
 ## Что MVP пока не делает
 
-- не выполняет глубокий web-research и не подтверждает источники;
+- не запускает многостраничный background-report на десятки минут; web-research ограничен контекстом практического плана;
 - не работает с AI без запущенного локального proxy;
 - не синхронизирует данные между устройствами;
 - не имеет аккаунтов, Supabase и удалённой истории;

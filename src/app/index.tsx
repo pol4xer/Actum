@@ -6,6 +6,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { CheckInModal } from '@/components/check-in-modal';
 import { GoalBuilder } from '@/components/goal-builder';
 import { HeroSigil, archetypeLabel } from '@/components/hero-sigil';
+import { MissionRunner } from '@/components/mission-runner';
 import { ThemedText } from '@/components/themed-text';
 import {
   AppButton,
@@ -17,6 +18,7 @@ import {
   Stat,
 } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
+import { Mission } from '@/domain/types';
 import { useApp } from '@/state/app-context';
 
 export default function HomeScreen() {
@@ -28,6 +30,7 @@ export default function HomeScreen() {
     completeRecovery,
     startNewGoal,
   } = useApp();
+  const [runnerVisible, setRunnerVisible] = useState(false);
   const [checkInVisible, setCheckInVisible] = useState(false);
 
   if (!state.activeGoal || !state.activePlan) return <GoalBuilder />;
@@ -110,7 +113,7 @@ export default function HomeScreen() {
             <View style={styles.sectionTop}>
               <Pill tone="gold">миссия дня · {currentMission.sequence}/{total}</Pill>
               <ThemedText type="small" style={styles.muted}>
-                ≈ {currentMission.estimatedMinutes} мин
+                {missionDurationLabel(currentMission)}
               </ThemedText>
             </View>
             <View style={styles.questMark}>
@@ -134,8 +137,8 @@ export default function HomeScreen() {
               </View>
             </View>
             <AppButton
-              label="Отчитаться о результате"
-              onPress={() => setCheckInVisible(true)}
+              label={currentMission.execution?.kind === 'timer' ? 'Открыть таймер' : 'Начать миссию'}
+              onPress={() => setRunnerVisible(true)}
               icon="→"
             />
           </Card>
@@ -185,6 +188,16 @@ export default function HomeScreen() {
         </Pressable>
       </Screen>
 
+      <MissionRunner
+        mission={currentMission}
+        visible={runnerVisible}
+        onClose={() => setRunnerVisible(false)}
+        onCheckIn={() => {
+          setRunnerVisible(false);
+          setCheckInVisible(true);
+        }}
+      />
+
       <CheckInModal
         mission={currentMission}
         visible={checkInVisible}
@@ -196,6 +209,15 @@ export default function HomeScreen() {
       />
     </>
   );
+}
+
+function missionDurationLabel(mission: Mission) {
+  if (mission.execution?.kind === 'timer') {
+    const seconds = mission.execution.durationSeconds;
+    const timer = seconds >= 60 && seconds % 60 === 0 ? `${seconds / 60} мин` : `${seconds} сек`;
+    return `${timer} таймер · ≈ ${mission.estimatedMinutes} мин всего`;
+  }
+  return `≈ ${mission.estimatedMinutes} мин`;
 }
 
 const styles = StyleSheet.create({

@@ -1,4 +1,3 @@
-import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -15,6 +14,7 @@ import { ThemedText } from '@/components/themed-text';
 import { AppButton, Pill } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import { Mission, MissionOutcome } from '@/domain/types';
+import { NotificationFeedbackType, notify } from '@/lib/haptics';
 
 type Outcome = Exclude<MissionOutcome, 'pending'>;
 
@@ -33,13 +33,13 @@ export function CheckInModal({
   const [note, setNote] = useState('');
 
   const submit = async () => {
-    await Haptics.notificationAsync(
+    await notify(
       outcome === 'completed'
-        ? Haptics.NotificationFeedbackType.Success
+        ? NotificationFeedbackType.Success
         : outcome === 'partial'
-          ? Haptics.NotificationFeedbackType.Warning
-          : Haptics.NotificationFeedbackType.Error,
-    ).catch(() => undefined);
+          ? NotificationFeedbackType.Warning
+          : NotificationFeedbackType.Error,
+    );
     onSubmit(outcome, note);
     setNote('');
     setOutcome('completed');
@@ -90,7 +90,7 @@ export function CheckInModal({
             />
             <OutcomeChoice
               icon="—"
-              title="Не получилось"
+              title="Не выполнено"
               text="Последствие + короткий путь возвращения"
               selected={outcome === 'skipped'}
               tone="danger"

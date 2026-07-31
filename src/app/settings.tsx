@@ -133,9 +133,9 @@ export default function SettingsScreen() {
         <Card style={styles.statusCard}>
           <StatusRow label="Клиент" value="Expo SDK 57 · React Native" status="ready" />
           <StatusRow label="Данные" value="AsyncStorage · on-device" status="ready" />
-          <StatusRow label="Планировщик" value="GPT + local fallback" status="ready" />
+          <StatusRow label="Планировщик" value="GPT + modular prompts" status="ready" />
           <StatusRow label="AI gateway" value="Local Node proxy" status="ready" />
-          <StatusRow label="Глубокий web-research" value="Следующая итерация" status="later" />
+          <StatusRow label="Web research" value="Responses API · citations" status="ready" />
           <StatusRow label="Supabase sync" value="Optional backend" status="later" />
           <StatusRow label="iOS Widget" value="Native extension" status="later" />
         </Card>
@@ -153,7 +153,7 @@ export default function SettingsScreen() {
           <View style={styles.divider} />
           <ThemedText type="smallBold">Не медицинский продукт</ThemedText>
           <ThemedText type="small" style={styles.muted}>
-            Actum предназначен для self-management и планирования low-risk целей. Он не диагностирует, не лечит и не гарантирует физический результат.
+            Actum не решает за пользователя, какую цель ему выбирать: риск показывается как заметное предупреждение, а не локальная блокировка. Приложение не диагностирует, не лечит и не гарантирует физический результат; ограничения самого API сохраняются.
           </ThemedText>
         </Card>
       </View>
