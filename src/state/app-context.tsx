@@ -1,14 +1,14 @@
 import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useState } from 'react';
 
-import { buildGoal } from '@/domain/goal-engine';
 import {
   AppState,
   Archetype,
-  GoalInput,
+  GeneratedGoal,
   MissionOutcome,
   Profile,
   StrictnessMode,
 } from '@/domain/types';
+import { disableDailyReminder } from '@/lib/notifications';
 import storage from '@/lib/storage';
 
 const STORAGE_KEY = 'actum.app-state.v1';
@@ -44,7 +44,7 @@ type AppContextValue = {
     archetype: Archetype;
     strictness: StrictnessMode;
   }): void;
-  createGoal(input: GoalInput): void;
+  createGoal(generated: GeneratedGoal): void;
   reportMission(missionId: string, outcome: Exclude<MissionOutcome, 'pending'>, note?: string): void;
   completeRecovery(): void;
   startNewGoal(): void;
@@ -107,8 +107,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       );
     };
 
-    const createGoal: AppContextValue['createGoal'] = (input) => {
-      const generated = buildGoal(input);
+    const createGoal: AppContextValue['createGoal'] = (generated) => {
       setState((previous) =>
         withTimestamp({
           ...previous,
@@ -230,12 +229,14 @@ export function AppProvider({ children }: PropsWithChildren) {
           ...previous,
           activeGoal: undefined,
           activePlan: undefined,
+          checkIns: [],
           recovery: undefined,
         }),
       );
     };
 
     const resetProgress: AppContextValue['resetProgress'] = async () => {
+      await disableDailyReminder();
       await storage.removeItem(STORAGE_KEY);
       setState({ ...INITIAL_STATE, lastUpdatedAt: new Date().toISOString() });
     };

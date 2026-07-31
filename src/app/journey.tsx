@@ -124,7 +124,9 @@ export default function JourneyScreen() {
             </ThemedText>
             <ThemedText type="subtitle">Почему план выглядит так</ThemedText>
           </View>
-          <Pill tone="neutral">local v1</Pill>
+          <Pill tone="neutral">
+            {state.activePlan.research.method === 'openai-responses-v1' ? 'GPT v1' : 'local v1'}
+          </Pill>
         </View>
         {state.activePlan.research.assumptions.map((assumption) => (
           <Bullet key={assumption}>{assumption}</Bullet>

@@ -1,14 +1,23 @@
 import { useMemo, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { AppButton, Card, Pill, Screen, ScreenHeader } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import { buildGoal, checkGoalRisk } from '@/domain/goal-engine';
-import { GoalInput } from '@/domain/types';
+import { GeneratedGoal, GoalInput } from '@/domain/types';
+import { AIPlannerError, generateGoalWithAI } from '@/lib/ai-planner';
 import { useApp } from '@/state/app-context';
 
-type Stage = 'intent' | 'details' | 'review' | 'blocked';
+type Stage = 'intent' | 'details' | 'generating' | 'review' | 'error' | 'blocked';
 
 const MINUTES = [10, 20, 30];
 const HORIZONS = [
@@ -24,18 +33,34 @@ export function GoalBuilder() {
   const [dailyMinutes, setDailyMinutes] = useState(20);
   const [horizonDays, setHorizonDays] = useState(14);
   const [currentLevel, setCurrentLevel] = useState<GoalInput['currentLevel']>('starting');
+  const [preview, setPreview] = useState<GeneratedGoal>();
+  const [generationError, setGenerationError] = useState('');
   const risk = useMemo(() => checkGoalRisk(prompt), [prompt]);
-  const preview = useMemo(
-    () =>
-      prompt.trim()
-        ? buildGoal({ prompt, dailyMinutes, horizonDays, currentLevel })
-        : undefined,
+  const input = useMemo(
+    () => ({ prompt, dailyMinutes, horizonDays, currentLevel }),
     [currentLevel, dailyMinutes, horizonDays, prompt],
   );
 
   const continueFromIntent = () => setStage(risk.safe ? 'details' : 'blocked');
+  const generate = async () => {
+    setGenerationError('');
+    setStage('generating');
+    try {
+      setPreview(await generateGoalWithAI(input));
+      setStage('review');
+    } catch (error) {
+      setGenerationError(
+        error instanceof AIPlannerError ? error.message : 'Не удалось получить план от GPT.',
+      );
+      setStage('error');
+    }
+  };
+  const useLocalFallback = () => {
+    setPreview(buildGoal(input));
+    setStage('review');
+  };
   const save = () => {
-    createGoal({ prompt, dailyMinutes, horizonDays, currentLevel });
+    if (preview) createGoal(preview);
   };
 
   if (stage === 'blocked') {
@@ -75,14 +100,24 @@ export function GoalBuilder() {
               ? 'Что хочешь изменить?'
               : stage === 'details'
                 ? 'Сделаем цель реальной'
-                : 'Твой первый маршрут'
+                : stage === 'generating'
+                  ? 'GPT собирает маршрут'
+                  : stage === 'error'
+                    ? 'План пока не пришёл'
+                    : 'Твой первый маршрут'
           }
           subtitle={
             stage === 'intent'
               ? 'Напиши обычными словами. Пока только одна главная цель.'
               : stage === 'details'
                 ? 'Нам нужны ограничения, а не идеальные условия.'
-                : 'Локальный движок проверил риск и собрал безопасный план.'
+                : stage === 'generating'
+                  ? 'Отправляем цель в OpenAI и ждём структурированный план.'
+                  : stage === 'error'
+                    ? 'Можно повторить запрос или продолжить с локальным шаблоном.'
+                    : preview?.plan.research.method === 'openai-responses-v1'
+                      ? 'GPT вернул план, который уже превращён в главы и миссии Actum.'
+                      : 'Локальный fallback собрал план без сети.'
           }
         />
 
@@ -180,9 +215,32 @@ export function GoalBuilder() {
 
             <View style={styles.buttonRow}>
               <AppButton label="Назад" variant="ghost" onPress={() => setStage('intent')} />
-              <AppButton label="Собрать план" onPress={() => setStage('review')} style={styles.flex} />
+              <AppButton label="Собрать план с GPT" onPress={generate} style={styles.flex} />
             </View>
           </>
+        ) : null}
+
+        {stage === 'generating' ? (
+          <Card accent style={styles.generatingCard}>
+            <ActivityIndicator color={Palette.goldBright} size="large" />
+            <ThemedText type="subtitle" style={styles.center}>
+              Разбираем цель на реальные шаги…
+            </ThemedText>
+            <ThemedText style={[styles.muted, styles.center]}>
+              Обычно это занимает несколько секунд. Не закрывай development build.
+            </ThemedText>
+          </Card>
+        ) : null}
+
+        {stage === 'error' ? (
+          <Card style={styles.errorCard}>
+            <Pill tone="warning">AI недоступен</Pill>
+            <ThemedText type="subtitle">Не удалось получить план</ThemedText>
+            <ThemedText style={styles.muted}>{generationError}</ThemedText>
+            <AppButton label="Повторить запрос к GPT" onPress={generate} />
+            <AppButton label="Использовать локальный план" variant="secondary" onPress={useLocalFallback} />
+            <AppButton label="Изменить параметры" variant="ghost" onPress={() => setStage('details')} />
+          </Card>
         ) : null}
 
         {stage === 'review' && preview ? (
@@ -227,10 +285,14 @@ export function GoalBuilder() {
             <Card style={styles.methodCard}>
               <View style={styles.methodHeader}>
                 <ThemedText type="smallBold">Методология MVP</ThemedText>
-                <Pill tone="violet">local curated</Pill>
+                <Pill tone="violet">
+                  {preview.plan.research.method === 'openai-responses-v1' ? 'GPT · Responses API' : 'local fallback'}
+                </Pill>
               </View>
               <ThemedText type="small" style={styles.muted}>
-                Это контролируемый локальный шаблон, а не live-research и не медицинская рекомендация. Источники и AI-orchestrator подключаются серверным адаптером позже.
+                {preview.plan.research.method === 'openai-responses-v1'
+                  ? 'План создан GPT по твоей формулировке и ограничениям. Это быстрый MVP без глубокого web-research.'
+                  : 'Это контролируемый локальный шаблон на случай, если AI-сервер недоступен.'}
               </ThemedText>
             </Card>
 
@@ -390,6 +452,13 @@ const styles = StyleSheet.create({
   radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 1, borderColor: Palette.textDim },
   radioActive: { borderWidth: 5, borderColor: Palette.violetSoft },
   buttonRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  generatingCard: {
+    minHeight: 260,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.three,
+  },
+  errorCard: { gap: Spacing.three, borderColor: '#5B4228' },
   cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   planMeta: {
     flexDirection: 'row',

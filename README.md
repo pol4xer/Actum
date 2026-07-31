@@ -1,54 +1,51 @@
 # Actum
 
-Actum — открываемый в VS Code iPhone-first MVP универсального life-RPG приложения. Пользователь формулирует реальную цель, проходит safety gate, получает маршрут из глав и ежедневных миссий, честно отмечает результат и видит две траектории: реальную и потенциальную.
+Actum — iPhone-first MVP life-RPG приложения. Пользователь пишет цель обычными словами, GPT превращает её в структурированный маршрут, а приложение сразу показывает главы, миссии, check-in, последствия и прогресс героя.
 
-Это уже интерактивный локальный MVP ядра продукта, а не пустой шаблон. Для первого запуска не нужны аккаунт, Supabase или API-ключ.
+Это намеренно простой MVP: Expo-приложение, локальное хранение и маленький Node-прокси к OpenAI. Supabase, аккаунты, сложный research pipeline и production-инфраструктура пока не нужны.
 
-## Что работает
+## Что уже работает
 
-- короткий онбординг и договор честности;
-- создание героя, архетипа и режима строгости;
-- одна главная цель и контролируемые low-risk домены;
-- локальный safety gate для опасных, медицинских и экстремальных запросов;
-- rule-based планировщик с версиями плана, главами и семью миссиями;
+- онбординг, герой, архетип и режим строгости;
+- свободная формулировка одной главной цели;
+- запрос цели в OpenAI Responses API;
+- GPT-план из глав и конкретных миссий в формате, который понимает приложение;
+- экран проверки плана перед принятием;
+- локальный fallback, если GPT недоступен;
 - check-in: «выполнено», «частично», «не получилось» и заметка;
-- XP, уровень, энергия, серия, свет мира, buffs/debuffs;
-- recovery-flow после пропуска;
-- карта пути и журнал событий;
-- экран «реальный vs потенциальный» с прозрачной методологией;
-- локальное сохранение в SQLite на iOS/Android и `localStorage` в web;
-- ежедневное local notification на устройстве;
-- полный сброс локальных данных из приложения.
+- XP, уровень, энергия, серия, свет мира, buffs/debuffs и recovery-flow;
+- карта пути, журнал и сравнение «реальный vs потенциальный»;
+- SQLite на iOS/Android, `localStorage` в web;
+- локальные уведомления и haptics;
+- development build для iOS через Expo/Xcode.
 
 ## Требования
 
 - macOS;
-- Node.js **22.13 или новее** (рекомендуется актуальный Node.js LTS);
-- pnpm 11 или npm;
-- Xcode 26.4+ для Expo SDK 57 и iOS Simulator.
+- Node.js 22.13+; проект закреплён на Node 22.22.3;
+- pnpm 11;
+- Xcode 26.4+ для Expo SDK 57 и iOS Simulator;
+- собственный OpenAI API key для GPT-планов.
 
-Проверьте версии:
+Проверь версии:
 
 ```bash
+nvm use
 node --version
 pnpm --version
 xcodebuild -version
 ```
 
-Системный Node.js 18 не подходит для Expo SDK 57.
+## Первый запуск
 
-## Открыть в VS Code
+Открой проект в VS Code:
 
 ```bash
 cd /Users/pol4xer/Actum
 code .
 ```
 
-Если команда `code` не установлена: откройте VS Code → `File` → `Open Folder…` → выберите папку `Actum`.
-
-## Установка и запуск
-
-В новом терминале активируйте закреплённую для проекта версию Node.js и pnpm:
+Установи зависимости:
 
 ```bash
 nvm use
@@ -56,52 +53,88 @@ corepack enable pnpm
 pnpm install
 ```
 
+Создай локальный env-файл, который Git не коммитит:
+
+```bash
+cp .env.example .env.local
+```
+
+Открой `.env.local` в VS Code и вставь свой ключ:
+
+```dotenv
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-5.6
+EXPO_PUBLIC_ACTUM_AI_URL=http://127.0.0.1:8787
+```
+
+Ключ создаётся в [OpenAI API dashboard](https://platform.openai.com/api-keys). Не вставляй его в `EXPO_PUBLIC_*`: тогда он попадёт в мобильный bundle.
+
+## Запуск MVP
+
+Нужны два терминала VS Code.
+
+Терминал 1 — локальный AI-сервер:
+
+```bash
+nvm use
+pnpm ai:server
+```
+
+Успешный старт выглядит так:
+
+```text
+Actum AI server: http://127.0.0.1:8787 · gpt-5.6 · OpenAI key loaded
+```
+
+Терминал 2 — приложение:
+
+```bash
+nvm use
+pnpm ios
+```
+
+После первой нативной сборки обычно достаточно:
+
+```bash
+pnpm start
+```
+
+и клавиши `i` в терминале Expo.
+
 Для быстрой проверки интерфейса в браузере:
 
 ```bash
 pnpm web
 ```
 
-Web-режим использует `localStorage`; SQLite, нативные уведомления и haptics проверяются только на iOS/Android.
+Если AI-сервер или ключ недоступны, экран покажет понятную ошибку и кнопку «Использовать локальный план» — основной игровой цикл всё равно можно проверить.
 
-Для полноценного запуска на iPhone Simulator:
+Если в Simulator уже сохранена старая цель, открой «Профиль» → «Начать другую цель». Профиль и XP останутся, а текущий маршрут будет очищен.
 
-```bash
-pnpm ios
+### Физический iPhone
+
+Для Simulator подходит `127.0.0.1`. Для физического iPhone телефон и Mac должны быть в одной доверенной Wi-Fi сети. В `.env.local` укажи LAN IP Mac и разреши серверу слушать локальную сеть:
+
+```dotenv
+EXPO_PUBLIC_ACTUM_AI_URL=http://192.168.x.x:8787
+ACTUM_AI_HOST=0.0.0.0
 ```
 
-`pnpm ios` создаст нативную папку `ios/`, соберёт development build через Xcode и запустит iPhone Simulator.
+Это только dev-режим. Не открывай порт 8787 в интернет.
 
-После первой сборки обычный цикл разработки:
+## Как проходит запрос
 
-```bash
-pnpm start
+```text
+цель + время + точка старта
+→ локальный scripts/ai-server.mjs
+→ OpenAI Responses API
+→ строгий JSON-план
+→ главы и миссии Actum
+→ пользователь принимает план
+→ план сохраняется локально
 ```
 
-Затем нажмите `i` в терминале Expo, чтобы открыть установленный development build в iOS Simulator.
-
-## Expo Application Services
-
-Локальный проект связан с EAS-проектом `@pol4xer/actum`. Конфигурация сборок находится в `eas.json`:
-
-- `development` — development client для внутреннего тестирования;
-- `preview` — production-подобная внутренняя сборка;
-- `production` — App Store-сборка с автоматическим увеличением build number.
-
-Проверить аккаунт и привязку:
-
-```bash
-npx eas-cli@latest whoami
-npx eas-cli@latest project:info
-```
-
-Создать первую облачную development-сборку для iOS:
-
-```bash
-npx eas-cli@latest build --platform ios --profile development
-```
-
-`eas init` и `eas build:configure` только привязывают и настраивают проект. Облачная сборка начинается исключительно после явного запуска `eas build`.
+Сейчас GPT делает практический plan generation, но не выполняет глубокий web-research и не подбирает проверенные ссылки. Это следующая итерация после проверки основной хотелки.
 
 ## Проверки
 
@@ -112,22 +145,37 @@ pnpm check
 
 `pnpm check` запускает TypeScript и production export web-версии.
 
+## Expo Application Services
+
+Проект связан с EAS-проектом `@pol4xer/actum`. Профили находятся в `eas.json`: `development`, `preview`, `production`.
+
+Проверить привязку:
+
+```bash
+npx eas-cli@latest whoami
+npx eas-cli@latest project:info
+```
+
+Облачная development-сборка запускается отдельно:
+
+```bash
+npx eas-cli@latest build --platform ios --profile development
+```
+
+Текущий локальный AI-сервер не доступен такой сборке извне. Для TestFlight его позже нужно будет развернуть как маленький backend; для локального MVP это не требуется.
+
 ## Структура
 
 ```text
+scripts/ai-server.mjs      # простой локальный proxy к OpenAI
 src/
-├── app/                    # Expo Router: Сегодня, Путь, Двойник, Профиль
-├── components/             # UI, goal builder, check-in, герой
-├── domain/                 # типы, risk gate и локальный goal engine
-├── lib/                    # SQLite/web storage и notifications adapters
-├── screens/                # онбординг
-└── state/                  # состояние приложения и event updates
+├── app/                   # Сегодня, Путь, Двойник, Профиль
+├── components/            # goal builder, check-in и UI
+├── domain/                # локальный fallback и игровые типы
+├── lib/ai-planner.ts      # вызов proxy и перевод GPT-плана в Actum
+├── lib/                   # storage и notifications adapters
+├── screens/               # онбординг
+└── state/                 # локальное состояние приложения
 ```
 
-Подробные границы MVP и путь к production находятся в [`docs/PRODUCT_SCOPE.md`](docs/PRODUCT_SCOPE.md).
-
-## Важные ограничения MVP
-
-Локальный планировщик не выдаёт себя за live research или облачный AI. Он использует контролируемые шаблоны для чтения, обучения, бытовых навыков, организации, простых привычек и умеренного движения. HealthKit, Supabase, AI research pipeline и iOS Widget предусмотрены архитектурой, но не включены в первую локально запускаемую итерацию.
-
-Actum предназначен для self-management и планирования. Он не является медицинским устройством, не диагностирует, не лечит и не гарантирует физический или жизненный результат.
+Дальнейшие границы MVP описаны в [`docs/PRODUCT_SCOPE.md`](docs/PRODUCT_SCOPE.md).

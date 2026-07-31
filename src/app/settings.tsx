@@ -12,6 +12,7 @@ export default function SettingsScreen() {
   const {
     state,
     currentMission,
+    startNewGoal,
     setNotificationsEnabled,
     resetProgress,
   } = useApp();
@@ -64,12 +65,23 @@ export default function SettingsScreen() {
     );
   };
 
+  const confirmNewGoal = () => {
+    Alert.alert(
+      'Начать другую цель?',
+      'Текущий маршрут и его журнал будут удалены. Профиль, уровень и XP останутся.',
+      [
+        { text: 'Отмена', style: 'cancel' },
+        { text: 'Сменить цель', style: 'destructive', onPress: startNewGoal },
+      ],
+    );
+  };
+
   return (
     <Screen>
       <ScreenHeader
         eyebrow="Профиль и система"
         title="Настройки"
-        subtitle="MVP работает локально и не требует аккаунта."
+        subtitle="Данные живут локально; GPT подключён через маленький dev-сервер."
       />
 
       <Card style={styles.profileCard}>
@@ -121,8 +133,9 @@ export default function SettingsScreen() {
         <Card style={styles.statusCard}>
           <StatusRow label="Клиент" value="Expo SDK 57 · React Native" status="ready" />
           <StatusRow label="Данные" value="SQLite · on-device" status="ready" />
-          <StatusRow label="Планировщик" value="Local curated v1" status="ready" />
-          <StatusRow label="Cloud AI + research" value="Server adapter" status="later" />
+          <StatusRow label="Планировщик" value="GPT + local fallback" status="ready" />
+          <StatusRow label="AI gateway" value="Local Node proxy" status="ready" />
+          <StatusRow label="Глубокий web-research" value="Следующая итерация" status="later" />
           <StatusRow label="Supabase sync" value="Optional backend" status="later" />
           <StatusRow label="iOS Widget" value="Native extension" status="later" />
         </Card>
@@ -133,9 +146,9 @@ export default function SettingsScreen() {
           Приватность и безопасность
         </ThemedText>
         <Card>
-          <ThemedText type="smallBold">Сейчас данные остаются на устройстве</ThemedText>
+          <ThemedText type="smallBold">Прогресс остаётся на устройстве</ThemedText>
           <ThemedText type="small" style={styles.muted}>
-            Профиль, цель, миссии и check-in сохраняются локально. Этот прототип не отправляет их в Supabase или AI-провайдер.
+            Профиль, миссии и check-in сохраняются локально. При создании плана формулировка цели и выбранные ограничения отправляются в OpenAI через локальный AI-сервер; журнал выполнения не отправляется.
           </ThemedText>
           <View style={styles.divider} />
           <ThemedText type="smallBold">Не медицинский продукт</ThemedText>
@@ -154,6 +167,9 @@ export default function SettingsScreen() {
           variant="secondary"
           onPress={() => Linking.openURL('https://docs.expo.dev/versions/v57.0.0/')}
         />
+        {state.activeGoal ? (
+          <AppButton label="Начать другую цель" variant="secondary" onPress={confirmNewGoal} />
+        ) : null}
         <AppButton label="Удалить локальные данные" variant="danger" onPress={confirmReset} />
       </View>
 

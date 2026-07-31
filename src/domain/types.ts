@@ -43,7 +43,7 @@ export type Goal = {
 };
 
 export type ResearchDossier = {
-  method: 'local-curated-v1';
+  method: 'local-curated-v1' | 'openai-responses-v1';
   confidence: 'high' | 'medium';
   safetyNotes: string[];
   assumptions: string[];
