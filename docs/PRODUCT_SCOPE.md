@@ -28,7 +28,7 @@
 | Game loop | Миссии, check-in, XP, энергия, серия, свет, buffs/debuffs |
 | Recovery | Микро-шаг после пропуска |
 | Potential twin | Игровое сравнение текущего выполнения с принятым планом |
-| Persistence | SQLite KV на native, localStorage на web |
+| Persistence | AsyncStorage на native, localStorage на web |
 | Notifications | Одно ежедневное локальное напоминание |
 
 ## Намеренно простая архитектура

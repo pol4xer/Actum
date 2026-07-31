@@ -132,7 +132,7 @@ export default function SettingsScreen() {
         </ThemedText>
         <Card style={styles.statusCard}>
           <StatusRow label="Клиент" value="Expo SDK 57 · React Native" status="ready" />
-          <StatusRow label="Данные" value="SQLite · on-device" status="ready" />
+          <StatusRow label="Данные" value="AsyncStorage · on-device" status="ready" />
           <StatusRow label="Планировщик" value="GPT + local fallback" status="ready" />
           <StatusRow label="AI gateway" value="Local Node proxy" status="ready" />
           <StatusRow label="Глубокий web-research" value="Следующая итерация" status="later" />

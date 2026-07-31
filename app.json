@@ -33,7 +33,6 @@
           "backgroundColor": "#090B14"
         }
       ],
-      "expo-sqlite",
       "expo-notifications",
       "expo-dev-client"
     ],

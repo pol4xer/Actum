@@ -15,7 +15,7 @@ Actum — iPhone-first MVP life-RPG приложения. Пользовател
 - check-in: «выполнено», «частично», «не получилось» и заметка;
 - XP, уровень, энергия, серия, свет мира, buffs/debuffs и recovery-flow;
 - карта пути, журнал и сравнение «реальный vs потенциальный»;
-- SQLite на iOS/Android, `localStorage` в web;
+- AsyncStorage на iOS/Android, `localStorage` в web;
 - локальные уведомления и haptics;
 - development build для iOS через Expo/Xcode.
 
@@ -44,6 +44,8 @@ xcodebuild -version
 cd /Users/pol4xer/Actum
 code .
 ```
+
+Все команды `pnpm` ниже запускай только из этой папки. Перед запуском можно проверить `pwd`: он должен вернуть `/Users/pol4xer/Actum`. Если в выводе появляются `opencv`, `webdriverio` или предложение `pnpm approve-builds`, останови команду — это зависимости другого проекта из домашней папки, к Actum они не относятся.
 
 Установи зависимости:
 

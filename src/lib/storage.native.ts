@@ -1,3 +1,3 @@
-import Storage from 'expo-sqlite/kv-store';
+import Storage from '@react-native-async-storage/async-storage';
 
 export default Storage;
