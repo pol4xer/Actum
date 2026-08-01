@@ -1,3 +1,5 @@
+export const PLAN_VALIDATOR_VERSION = 'plan-validator-v4.1';
+
 const ROUTINE_UNITS = new Set([
   'reps',
   'seconds',
@@ -9,6 +11,7 @@ const ROUTINE_UNITS = new Set([
   'attempts',
   'custom',
 ]);
+const DISCRETE_ROUTINE_UNITS = new Set(['reps', 'pages', 'items', 'words', 'attempts']);
 const GOAL_DOMAINS = new Set(['read', 'learn', 'practice', 'organize', 'move', 'habit']);
 const MISSION_TYPES = new Set([
   'learn',
@@ -22,290 +25,381 @@ const MISSION_TYPES = new Set([
   'submit',
   'check',
 ]);
+const ALLOWED_HORIZONS = new Set([7, 14, 30]);
+const ROUTINE_UNIT_ALIASES = new Map([
+  ['reps', 'reps'],
+  ['rep', 'reps'],
+  ['repetitions', 'reps'],
+  ['повтор', 'reps'],
+  ['повтора', 'reps'],
+  ['повторов', 'reps'],
+  ['повторения', 'reps'],
+  ['seconds', 'seconds'],
+  ['second', 'seconds'],
+  ['sec', 'seconds'],
+  ['secs', 'seconds'],
+  ['s', 'seconds'],
+  ['сек', 'seconds'],
+  ['секунда', 'seconds'],
+  ['секунды', 'seconds'],
+  ['секунд', 'seconds'],
+  ['minutes', 'minutes'],
+  ['minute', 'minutes'],
+  ['min', 'minutes'],
+  ['mins', 'minutes'],
+  ['мин', 'minutes'],
+  ['минута', 'minutes'],
+  ['минуты', 'minutes'],
+  ['минут', 'minutes'],
+  ['pages', 'pages'],
+  ['page', 'pages'],
+  ['стр', 'pages'],
+  ['страница', 'pages'],
+  ['страницы', 'pages'],
+  ['страниц', 'pages'],
+  ['items', 'items'],
+  ['item', 'items'],
+  ['элемент', 'items'],
+  ['элемента', 'items'],
+  ['элементов', 'items'],
+  ['words', 'words'],
+  ['word', 'words'],
+  ['слово', 'words'],
+  ['слова', 'words'],
+  ['слов', 'words'],
+  ['meters', 'meters'],
+  ['meter', 'meters'],
+  ['metres', 'meters'],
+  ['metre', 'meters'],
+  ['m', 'meters'],
+  ['метр', 'meters'],
+  ['метра', 'meters'],
+  ['метров', 'meters'],
+  ['attempts', 'attempts'],
+  ['attempt', 'attempts'],
+  ['попытка', 'attempts'],
+  ['попытки', 'attempts'],
+  ['попыток', 'attempts'],
+]);
 
 const VAGUE_ONLY_PATTERNS = [
-  /^(?:подготовься|сделай разминку|изучи(?: тему| технику)?|поработай над техникой|выполни упражнение|добавь немного|действуй аккуратно)[.!]?$/iu,
+  /^(?:подготовься|сделай разминку|изучи(?: тему| технику)?|поработай над техникой|поработай над дыханием|выполни упражнение|сделай подготовительные упражнения|добавь немного|действуй аккуратно)[.!]?$/iu,
   /^(?:найди|обратись к) (?:инструктору|инструктора|специалисту|специалиста)[.!]?$/iu,
   /^(?:prepare|warm up|study(?: the)? technique|do the exercise|find (?:an? )?(?:coach|specialist)|be careful)[.!]?$/iu,
 ];
 const SOFT_VAGUE_PATTERN =
-  /(?:постепенн|понемногу|по самочувствию|в комфортн|подготовься|сделай разминку|изучи технику|поработай над техникой|добавь немного|gradually|comfortable pace)/iu;
+  /(?:постепенн|понемногу|по самочувствию|в комфортн|подготовься|сделай разминку|изучи технику|поработай над техникой|поработай над дыханием|добавь немного|gradually|comfortable pace)/iu;
 const GENERIC_SHORT_ACTION_PATTERN =
   /^(?:дыши|тренируй|потренируй|практикуй|выполни|сделай|подготовься|работай|breathe|train|practice|prepare|do the exercise)(?:\s|[.,!?:;—-]|$)/iu;
 const PROGRESSION_BRANCH_PATTERN = /(?:если|if).*(?:если нет|иначе|otherwise|if not)/iu;
+const MANUAL_VAGUE_PATTERN =
+  /(?:качественн\w*\s+тренировочн\w*\s+сесси|хорош\w*\s+техник|запиши\s+ощущен|проведи\s+тренировочн\w*\s+сесси|quality\s+training\s+session|good\s+technique|record\s+how\s+you\s+feel)/iu;
+const MANUAL_ARTIFACT_PATTERN =
+  /(?:(?:форм|файл|документ|список|таблиц|черновик|фото|видео|ссылк|письм|сообщени|ответ|звонок|книг|запис|отч[её]т|папк|полк|стол|комнат|зон|form|file|document|list|table|draft|photo|video|link|letter|message|answer|call|book|entry|report|folder).{0,56}(?:записан|написан|создан|сохран|отправ|заполн|разобран|удал|перемещ|собран|прочитан|реш[её]н|заверш|очищ|submitted|written|created|saved|sent|filled|removed|moved|assembled|read|solved|completed|cleared)|(?:записан|написан|создан|сохран|отправ|заполн|разобран|удал|перемещ|собран|прочитан|реш[её]н|заверш|очищ|submitted|written|created|saved|sent|filled|removed|moved|assembled|read|solved|completed|cleared).{0,56}(?:форм|файл|документ|список|таблиц|черновик|фото|видео|ссылк|письм|сообщени|ответ|звонок|книг|запис|отч[её]т|папк|полк|стол|комнат|зон|form|file|document|list|table|draft|photo|video|link|letter|message|answer|call|book|entry|report|folder))/iu;
 
-export function normalizePlanSchedule(plan, horizonDays) {
-  const missions = Array.isArray(plan?.chapters)
-    ? plan.chapters.flatMap((chapter) =>
-        Array.isArray(chapter?.missions) ? chapter.missions : [],
-      )
-    : [];
-  if (
-    ![7, 14, 28].includes(horizonDays) ||
-    missions.length === 0 ||
-    missions.length > horizonDays ||
-    missions.some(
-      (mission) =>
-        !Number.isInteger(mission?.repeatCount) ||
-        mission.repeatCount < 1 ||
-        mission.repeatCount > 28,
-    )
-  ) {
-    return plan;
-  }
-
-  let total = missions.reduce((sum, mission) => sum + mission.repeatCount, 0);
-  let cursor = 0;
-  while (total < horizonDays) {
-    const mission = missions[cursor % missions.length];
-    if (mission.repeatCount < 28) {
-      mission.repeatCount += 1;
-      total += 1;
-    }
-    cursor += 1;
-  }
-
-  cursor = missions.length - 1;
-  while (total > horizonDays) {
-    const mission = missions[cursor];
-    if (mission.repeatCount > 1) {
-      mission.repeatCount -= 1;
-      total -= 1;
-    }
-    cursor = cursor === 0 ? missions.length - 1 : cursor - 1;
-  }
-
-  return plan;
-}
-
-export function normalizePlanDurations(plan, dailyMinutes) {
-  const maximumSeconds = Math.max(60, Math.round(dailyMinutes) * 60);
-  const missions = Array.isArray(plan?.chapters)
-    ? plan.chapters.flatMap((chapter) =>
-        Array.isArray(chapter?.missions) ? chapter.missions : [],
-      )
-    : [];
-  let adjustedMissions = 0;
-
-  for (const mission of missions) {
-    const actions = mission?.execution?.kind === 'routine' ? mission.execution.actions : undefined;
-    if (!Array.isArray(actions)) continue;
-    const originalDuration = knownRoutineDuration(actions);
-    if (!Number.isFinite(originalDuration) || originalDuration <= maximumSeconds) continue;
-
-    const scale = maximumSeconds / originalDuration;
-    for (const action of actions) {
-      if (action?.unit === 'seconds' || action?.unit === 'minutes') {
-        const originalSeconds = action.unit === 'minutes' ? action.quantity * 60 : action.quantity;
-        action.unit = 'seconds';
-        action.quantity = Math.max(1, Math.floor(originalSeconds * scale));
-        action.unitLabel = null;
-        action.successCriterion =
-          `Таймер текущего подхода дошёл до 0 после ${action.quantity} секунд без досрочного завершения.`;
-      }
-      if (Number.isInteger(action?.restSeconds)) {
-        action.restSeconds = Math.max(0, Math.floor(action.restSeconds * scale));
-      }
-    }
-
-    if (knownRoutineDuration(actions) > maximumSeconds) {
-      for (const action of actions) {
-        action.restSeconds = 0;
-        if (action.unit === 'seconds') action.quantity = 1;
-      }
-    }
-
-    const firstAction = actions[0];
-    mission.execution.successCriterion =
-      `Выполнены все ${actions.length} действий и все подходы с нормализованными значениями, показанными в комплексе.`;
-    if (firstAction) {
-      mission.progressionRule =
-        `Если выполнен критерий всей миссии — увеличь объём действия «${firstAction.title}» на 1 ${routineUnitLabel(firstAction)}; ` +
-        'если нет — повтори текущие числа с изменением 0.';
-    }
-    mission.estimatedMinutes = Math.min(
-      Math.max(1, Math.round(mission.estimatedMinutes || dailyMinutes)),
-      Math.round(dailyMinutes),
-    );
-    adjustedMissions += 1;
-  }
-
-  return adjustedMissions;
-}
-
-export function validatePlanActionability(plan, dailyMinutes, horizonDays) {
+export function validatePlanActionability(
+  plan,
+  dailyMinutes,
+  horizonDays,
+  expectedBaselineStatement,
+  expectedTargetTimeline,
+  trustedBaseline,
+) {
   if (!plan || typeof plan !== 'object') fail('plan', 'план должен быть объектом');
   if (!Number.isInteger(dailyMinutes) || dailyMinutes < 1) {
     fail('dailyMinutes', 'дневной лимит должен быть целым числом минут');
   }
-  if (![7, 14, 28].includes(horizonDays)) {
-    fail('horizonDays', 'горизонт должен быть равен 7, 14 или 28 дням');
+  if (!ALLOWED_HORIZONS.has(horizonDays)) {
+    fail('horizonDays', 'горизонт должен быть равен 7, 14 или 30 дням');
   }
+
   assertString(plan.title, 'title', 3, 120);
   if (!GOAL_DOMAINS.has(plan.domain)) fail('domain', 'неизвестный домен цели');
-  assertString(plan.targetMetric, 'targetMetric', 3, 180);
-  assertString(plan.summary, 'summary', 10, 500);
+  assertString(plan.targetMetric, 'targetMetric', 3, 220);
+  assertString(plan.targetTimeline, 'targetTimeline', 2, 80);
+  if (
+    expectedTargetTimeline &&
+    plan.targetTimeline.trim() !== expectedTargetTimeline.trim()
+  ) {
+    fail('targetTimeline', 'срок большой цели пользователя был изменён');
+  }
+  assertString(plan.summary, 'summary', 10, 600);
+  validateBaseline(plan.baseline, expectedBaselineStatement, trustedBaseline);
   assertStringArray(plan.safetyNotes, 'safetyNotes', 0, 4, 3, 300);
-  assertStringArray(plan.assumptions, 'assumptions', 1, 5, 3, 300);
-  assertStringArray(plan.sourceLabels, 'sourceLabels', 1, 6, 2, 160);
-  if (!Array.isArray(plan.chapters) || plan.chapters.length !== 3) {
-    fail('chapters', 'план должен содержать ровно три главы');
+  assertStringArray(plan.assumptions, 'assumptions', 1, 6, 3, 300);
+  assertStringArray(plan.sourceLabels, 'sourceLabels', 1, 8, 2, 180);
+  validatePhases(plan.phases, horizonDays);
+
+  if (!Array.isArray(plan.days) || plan.days.length !== horizonDays) {
+    fail('days', `план должен содержать ровно ${horizonDays} календарных дней`);
   }
 
-  let totalSessions = 0;
-  plan.chapters.forEach((chapter, chapterIndex) => {
-    const chapterPath = `chapters.${chapterIndex}`;
-    if (!chapter || typeof chapter !== 'object') fail(chapterPath, 'глава должна быть объектом');
-    assertString(chapter.title, `${chapterPath}.title`, 2, 100);
-    assertString(chapter.subtitle, `${chapterPath}.subtitle`, 2, 160);
-    if (!Array.isArray(chapter.missions) || chapter.missions.length < 2 || chapter.missions.length > 3) {
-      fail(`${chapterPath}.missions`, 'глава должна содержать от двух до трёх миссий');
+  let calculatedActionCount = 0;
+  plan.days.forEach((day, index) => {
+    const path = `days.${index}`;
+    assertInteger(day?.dayNumber, `${path}.dayNumber`, 1, horizonDays);
+    if (day.dayNumber !== index + 1) {
+      fail(`${path}.dayNumber`, `ожидается последовательный день ${index + 1}`);
     }
-
-    chapter.missions.forEach((mission, missionIndex) => {
-      validateMission(mission, dailyMinutes, `${chapterPath}.missions.${missionIndex}`);
-      totalSessions += mission.repeatCount;
-    });
+    const expectedPhaseIndex = phaseIndexForDay(plan.phases, day.dayNumber);
+    assertInteger(day.phaseIndex, `${path}.phaseIndex`, 1, 3);
+    if (day.phaseIndex !== expectedPhaseIndex) {
+      fail(`${path}.phaseIndex`, `день ${day.dayNumber} не входит в указанную фазу`);
+    }
+    calculatedActionCount += validateDay(day, dailyMinutes, trustedBaseline, path);
   });
 
-  if (totalSessions !== horizonDays) {
-    fail(
-      'chapters',
-      `сумма repeatCount должна быть ${horizonDays}, получено ${totalSessions}`,
-    );
+  if (
+    trustedBaseline &&
+    (plan.domain === 'move' || plan.domain === 'practice') &&
+    calculatedActionCount < 1
+  ) {
+    fail('days', 'измеримая двигательная цель не использует baseline ни в одном расчёте');
   }
 
   return plan;
 }
 
-function validateMission(mission, dailyMinutes, path) {
-  if (!mission || typeof mission !== 'object') fail(path, 'миссия должна быть объектом');
-  assertString(mission.title, `${path}.title`, 2, 120);
-  assertString(mission.description, `${path}.description`, 5, 500);
-  if (!MISSION_TYPES.has(mission.type)) fail(`${path}.type`, 'неизвестный тип миссии');
-  assertInteger(mission.xp, `${path}.xp`, 10, 60);
-  assertInteger(mission.repeatCount, `${path}.repeatCount`, 1, 28);
-  assertString(mission.progressionRule, `${path}.progressionRule`, 8, 360);
-  const progressionNumbers = mission.progressionRule.match(/\d+(?:[.,]\d+)?/gu) ?? [];
+function validateBaseline(baseline, expectedBaselineStatement, trustedBaseline) {
+  if (!baseline || typeof baseline !== 'object') fail('baseline', 'не указана исходная точка');
+  assertString(baseline.userStatement, 'baseline.userStatement', 2, 500);
+  assertString(baseline.normalizedMetric, 'baseline.normalizedMetric', 2, 180);
+  assertString(baseline.calculationRule, 'baseline.calculationRule', 8, 360);
+
   if (
-    isVagueOnly(mission.progressionRule) ||
+    expectedBaselineStatement &&
+    baseline.userStatement.trim() !== expectedBaselineStatement.trim()
+  ) {
+    fail('baseline.userStatement', 'исходная точка пользователя была изменена');
+  }
+
+  if (!trustedBaseline) {
+    if (baseline.value !== null || baseline.unit !== null) {
+      fail('baseline.value', 'непроверенное числовое значение должно быть null');
+    }
+    return 0;
+  }
+
+  assertFiniteNumber(baseline.value, 'baseline.value', 0, 1_000_000_000);
+  assertString(baseline.unit, 'baseline.unit', 1, 40);
+  if (!nearlyEqual(baseline.value, trustedBaseline.value)) {
+    fail(
+      'baseline.value',
+      `ожидается локально распознанное значение ${trustedBaseline.value}`,
+    );
+  }
+  if (canonicalRoutineUnit(baseline.unit) !== trustedBaseline.unit) {
+    fail('baseline.unit', `ожидается локально распознанная единица ${trustedBaseline.unit}`);
+  }
+}
+
+function validatePhases(phases, horizonDays) {
+  if (!Array.isArray(phases) || phases.length !== 3) {
+    fail('phases', 'план должен содержать ровно три последовательные фазы');
+  }
+
+  phases.forEach((phase, index) => {
+    const path = `phases.${index}`;
+    if (!phase || typeof phase !== 'object') fail(path, 'фаза должна быть объектом');
+    assertString(phase.title, `${path}.title`, 2, 100);
+    assertString(phase.subtitle, `${path}.subtitle`, 2, 180);
+    assertInteger(phase.startDay, `${path}.startDay`, 1, horizonDays);
+    assertInteger(phase.endDay, `${path}.endDay`, 1, horizonDays);
+    if (phase.endDay < phase.startDay) fail(path, 'конец фазы раньше её начала');
+
+    const expectedStart = index === 0 ? 1 : phases[index - 1].endDay + 1;
+    if (phase.startDay !== expectedStart) {
+      fail(`${path}.startDay`, `ожидается день ${expectedStart} без разрыва или пересечения`);
+    }
+  });
+
+  if (phases[2].endDay !== horizonDays) {
+    fail('phases.2.endDay', `последняя фаза должна завершаться днём ${horizonDays}`);
+  }
+}
+
+function phaseIndexForDay(phases, dayNumber) {
+  const index = phases.findIndex(
+    (phase) => dayNumber >= phase.startDay && dayNumber <= phase.endDay,
+  );
+  return index + 1;
+}
+
+function validateDay(day, dailyMinutes, trustedBaseline, path) {
+  if (!day || typeof day !== 'object') fail(path, 'день должен быть объектом');
+  assertString(day.title, `${path}.title`, 2, 120);
+  assertString(day.description, `${path}.description`, 5, 560);
+  if (!MISSION_TYPES.has(day.type)) fail(`${path}.type`, 'неизвестный тип миссии');
+  assertInteger(day.xp, `${path}.xp`, 5, 60);
+  assertString(day.progressionRule, `${path}.progressionRule`, 8, 420);
+  const progressionNumbers = day.progressionRule.match(/\d+(?:[.,]\d+)?/gu) ?? [];
+  if (
+    isVagueOnly(day.progressionRule) ||
     progressionNumbers.length < 2 ||
-    !PROGRESSION_BRANCH_PATTERN.test(mission.progressionRule)
+    !PROGRESSION_BRANCH_PATTERN.test(day.progressionRule)
   ) {
     fail(`${path}.progressionRule`, 'правило не содержит двух точных измеримых веток');
   }
-  if (mission.warning !== null) assertString(mission.warning, `${path}.warning`, 3, 300);
-  if (isVagueOnly(mission.description)) {
+  if (day.warning !== null) assertString(day.warning, `${path}.warning`, 3, 300);
+  if (isVagueOnly(day.description)) {
     fail(`${path}.description`, 'описание подменяет действие общей фразой');
   }
-  if (!Number.isInteger(mission.estimatedMinutes) || mission.estimatedMinutes < 1) {
-    fail(`${path}.estimatedMinutes`, 'длительность миссии должна быть положительным целым числом');
+  if (!Number.isInteger(day.estimatedMinutes) || day.estimatedMinutes < 1) {
+    fail(`${path}.estimatedMinutes`, 'длительность дня должна быть положительным целым числом');
   }
-  if (mission.estimatedMinutes > dailyMinutes) {
-    fail(`${path}.estimatedMinutes`, 'миссия превышает выбранный дневной лимит');
+  if (day.estimatedMinutes > dailyMinutes) {
+    fail(`${path}.estimatedMinutes`, 'день превышает выбранный дневной лимит');
   }
-  if (!Array.isArray(mission.steps) || mission.steps.length < 1 || mission.steps.length > 6) {
-    fail(`${path}.steps`, 'миссия должна содержать от одного до шести конкретных указаний');
+  if (!Array.isArray(day.steps) || day.steps.length < 1 || day.steps.length > 8) {
+    fail(`${path}.steps`, 'день должен содержать от одного до восьми конкретных указаний');
   }
-  mission.steps.forEach((step, stepIndex) => {
-    assertString(step, `${path}.steps.${stepIndex}`, 2, 260);
+  day.steps.forEach((step, stepIndex) => {
+    assertString(step, `${path}.steps.${stepIndex}`, 2, 300);
   });
-  if (mission.steps.some(isInsufficientlySpecific)) {
-    fail(`${path}.steps`, 'миссия не содержит конкретного указания');
+  if (day.steps.some(isInsufficientlySpecific)) {
+    fail(`${path}.steps`, 'день не содержит конкретного указания');
   }
 
-  const execution = mission.execution;
+  const execution = day.execution;
   if (!execution || typeof execution !== 'object') {
     fail(`${path}.execution`, 'не указан способ выполнения');
   }
-  assertString(execution.successCriterion, `${path}.execution.successCriterion`, 5, 300);
+  assertString(execution.successCriterion, `${path}.execution.successCriterion`, 5, 320);
 
   if (execution.kind === 'manual') {
     if (execution.durationSeconds !== null) {
       fail(`${path}.execution.durationSeconds`, 'для manual ожидается null');
     }
-    return;
+    const manualEvidence = `${day.steps.join(' ')} ${execution.successCriterion}`;
+    if (MANUAL_VAGUE_PATTERN.test(manualEvidence) || !MANUAL_ARTIFACT_PATTERN.test(manualEvidence)) {
+      fail(
+        `${path}.execution.successCriterion`,
+        'manual-день не содержит измеримого результата или проверяемого артефакта',
+      );
+    }
+    return 0;
   }
 
   if (execution.kind === 'timer') {
     assertInteger(execution.durationSeconds, `${path}.execution.durationSeconds`, 1, 7200);
-    if (execution.durationSeconds > dailyMinutes * 60) {
-      fail(`${path}.execution.durationSeconds`, 'таймер превышает выбранный дневной лимит');
+    if (execution.durationSeconds > day.estimatedMinutes * 60) {
+      fail(`${path}.execution.durationSeconds`, 'таймер превышает заявленную длительность дня');
     }
-    return;
+    return 0;
   }
 
   if (execution.kind !== 'routine') {
     fail(`${path}.execution.kind`, 'неизвестный способ выполнения');
   }
-  if (!Array.isArray(execution.actions) || execution.actions.length < 1 || execution.actions.length > 8) {
-    fail(`${path}.execution.actions`, 'routine должна содержать от одного до восьми действий');
+  if (!Array.isArray(execution.actions) || execution.actions.length < 1 || execution.actions.length > 10) {
+    fail(`${path}.execution.actions`, 'routine должна содержать от одного до десяти действий');
   }
 
   let knownDurationSeconds = 0;
+  let calculatedActionCount = 0;
   execution.actions.forEach((action, actionIndex) => {
     const actionPath = `${path}.execution.actions.${actionIndex}`;
     if (!action || typeof action !== 'object') fail(actionPath, 'действие должно быть объектом');
     assertString(action.title, `${actionPath}.title`, 2, 100);
-    assertString(action.instruction, `${actionPath}.instruction`, 8, 300);
-    assertString(action.successCriterion, `${actionPath}.successCriterion`, 5, 240);
+    assertString(action.instruction, `${actionPath}.instruction`, 8, 360);
+    assertString(action.successCriterion, `${actionPath}.successCriterion`, 5, 260);
     if (isInsufficientlySpecific(action.instruction)) {
       fail(`${actionPath}.instruction`, 'инструкция подменена общей фразой');
     }
     assertInteger(action.sets, `${actionPath}.sets`, 1, 20);
-    assertInteger(action.quantity, `${actionPath}.quantity`, 1, 10000);
+    assertFiniteNumber(action.quantity, `${actionPath}.quantity`, 0.01, 1_000_000);
+    assertInteger(action.workSecondsPerSet, `${actionPath}.workSecondsPerSet`, 1, 7200);
     if (!ROUTINE_UNITS.has(action.unit)) fail(`${actionPath}.unit`, 'неизвестная единица объёма');
+    if (DISCRETE_ROUTINE_UNITS.has(action.unit) && !Number.isInteger(action.quantity)) {
+      fail(`${actionPath}.quantity`, `для единицы ${action.unit} ожидается целое число`);
+    }
     assertInteger(action.restSeconds, `${actionPath}.restSeconds`, 0, 1800);
     if (action.tempo !== null) assertString(action.tempo, `${actionPath}.tempo`, 2, 100);
+    if (action.loadBasis !== null) {
+      validateLoadBasis(action, trustedBaseline, actionPath);
+      calculatedActionCount += 1;
+    }
     if (action.unit === 'custom') {
       assertString(action.unitLabel, `${actionPath}.unitLabel`, 1, 40);
     } else if (action.unitLabel !== null) {
       fail(`${actionPath}.unitLabel`, 'unitLabel допустим только для custom');
     }
+    if (
+      action.unit === 'seconds' &&
+      action.workSecondsPerSet !== Math.max(1, Math.round(action.quantity))
+    ) {
+      fail(`${actionPath}.workSecondsPerSet`, 'для seconds время подхода должно совпадать с quantity');
+    }
+    if (
+      action.unit === 'minutes' &&
+      action.workSecondsPerSet !== Math.max(1, Math.round(action.quantity * 60))
+    ) {
+      fail(`${actionPath}.workSecondsPerSet`, 'для minutes время подхода должно совпадать с quantity');
+    }
 
-    const workSeconds =
-      action.unit === 'seconds'
-        ? action.quantity
-        : action.unit === 'minutes'
-          ? action.quantity * 60
-          : 0;
     const restPeriods = Math.max(0, action.sets - 1) +
       (actionIndex < execution.actions.length - 1 ? 1 : 0);
-    knownDurationSeconds += action.sets * workSeconds + restPeriods * action.restSeconds;
+    knownDurationSeconds +=
+      action.sets * action.workSecondsPerSet + restPeriods * action.restSeconds;
   });
 
-  if (knownDurationSeconds > dailyMinutes * 60) {
-    fail(`${path}.execution.actions`, 'известная длительность routine превышает дневной лимит');
+  if (knownDurationSeconds > day.estimatedMinutes * 60) {
+    fail(`${path}.execution.actions`, 'известная длительность routine превышает заявленную длительность дня');
+  }
+  return calculatedActionCount;
+}
+
+function validateLoadBasis(action, trustedBaseline, path) {
+  const basis = action.loadBasis;
+  if (!basis || typeof basis !== 'object' || Array.isArray(basis)) {
+    fail(`${path}.loadBasis`, 'расчёт нагрузки должен быть объектом');
+  }
+  assertFiniteNumber(basis.percentage, `${path}.loadBasis.percentage`, 0.01, 1000);
+  assertFiniteNumber(basis.baseValue, `${path}.loadBasis.baseValue`, 0, 1_000_000_000);
+  assertString(basis.baseUnit, `${path}.loadBasis.baseUnit`, 1, 40);
+  assertFiniteNumber(basis.result, `${path}.loadBasis.result`, 0, 1_000_000);
+
+  if (!trustedBaseline) {
+    fail(`${path}.loadBasis`, 'процент нельзя считать без локально распознанной исходной величины');
+  }
+  if (!nearlyEqual(basis.baseValue, trustedBaseline.value)) {
+    fail(
+      `${path}.loadBasis.baseValue`,
+      `ожидается локально распознанное значение ${trustedBaseline.value}`,
+    );
+  }
+  if (canonicalRoutineUnit(basis.baseUnit) !== trustedBaseline.unit) {
+    fail(
+      `${path}.loadBasis.baseUnit`,
+      `ожидается локально распознанная единица ${trustedBaseline.unit}`,
+    );
+  }
+  if (canonicalRoutineUnit(action.unit) !== trustedBaseline.unit) {
+    fail(`${path}.unit`, `процент от baseline нельзя записать в единице ${action.unit}`);
+  }
+
+  const expectedResult = trustedBaseline.value * basis.percentage / 100;
+  const exactOrRounded =
+    nearlyEqual(basis.result, expectedResult) ||
+    (Number.isInteger(basis.result) && nearlyEqual(basis.result, Math.round(expectedResult)));
+  if (!exactOrRounded) {
+    fail(
+      `${path}.loadBasis.result`,
+      `result ${basis.result} не соответствует ${basis.percentage}% от baseline ${trustedBaseline.value}`,
+    );
+  }
+  if (!nearlyEqual(action.quantity, basis.result)) {
+    fail(`${path}.quantity`, `quantity ${action.quantity} не совпадает с loadBasis.result ${basis.result}`);
   }
 }
 
-function knownRoutineDuration(actions) {
-  return actions.reduce((total, action, actionIndex) => {
-    if (!action || !Number.isInteger(action.sets)) return total;
-    const workSeconds =
-      action.unit === 'seconds'
-        ? action.quantity
-        : action.unit === 'minutes'
-          ? action.quantity * 60
-          : 0;
-    const restPeriods = Math.max(0, action.sets - 1) +
-      (actionIndex < actions.length - 1 ? 1 : 0);
-    return total + action.sets * workSeconds + restPeriods * (action.restSeconds || 0);
-  }, 0);
+function canonicalRoutineUnit(value) {
+  if (typeof value !== 'string') return undefined;
+  return ROUTINE_UNIT_ALIASES.get(value.trim().toLocaleLowerCase('ru-RU'));
 }
 
-function routineUnitLabel(action) {
-  if (action.unit === 'custom') return action.unitLabel || 'единицу';
-  return {
-    reps: 'повтор',
-    seconds: 'секунду',
-    minutes: 'минуту',
-    pages: 'страницу',
-    items: 'элемент',
-    words: 'слово',
-    meters: 'метр',
-    attempts: 'попытку',
-  }[action.unit] || 'единицу';
+function nearlyEqual(left, right) {
+  return Number.isFinite(left) && Number.isFinite(right) && Math.abs(left - right) <= 0.01;
 }
 
 function isVagueOnly(value) {
@@ -343,6 +437,12 @@ function assertStringArray(value, path, minimum, maximum, minLength, maxLength) 
 function assertInteger(value, path, minimum, maximum) {
   if (!Number.isInteger(value) || value < minimum || value > maximum) {
     fail(path, `ожидается целое число от ${minimum} до ${maximum}`);
+  }
+}
+
+function assertFiniteNumber(value, path, minimum, maximum) {
+  if (!Number.isFinite(value) || value < minimum || value > maximum) {
+    fail(path, `ожидается число от ${minimum} до ${maximum}`);
   }
 }
 

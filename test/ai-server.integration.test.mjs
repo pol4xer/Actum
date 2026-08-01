@@ -14,11 +14,58 @@ const testStateFile = join(testStateDirectory, 'ai-state.json');
 process.env.ACTUM_AI_STATE_FILE = testStateFile;
 after(() => rmSync(testStateDirectory, { recursive: true, force: true }));
 
-const [{ handleRequest: initialHandleRequest }, { createOpenAIResponse, extractOutputText }] = await Promise.all([
+const [serverModule, { createOpenAIResponse, extractOutputText, responseMeta }] = await Promise.all([
   import('../scripts/ai-server.mjs'),
   import('../scripts/ai/providers/openai-responses.mjs'),
 ]);
+const {
+  AI_PIPELINE_CACHE_IDENTITY,
+  createPlanCacheKey,
+  createResearchCacheKey,
+  handleRequest: initialHandleRequest,
+  providerStageKey,
+} = serverModule;
 let gatewayHandler = initialHandleRequest;
+
+test('research prompt changes invalidate research and planning stage keys', () => {
+  const webInput = goalInput('Invalidate the complete pipeline');
+  const quickInput = goalInput('Keep quick planning stable', 'quick');
+  const changedIdentity = {
+    ...AI_PIPELINE_CACHE_IDENTITY,
+    researchPromptVersion: `${AI_PIPELINE_CACHE_IDENTITY.researchPromptVersion}-next`,
+    researchModel: `${AI_PIPELINE_CACHE_IDENTITY.researchModel}-next`,
+  };
+
+  const originalResearchKey = createResearchCacheKey(webInput);
+  const changedResearchKey = createResearchCacheKey(webInput, changedIdentity);
+  const originalPlanKey = createPlanCacheKey(webInput);
+  const changedPlanKey = createPlanCacheKey(webInput, changedIdentity);
+
+  assert.notEqual(changedResearchKey, originalResearchKey);
+  assert.notEqual(changedPlanKey, originalPlanKey);
+  assert.notEqual(
+    providerStageKey(changedPlanKey, 'planning'),
+    providerStageKey(originalPlanKey, 'planning'),
+  );
+  assert.equal(createPlanCacheKey(quickInput), createPlanCacheKey(quickInput, changedIdentity));
+});
+
+test('web research metadata counts distinct search queries, not repeated tool calls', () => {
+  const meta = responseMeta({
+    output: [
+      { type: 'web_search_call', action: { type: 'search', query: 'breath hold protocol' } },
+      { type: 'web_search_call', action: { type: 'search', query: ' Breath   Hold Protocol ' } },
+      {
+        type: 'web_search_call',
+        action: { type: 'search', queries: ['apnea progression', 'apnea safety evidence'] },
+      },
+      { type: 'web_search_call', action: { type: 'open_page', url: 'https://example.com' } },
+    ],
+  });
+
+  assert.equal(meta.webSearchCallCount, 4);
+  assert.equal(meta.webSearchCount, 3);
+});
 
 test('AI gateway preserves paid work across failure, restart, cache, and concurrent joins', { timeout: 10_000 }, async (t) => {
   const originalFetch = globalThis.fetch;
@@ -44,6 +91,10 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   globalThis.fetch = async (url, options = {}) => {
     assert.equal(options.headers.Authorization, 'Bearer test-only-openai-key');
     if (options.method === 'GET') {
+      if (String(url).endsWith('/resp_terminal_plan_test')) {
+        apiCalls.push({ kind: 'terminal_poll', url: String(url) });
+        return jsonResponse(terminalPlanFailurePayload());
+      }
       apiCalls.push({ kind: 'planning_poll', url: String(url) });
       resumePollCount += 1;
       if (resumePollCount <= 3) {
@@ -61,13 +112,20 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
     assert.equal(body.background, true);
     const kind = Array.isArray(body.tools) ? 'research' : 'planning';
     if (kind === 'planning') {
-      const missionProperties =
-        body.text.format.schema.properties.chapters.items.properties.missions.items.properties;
-      assert.equal(missionProperties.estimatedMinutes.maximum, 20);
+      const schema = body.text.format.schema;
+      const dayProperties = schema.properties.days.items.properties;
+      assert.equal(schema.properties.days.minItems, 14);
+      assert.equal(schema.properties.days.maxItems, 14);
+      assert.equal(dayProperties.estimatedMinutes.maximum, 20);
       assert.equal(
-        missionProperties.execution.anyOf[1].properties.durationSeconds.maximum,
+        dayProperties.execution.anyOf[1].properties.durationSeconds.maximum,
         1200,
       );
+      for (const routineVariant of dayProperties.execution.anyOf[2].properties.actions.items.anyOf) {
+        assert.equal(routineVariant.properties.workSecondsPerSet.maximum, 1200);
+        assert.equal(routineVariant.properties.restSeconds.maximum, 1200);
+      }
+      assert.equal(body.max_output_tokens, 30_000);
     }
     const input = JSON.parse(body.input);
     apiCalls.push({ kind, input });
@@ -89,8 +147,11 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
     if (input.goal === 'Reject vague completed output') {
       return jsonResponse(vaguePlanPayload());
     }
-    if (input.goal === 'Normalize schedule completed output') {
+    if (input.goal === 'Reject mismatched calendar output') {
       return jsonResponse(scheduleMismatchPlanPayload());
+    }
+    if (input.goal === 'Retain terminal provider outcome') {
+      return jsonResponse(terminalPlanFailurePayload());
     }
     if (input.goal === 'Join one active request') {
       markBlockedPlanningStarted();
@@ -114,6 +175,9 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   assert.equal(health.status, 200);
   assert.equal(health.body.transport, 'background-polling');
   assert.equal(health.body.configured, true);
+  assert.equal(health.body.baselineParserVersion, 'baseline-v1');
+  assert.equal(health.body.validatorVersion, 'plan-validator-v4.1');
+  assert.equal(health.body.researchPromptVersion, 'actum-research-2026-08-01-v1.2');
 
   const firstInput = goalInput('Resume paid background work');
   const first = await postPlan(firstInput, 'actum_test_failure_001');
@@ -139,6 +203,11 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
     ['research', 'planning'],
   );
   assert.equal(apiCalls[1].input.researchBrief, 'Verified research brief for the requested goal.');
+  assert.equal(apiCalls[0].input.userBaseline, 'Current test baseline: 8 repetitions');
+  assert.equal(apiCalls[1].input.userBaseline, 'Current test baseline: 8 repetitions');
+  assert.deepEqual(apiCalls[0].input.trustedBaseline, { value: 8, unit: 'reps' });
+  assert.deepEqual(apiCalls[1].input.trustedBaseline, { value: 8, unit: 'reps' });
+  assert.equal(apiCalls[1].input.targetTimeline, '12 months');
   assert.equal(
     apiCalls.filter((call) => call.kind === 'planning_poll').length,
     4,
@@ -216,7 +285,7 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   const vagueFirst = await postPlan(vagueInput, 'actum_test_vague_016');
   assert.equal(vagueFirst.status, 502);
   assert.equal(vagueFirst.body.code, 'upstream_invalid_plan_contract');
-  assert.match(vagueFirst.body.error, /chapters\.0\.missions\.0\.steps/);
+  assert.match(vagueFirst.body.error, /days\.0\.steps/);
   const vagueSecond = await postPlan(vagueInput, 'actum_test_vague_017');
   assert.equal(vagueSecond.status, 502);
   assert.equal(vagueSecond.body.code, 'upstream_invalid_plan_contract');
@@ -227,21 +296,46 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
     1,
   );
 
-  const scheduleInput = goalInput('Normalize schedule completed output', 'quick');
-  const normalizedSchedule = await postPlan(scheduleInput, 'actum_test_schedule_018');
-  assert.equal(normalizedSchedule.status, 200);
+  const scheduleInput = goalInput('Reject mismatched calendar output', 'quick');
+  const mismatchedSchedule = await postPlan(scheduleInput, 'actum_test_schedule_018');
+  assert.equal(mismatchedSchedule.status, 502);
+  assert.equal(mismatchedSchedule.body.code, 'upstream_invalid_plan_contract');
+  assert.match(mismatchedSchedule.body.error, /days\.0\.dayNumber/);
+  const scheduleRetry = await postPlan(scheduleInput, 'actum_test_schedule_retry_021');
+  assert.equal(scheduleRetry.status, 502);
+  assert.equal(scheduleRetry.body.code, 'upstream_invalid_plan_contract');
   assert.equal(
-    normalizedSchedule.body.plan.chapters
-      .flatMap((chapter) => chapter.missions)
-      .reduce((sum, mission) => sum + mission.repeatCount, 0),
-    14,
+    apiCalls.filter(
+      (call) =>
+        call.kind === 'planning' && call.input.goal === 'Reject mismatched calendar output',
+    ).length,
+    1,
   );
-  const normalizedAction =
-    normalizedSchedule.body.plan.chapters[0].missions[0].execution.actions[0];
-  assert.ok(
-    normalizedAction.sets * normalizedAction.quantity +
-      (normalizedAction.sets - 1) * normalizedAction.restSeconds <=
-      1200,
+
+  const terminalInput = goalInput('Retain terminal provider outcome', 'quick');
+  const terminalFirst = await postPlan(terminalInput, 'actum_test_terminal_019');
+  assert.equal(terminalFirst.status, 502);
+  assert.equal(terminalFirst.body.code, 'terminal_test_failure');
+  const terminalPostCount = apiCalls.filter(
+    (call) =>
+      call.kind === 'planning' && call.input.goal === 'Retain terminal provider outcome',
+  ).length;
+  gatewayHandler = (
+    await import(`../scripts/ai-server.mjs?restart-after-terminal=${Date.now()}`)
+  ).handleRequest;
+  const terminalSecond = await postPlan(terminalInput, 'actum_test_terminal_retry_020');
+  assert.equal(terminalSecond.status, 502);
+  assert.equal(terminalSecond.body.code, 'terminal_test_failure');
+  assert.equal(
+    apiCalls.filter(
+      (call) =>
+        call.kind === 'planning' && call.input.goal === 'Retain terminal provider outcome',
+    ).length,
+    terminalPostCount,
+  );
+  assert.equal(
+    apiCalls.filter((call) => call.kind === 'terminal_poll').length,
+    1,
   );
 
   const concurrentInput = goalInput('Join one active request');
@@ -324,8 +418,7 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   assert.match(joinedLogs, /retry_guarded=true/);
   assert.match(joinedLogs, /actum_test_invalid_009 stage=planning stage_result_cache_hit/);
   assert.match(joinedLogs, /actum_test_vague_017 stage=planning stage_result_cache_hit/);
-  assert.match(joinedLogs, /contract_path=chapters\.0\.missions\.0\.steps/);
-  assert.match(joinedLogs, /actum_test_schedule_018 plan_normalized duration_missions=1/);
+  assert.match(joinedLogs, /contract_path=days\.0\.steps/);
   assert.match(joinedLogs, /actum_test_cache_003 cache_hit/);
   assert.doesNotMatch(joinedLogs, /actum_test_cache_003 inflight_join/);
   assert.match(joinedLogs, /inflight_join/);
@@ -399,6 +492,8 @@ function goalInput(prompt, researchMode = 'web') {
     dailyMinutes: 20,
     horizonDays: 14,
     currentLevel: 'starting',
+    baseline: 'Current test baseline: 8 repetitions',
+    targetTimeline: '12 months',
     researchMode,
   };
 }
@@ -408,7 +503,18 @@ function researchPayload() {
     id: 'resp_research_test',
     status: 'completed',
     output: [
-      { type: 'web_search_call' },
+      {
+        type: 'web_search_call',
+        action: { type: 'search', query: 'authoritative method evidence' },
+      },
+      {
+        type: 'web_search_call',
+        action: { type: 'search', query: 'concrete practice protocol' },
+      },
+      {
+        type: 'web_search_call',
+        action: { type: 'search', query: 'progression and measurement guidance' },
+      },
       {
         type: 'message',
         content: [
@@ -421,6 +527,13 @@ function researchPayload() {
                 url_citation: {
                   title: 'Verified source',
                   url: 'https://example.com/research',
+                },
+              },
+              {
+                type: 'url_citation',
+                url_citation: {
+                  title: 'Second verified source',
+                  url: 'https://example.org/protocol',
                 },
               },
             ],
@@ -459,10 +572,21 @@ function invalidPlanPayload() {
   };
 }
 
+function terminalPlanFailurePayload() {
+  return {
+    id: 'resp_terminal_plan_test',
+    status: 'failed',
+    error: {
+      code: 'terminal_test_failure',
+      message: 'Terminal provider failure used by the local no-cost integration test.',
+    },
+  };
+}
+
 function vaguePlanPayload() {
   const plan = validPlan();
-  plan.chapters[0].missions[0].steps = ['Подготовься.'];
-  plan.chapters[0].missions[0].execution = {
+  plan.days[0].steps = ['Подготовься.'];
+  plan.days[0].execution = {
     kind: 'manual',
     durationSeconds: null,
     successCriterion: 'Подготовка якобы завершена.',
@@ -481,12 +605,9 @@ function vaguePlanPayload() {
 
 function scheduleMismatchPlanPayload() {
   const plan = validPlan();
-  plan.chapters[0].missions[0].repeatCount += 1;
-  const action = plan.chapters[0].missions[0].execution.actions[0];
-  action.sets = 3;
-  action.quantity = 600;
-  action.unit = 'seconds';
-  action.restSeconds = 60;
+  plan.days.forEach((day) => {
+    day.dayNumber = 14;
+  });
   return {
     id: 'resp_schedule_plan_test',
     status: 'completed',
@@ -500,23 +621,38 @@ function scheduleMismatchPlanPayload() {
 }
 
 function validPlan() {
+  const phases = [
+    { title: 'Chapter 1', subtitle: 'Test phase 1', startDay: 1, endDay: 5 },
+    { title: 'Chapter 2', subtitle: 'Test phase 2', startDay: 6, endDay: 10 },
+    { title: 'Chapter 3', subtitle: 'Test phase 3', startDay: 11, endDay: 14 },
+  ];
   return {
     title: 'Test route',
     domain: 'practice',
-    targetMetric: 'Complete six test missions',
+    targetMetric: 'Complete fourteen explicit calendar days',
+    targetTimeline: '12 months',
     summary: 'A deterministic route used only by the local no-cost integration test.',
+    baseline: {
+      userStatement: 'Current test baseline: 8 repetitions',
+      normalizedMetric: 'Controlled repetitions',
+      value: 8,
+      unit: 'repetitions',
+      calculationRule: 'Keep the baseline fixed at 8 repetitions throughout this test block.',
+    },
     safetyNotes: ['Stop if uncomfortable.'],
     assumptions: ['The user can practice for twenty minutes.'],
     sourceLabels: ['Verified source'],
-    chapters: Array.from({ length: 3 }, (_, chapterIndex) => ({
-      title: `Chapter ${chapterIndex + 1}`,
-      subtitle: `Test phase ${chapterIndex + 1}`,
-      missions: Array.from({ length: 2 }, (_, missionIndex) => ({
-        title: `Mission ${chapterIndex + 1}.${missionIndex + 1}`,
+    phases,
+    days: Array.from({ length: 14 }, (_, index) => {
+      const dayNumber = index + 1;
+      const phaseIndex = dayNumber <= 5 ? 1 : dayNumber <= 10 ? 2 : 3;
+      return {
+        dayNumber,
+        phaseIndex,
+        title: `Day ${dayNumber} controlled practice`,
         description: 'Perform a small, measurable practice step.',
         type: 'practice',
         estimatedMinutes: 10,
-        repeatCount: chapterIndex === 0 ? 3 : 2,
         xp: 20,
         steps: [
           'Place a mat on a flat surface and keep the test counter visible.',
@@ -530,8 +666,15 @@ function validPlan() {
               instruction: 'Complete each repetition with the same range of motion.',
               sets: 3,
               quantity: 8,
+              workSecondsPerSet: 32,
               unit: 'reps',
               unitLabel: null,
+              loadBasis: {
+                percentage: 100,
+                baseValue: 8,
+                baseUnit: 'reps',
+                result: 8,
+              },
               restSeconds: 30,
               tempo: '2 seconds out, 2 seconds back',
               successCriterion: 'All eight repetitions keep the prescribed tempo.',
@@ -542,8 +685,8 @@ function validPlan() {
         progressionRule:
           'If all sets meet the criterion, add 1 repetition next time; otherwise repeat 3 sets of 8.',
         warning: null,
-      })),
-    })),
+      };
+    }),
   };
 }
 

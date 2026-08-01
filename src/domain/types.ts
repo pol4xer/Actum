@@ -25,13 +25,24 @@ export type RoutineUnit =
   | 'attempts'
   | 'custom';
 
+export type RoutineLoadBasis = {
+  percentage: number;
+  baseValue: number;
+  baseUnit: string;
+  result: number;
+};
+
 export type RoutineAction = {
   title: string;
   instruction: string;
   sets: number;
   quantity: number;
+  /** Required by plan-v4; optional only for locally persisted older plans. */
+  workSecondsPerSet?: number;
   unit: RoutineUnit;
   unitLabel?: string;
+  /** String is kept only so locally persisted plan-v3 missions remain readable. */
+  loadBasis?: RoutineLoadBasis | string;
   restSeconds: number;
   tempo?: string;
   successCriterion: string;
@@ -59,6 +70,14 @@ export type CharacterState = {
   debuffs: string[];
 };
 
+export type PlanBaseline = {
+  userStatement: string;
+  normalizedMetric: string;
+  value: number | null;
+  unit: string | null;
+  calculationRule: string;
+};
+
 export type Goal = {
   id: string;
   rawPrompt: string;
@@ -66,6 +85,8 @@ export type Goal = {
   domain: GoalDomain;
   targetDate: string;
   targetMetric: string;
+  baseline?: PlanBaseline;
+  targetTimeline?: string;
   status: 'active' | 'completed' | 'paused';
   createdAt: string;
 };
@@ -94,6 +115,8 @@ export type QuestChapter = {
   title: string;
   subtitle: string;
   order: number;
+  startDay?: number;
+  endDay?: number;
 };
 
 export type Mission = {
@@ -106,6 +129,8 @@ export type Mission = {
   estimatedMinutes: number;
   xp: number;
   outcome: MissionOutcome;
+  dayNumber?: number;
+  scheduledDate?: string;
   repeatIndex?: number;
   repeatTotal?: number;
   steps?: string[];
@@ -122,6 +147,8 @@ export type PlanVersion = {
   dailyMinutes: number;
   horizonDays: number;
   summary: string;
+  baseline?: PlanBaseline;
+  targetTimeline?: string;
   chapters: QuestChapter[];
   missions: Mission[];
   research: ResearchDossier;
@@ -166,6 +193,8 @@ export type AppState = {
 export type GoalInput = {
   prompt: string;
   currentLevel: 'starting' | 'some-experience' | 'returning';
+  baseline: string;
+  targetTimeline: string;
   dailyMinutes: number;
   horizonDays: number;
   researchMode?: 'quick' | 'web';

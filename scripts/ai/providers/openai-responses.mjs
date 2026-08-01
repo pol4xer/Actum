@@ -491,14 +491,42 @@ export function extractWebSources(payload) {
   return sources.slice(0, 8);
 }
 
+export function extractWebSearchQueries(payload) {
+  if (!Array.isArray(payload?.output)) return [];
+
+  const seen = new Set();
+  const queries = [];
+  for (const item of payload.output) {
+    if (item?.type !== 'web_search_call') continue;
+    const candidates = [
+      item?.action?.query,
+      ...(Array.isArray(item?.action?.queries) ? item.action.queries : []),
+      item?.query,
+      ...(Array.isArray(item?.queries) ? item.queries : []),
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string') continue;
+      const query = candidate.trim().replace(/\s+/gu, ' ');
+      if (query.length < 2 || query.length > 1_000) continue;
+      const normalized = query.normalize('NFKC').toLocaleLowerCase('en-US');
+      if (seen.has(normalized)) continue;
+      seen.add(normalized);
+      queries.push(query);
+    }
+  }
+  return queries;
+}
+
 export function responseMeta(payload) {
   const usage = payload?.usage || {};
+  const webSearchQueries = extractWebSearchQueries(payload);
   return {
     providerResponseId: boundedStringOrUndefined(payload?.id, 4, 180),
     inputTokens: nonNegativeIntegerOrUndefined(usage.input_tokens),
     outputTokens: nonNegativeIntegerOrUndefined(usage.output_tokens),
     totalTokens: nonNegativeIntegerOrUndefined(usage.total_tokens),
-    webSearchCount: Array.isArray(payload?.output)
+    webSearchCount: webSearchQueries.length,
+    webSearchCallCount: Array.isArray(payload?.output)
       ? payload.output.filter((item) => item?.type === 'web_search_call').length
       : 0,
   };

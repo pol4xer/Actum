@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import { Mission } from '@/domain/types';
+import { calendarDateRelation, formatCalendarDate } from '@/lib/calendar-date';
 import { useApp } from '@/state/app-context';
 
 export default function HomeScreen() {
@@ -40,6 +41,8 @@ export default function HomeScreen() {
   const planProgress = reported / total;
   const xpInLevel = state.character.xp % 100;
   const firstName = state.profile?.name.split(' ')[0] ?? 'Путник';
+  const missionDate = formatCalendarDate(currentMission?.scheduledDate);
+  const missionTiming = calendarDateRelation(currentMission?.scheduledDate);
   const today = new Intl.DateTimeFormat('ru-RU', {
     weekday: 'long',
     day: 'numeric',
@@ -54,7 +57,11 @@ export default function HomeScreen() {
           title={`С возвращением, ${firstName}`}
           subtitle={
             currentMission
-              ? 'Сегодня нужен один честный шаг.'
+              ? missionTiming === 'future' && missionDate
+                ? `Следующий шаг запланирован на ${missionDate}. При желании его можно открыть заранее.`
+                : missionTiming === 'past' && missionDate
+                  ? `В календаре остался незавершённый шаг на ${missionDate}.`
+                  : 'Сегодня нужен один честный шаг.'
               : 'Маршрут пройден. Время посмотреть на путь.'
           }
           action={
@@ -111,7 +118,17 @@ export default function HomeScreen() {
         {currentMission ? (
           <Card accent style={styles.missionCard}>
             <View style={styles.sectionTop}>
-              <Pill tone="gold">миссия дня · {currentMission.sequence}/{total}</Pill>
+              <Pill tone="gold">
+                {missionTiming === 'future'
+                  ? 'следующий день'
+                  : missionTiming === 'past'
+                    ? 'незавершённый день'
+                    : missionTiming === 'today'
+                      ? 'сегодня'
+                      : 'день'}{' '}
+                · {currentMission.dayNumber ?? currentMission.sequence}/{total}
+                {missionDate ? ` · ${missionDate}` : ''}
+              </Pill>
               <ThemedText type="small" style={styles.muted}>
                 {missionDurationLabel(currentMission)}
               </ThemedText>

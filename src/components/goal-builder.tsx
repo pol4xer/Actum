@@ -17,23 +17,26 @@ import { checkGoalRisk } from '@/domain/goal-engine';
 import { GeneratedGoal, GoalInput, Mission, RoutineUnit } from '@/domain/types';
 import { AIPlannerError, generateGoalWithAI } from '@/lib/ai-planner';
 import type { AIPlannerErrorCode } from '@/lib/ai-planner';
+import { formatCalendarDate } from '@/lib/calendar-date';
 import { useApp } from '@/state/app-context';
 
 type Stage = 'intent' | 'details' | 'generating' | 'review' | 'error';
 
-const MINUTES = [10, 20, 30];
+const MINUTES = [10, 20, 30, 45, 60];
 const HORIZONS = [
   { value: 7, label: '7 дней' },
   { value: 14, label: '2 недели' },
-  { value: 28, label: '4 недели' },
+  { value: 30, label: '30 дней' },
 ];
 
 export function GoalBuilder() {
   const { createGoal } = useApp();
   const [stage, setStage] = useState<Stage>('intent');
   const [prompt, setPrompt] = useState('');
+  const [baseline, setBaseline] = useState('');
+  const [targetTimeline, setTargetTimeline] = useState('');
   const [dailyMinutes, setDailyMinutes] = useState(20);
-  const [horizonDays, setHorizonDays] = useState(14);
+  const [horizonDays, setHorizonDays] = useState(30);
   const [currentLevel, setCurrentLevel] = useState<GoalInput['currentLevel']>('starting');
   const [researchMode, setResearchMode] = useState<NonNullable<GoalInput['researchMode']>>('web');
   const [preview, setPreview] = useState<GeneratedGoal>();
@@ -41,12 +44,22 @@ export function GoalBuilder() {
   const [generationErrorCode, setGenerationErrorCode] = useState<AIPlannerErrorCode>();
   const risk = useMemo(() => checkGoalRisk(prompt), [prompt]);
   const input = useMemo(
-    () => ({ prompt, dailyMinutes, horizonDays, currentLevel, researchMode }),
-    [currentLevel, dailyMinutes, horizonDays, prompt, researchMode],
+    () => ({
+      prompt,
+      baseline,
+      targetTimeline,
+      dailyMinutes,
+      horizonDays,
+      currentLevel,
+      researchMode,
+    }),
+    [baseline, currentLevel, dailyMinutes, horizonDays, prompt, researchMode, targetTimeline],
   );
+  const detailsComplete = baseline.trim().length >= 2 && targetTimeline.trim().length >= 2;
 
   const continueFromIntent = () => setStage('details');
   const generate = async () => {
+    if (!detailsComplete) return;
     setGenerationError('');
     setGenerationErrorCode(undefined);
     setStage('generating');
@@ -150,6 +163,40 @@ export function GoalBuilder() {
 
         {stage === 'details' ? (
           <>
+            <Question title="Текущая измеренная точка · обязательно">
+              <TextInput
+                accessibilityLabel="Текущая измеренная точка"
+                maxLength={500}
+                multiline
+                onChangeText={setBaseline}
+                placeholder="Например: сейчас читаю 8 страниц за 20 минут или удерживаю планку 45 секунд"
+                placeholderTextColor={Palette.textDim}
+                style={[styles.detailInput, styles.baselineInput]}
+                textAlignVertical="top"
+                value={baseline}
+              />
+              <ThemedText type="small" style={styles.muted}>
+                Укажи число и единицу, если они известны. GPT сохранит исходную формулировку и
+                отдельно нормализует метрику.
+              </ThemedText>
+            </Question>
+
+            <Question title="Срок большой цели · обязательно">
+              <TextInput
+                accessibilityLabel="Срок большой цели"
+                maxLength={80}
+                onChangeText={setTargetTimeline}
+                placeholder="Например: 6 месяцев или к 1 июня"
+                placeholderTextColor={Palette.textDim}
+                style={styles.detailInput}
+                value={targetTimeline}
+              />
+              <ThemedText type="small" style={styles.muted}>
+                Подробный календарь покроет первый блок, а этот срок останется направлением всей
+                цели.
+              </ThemedText>
+            </Question>
+
             <Question title="Сколько времени реально есть в день?">
               <ChoiceRow>
                 {MINUTES.map((value) => (
@@ -176,7 +223,7 @@ export function GoalBuilder() {
               </ChoiceRow>
             </Question>
 
-            <Question title="Точка старта">
+            <Question title="Опыт относительно цели">
               <View style={styles.levelList}>
                 <LevelChoice
                   label="Начинаю с нуля"
@@ -234,6 +281,7 @@ export function GoalBuilder() {
               <AppButton label="Назад" variant="ghost" onPress={() => setStage('intent')} />
               <AppButton
                 label={researchMode === 'web' ? 'Исследовать и собрать' : 'Собрать с GPT'}
+                disabled={!detailsComplete}
                 onPress={generate}
                 style={styles.flex}
               />
@@ -291,7 +339,7 @@ export function GoalBuilder() {
                   {risk.safe ? 'план готов' : 'предупреждение показано'}
                 </Pill>
                 <ThemedText type="small" style={styles.muted}>
-                  v1
+                  plan-v4
                 </ThemedText>
               </View>
               <ThemedText type="subtitle">{preview.goal.title}</ThemedText>
@@ -299,22 +347,48 @@ export function GoalBuilder() {
               <View style={styles.planMeta}>
                 <Meta value={`${dailyMinutes} мин`} label="в день" />
                 <Meta value={`${horizonDays}`} label="дней" />
-                <Meta value={`${preview.plan.missions.length}`} label="миссий" />
+                <Meta value={`${preview.plan.missions.length}`} label="дней в плане" />
               </View>
             </Card>
 
+            {preview.plan.baseline ? (
+              <Card style={styles.baselineCard}>
+                <ThemedText type="eyebrow" style={styles.violet}>
+                  Зафиксированная точка старта
+                </ThemedText>
+                <ThemedText type="smallBold">{preview.plan.baseline.userStatement}</ThemedText>
+                <ThemedText type="small" style={styles.baselineMetric}>
+                  {baselineMetricLabel(preview.plan.baseline)}
+                </ThemedText>
+                <ThemedText type="small" style={styles.muted}>
+                  {preview.plan.baseline.calculationRule}
+                </ThemedText>
+                <View style={styles.timelineRow}>
+                  <ThemedText type="eyebrow" style={styles.muted}>
+                    срок большой цели
+                  </ThemedText>
+                  <ThemedText type="smallBold">
+                    {preview.plan.targetTimeline ?? preview.goal.targetTimeline ?? targetTimeline}
+                  </ThemedText>
+                </View>
+              </Card>
+            ) : null}
+
             <View style={styles.section}>
               <ThemedText type="eyebrow" style={styles.muted}>
-                Первые миссии
+                Первые календарные дни
               </ThemedText>
               {preview.plan.missions.slice(0, 3).map((mission, index) => (
                 <View key={mission.id} style={styles.missionPreview}>
                   <View style={styles.sequence}>
                     <ThemedText type="smallBold" style={styles.sequenceText}>
-                      {index + 1}
+                      {mission.dayNumber ?? index + 1}
                     </ThemedText>
                   </View>
                   <View style={styles.missionCopy}>
+                    <ThemedText type="eyebrow" style={styles.missionDate}>
+                      {missionCalendarLabel(mission, index)}
+                    </ThemedText>
                     <ThemedText type="smallBold">{mission.title}</ThemedText>
                     <ThemedText type="small" style={styles.muted}>
                       {missionDurationLabel(mission)} · {mission.xp} XP
@@ -490,11 +564,29 @@ function routineUnitLabel(unit: RoutineUnit, custom?: string) {
   return labels[unit];
 }
 
+function baselineMetricLabel(baseline: NonNullable<GeneratedGoal['plan']['baseline']>) {
+  if (baseline.value == null || baseline.unit == null) {
+    return `${baseline.normalizedMetric} · числовое значение не выделено`;
+  }
+  const value = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 4 }).format(
+    baseline.value,
+  );
+  return `${baseline.normalizedMetric} · ${value} ${baseline.unit}`;
+}
+
+function missionCalendarLabel(mission: Mission, index: number) {
+  const dayNumber = mission.dayNumber ?? index + 1;
+  const dateLabel = formatCalendarDate(mission.scheduledDate, 'long');
+  if (!dateLabel) return `День ${dayNumber}`;
+  return `День ${dayNumber} · ${dateLabel}`;
+}
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   lead: { color: Palette.textMuted, lineHeight: 24 },
   prescriptionPreview: { color: Palette.cyan, lineHeight: 20 },
   muted: { color: Palette.textMuted },
+  violet: { color: Palette.violetSoft },
   gold: { color: Palette.goldBright },
   warning: { color: Palette.warning },
   center: { textAlign: 'center' },
@@ -511,6 +603,19 @@ const styles = StyleSheet.create({
     fontSize: 18,
     lineHeight: 27,
   },
+  detailInput: {
+    minHeight: 54,
+    borderRadius: Radius.medium,
+    borderWidth: 1,
+    borderColor: Palette.line,
+    backgroundColor: Palette.surface,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.twoHalf,
+    color: Palette.text,
+    fontSize: 16,
+    lineHeight: 23,
+  },
+  baselineInput: { minHeight: 112 },
   exampleBlock: { gap: Spacing.two },
   exampleWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   example: {
@@ -569,6 +674,14 @@ const styles = StyleSheet.create({
   },
   errorCard: { gap: Spacing.three, borderColor: '#5B4228' },
   cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  baselineCard: { gap: Spacing.two },
+  baselineMetric: { color: Palette.cyan },
+  timelineRow: {
+    gap: 4,
+    paddingTop: Spacing.two,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Palette.line,
+  },
   planMeta: {
     flexDirection: 'row',
     paddingTop: Spacing.three,
@@ -600,6 +713,7 @@ const styles = StyleSheet.create({
   },
   sequenceText: { color: Palette.goldBright },
   missionCopy: { flex: 1, gap: 2 },
+  missionDate: { color: Palette.violetSoft },
   methodCard: { borderRadius: Radius.medium },
   methodHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   sourceLink: {

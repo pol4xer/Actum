@@ -6,13 +6,17 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { createPlanSchema, PLAN_CONTRACT_VERSION } from './ai/contracts/plan-v1.mjs';
 import {
-  normalizePlanDurations,
-  normalizePlanSchedule,
+  BASELINE_PARSER_VERSION,
+  parseTrustedBaseline,
+} from './ai/contracts/parse-baseline.mjs';
+import {
+  PLAN_VALIDATOR_VERSION,
   validatePlanActionability,
 } from './ai/contracts/validate-plan.mjs';
 import {
   buildPlanInstructions,
   PROMPT_VERSION,
+  RESEARCH_PROMPT_VERSION,
   RESEARCH_INSTRUCTIONS,
 } from './ai/prompts/plan-v1.mjs';
 import {
@@ -29,14 +33,23 @@ const HOST = process.env.ACTUM_AI_HOST || '127.0.0.1';
 const MODEL = process.env.OPENAI_MODEL || 'gpt-5.6';
 const RESEARCH_MODEL = process.env.OPENAI_RESEARCH_MODEL || MODEL;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+export const AI_PIPELINE_CACHE_IDENTITY = Object.freeze({
+  promptVersion: PROMPT_VERSION,
+  researchPromptVersion: RESEARCH_PROMPT_VERSION,
+  contractVersion: PLAN_CONTRACT_VERSION,
+  validatorVersion: PLAN_VALIDATOR_VERSION,
+  baselineParserVersion: BASELINE_PARSER_VERSION,
+  model: MODEL,
+  researchModel: RESEARCH_MODEL,
+});
 const PLAN_CACHE_TTL_MS = 30 * 60_000;
 const RESEARCH_CACHE_TTL_MS = 2 * 60 * 60_000;
 const BACKGROUND_JOB_TTL_MS = 2 * 60 * 60_000;
 const AMBIGUOUS_CREATE_TTL_MS = 2 * 60 * 60_000;
 const STAGE_RESULT_TTL_MS = 2 * 60 * 60_000;
 const MAX_CONCURRENT_PLANS = 2;
-const RESEARCH_TIMEOUT_MS = 9 * 60_000;
-const PLANNING_TIMEOUT_MS = 9 * 60_000;
+const RESEARCH_TIMEOUT_MS = 12 * 60_000;
+const PLANNING_TIMEOUT_MS = 12 * 60_000;
 const STATE_VERSION = 1;
 const STATE_FILE =
   process.env.ACTUM_AI_STATE_FILE ||
@@ -67,7 +80,10 @@ export async function handleRequest(request, response) {
       model: MODEL,
       researchModel: RESEARCH_MODEL,
       promptVersion: PROMPT_VERSION,
+      researchPromptVersion: RESEARCH_PROMPT_VERSION,
       contractVersion: PLAN_CONTRACT_VERSION,
+      validatorVersion: PLAN_VALIDATOR_VERSION,
+      baselineParserVersion: BASELINE_PARSER_VERSION,
       transport: 'background-polling',
       inFlightRequests: inFlightPlans.size,
       cachedPlans: planCache.size,
@@ -112,10 +128,12 @@ export async function handleRequest(request, response) {
   });
 
   let cacheKey;
+  let researchCacheKey;
   try {
     const input = await readJson(request);
     validateInput(input);
     cacheKey = createPlanCacheKey(input);
+    researchCacheKey = createResearchCacheKey(input);
     const cached = readCachedPlan(cacheKey);
     if (cached) {
       console.log(
@@ -139,7 +157,13 @@ export async function handleRequest(request, response) {
         });
         return;
       }
-      const promise = createPlan(input, requestId, startedAt, cacheKey)
+      const promise = createPlan(
+        input,
+        requestId,
+        startedAt,
+        cacheKey,
+        researchCacheKey,
+      )
         .then((result) => {
           cachePlan(cacheKey, result);
           return result;
@@ -158,7 +182,9 @@ export async function handleRequest(request, response) {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Неизвестная ошибка AI-сервера.';
     const providerCode = error instanceof OpenAIRequestError ? error.code : undefined;
-    const researchPreserved = Boolean(cacheKey && readCachedResearch(cacheKey));
+    const researchPreserved = Boolean(
+      researchCacheKey && readCachedResearch(researchCacheKey),
+    );
     const retryGuarded = Boolean(error?.retryGuarded || error?.code === 'ambiguous_create');
     const diagnostics = safeErrorDetails(error);
     console.error(
@@ -205,13 +231,14 @@ if (isDirectRun()) {
     const status = OPENAI_API_KEY ? 'OpenAI key loaded' : 'OPENAI_API_KEY is missing';
     console.log(`Actum AI server: http://${HOST}:${PORT} · ${MODEL} · ${status}`);
     console.log(
-      `[actum-ai] prompt=${PROMPT_VERSION} contract=${PLAN_CONTRACT_VERSION} transport=background-polling durable_state=${statePersistenceHealthy ? 'ready' : 'error'}`,
+      `[actum-ai] prompt=${PROMPT_VERSION} research_prompt=${RESEARCH_PROMPT_VERSION} contract=${PLAN_CONTRACT_VERSION} validator=${PLAN_VALIDATOR_VERSION} baseline_parser=${BASELINE_PARSER_VERSION} transport=background-polling durable_state=${statePersistenceHealthy ? 'ready' : 'error'}`,
     );
   });
 }
 
-async function createPlan(input, requestId, startedAt, cacheKey) {
+async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKey) {
   const researchMode = input.researchMode === 'quick' ? 'quick' : 'web';
+  const trustedBaseline = parseTrustedBaseline(input.baseline);
   let research = {
     brief: '',
     sources: [],
@@ -219,7 +246,7 @@ async function createPlan(input, requestId, startedAt, cacheKey) {
   };
 
   if (researchMode === 'web') {
-    const cachedResearch = readCachedResearch(cacheKey);
+    const cachedResearch = readCachedResearch(researchCacheKey);
     if (cachedResearch) {
       research = cachedResearch;
       console.log(
@@ -227,8 +254,13 @@ async function createPlan(input, requestId, startedAt, cacheKey) {
       );
     } else {
       console.log(`[actum-ai] ${requestId} researching model=${RESEARCH_MODEL}`);
-      research = await requestResearch(input, requestId, providerStageKey(cacheKey, 'research'));
-      cacheResearch(cacheKey, research);
+      research = await requestResearch(
+        input,
+        trustedBaseline,
+        requestId,
+        providerStageKey(researchCacheKey, 'research'),
+      );
+      cacheResearch(researchCacheKey, research);
       console.log(
         `[actum-ai] ${requestId} researched response=${research.meta.providerResponseId || 'unknown'} searches=${research.meta.webSearchCount} sources=${research.sources.length} preserved=true`,
       );
@@ -238,6 +270,7 @@ async function createPlan(input, requestId, startedAt, cacheKey) {
   console.log(`[actum-ai] ${requestId} planning model=${MODEL}`);
   const planResponse = await requestStructuredPlan(
     input,
+    trustedBaseline,
     research,
     requestId,
     providerStageKey(cacheKey, 'planning'),
@@ -265,14 +298,14 @@ async function createPlan(input, requestId, startedAt, cacheKey) {
     );
   }
   try {
-    normalizePlanSchedule(plan, input.horizonDays);
-    const normalizedDurations = normalizePlanDurations(plan, input.dailyMinutes);
-    if (normalizedDurations > 0) {
-      console.warn(
-        `[actum-ai] ${requestId} plan_normalized duration_missions=${normalizedDurations}`,
-      );
-    }
-    validatePlanActionability(plan, input.dailyMinutes, input.horizonDays);
+    validatePlanActionability(
+      plan,
+      input.dailyMinutes,
+      input.horizonDays,
+      input.baseline,
+      input.targetTimeline,
+      trustedBaseline,
+    );
   } catch (cause) {
     throw invalidProviderOutput(
       cause instanceof Error ? cause.message : 'План не прошёл локальную проверку.',
@@ -311,7 +344,7 @@ async function createPlan(input, requestId, startedAt, cacheKey) {
   };
 }
 
-async function requestResearch(input, requestId, stageKey) {
+async function requestResearch(input, trustedBaseline, requestId, stageKey) {
   const payload = await executeProviderStage({
     stageKey,
     stage: 'research',
@@ -326,13 +359,16 @@ async function requestResearch(input, requestId, stageKey) {
       input: JSON.stringify({
         goal: input.prompt.trim(),
         startingPoint: input.currentLevel,
+        userBaseline: input.baseline.trim(),
+        trustedBaseline,
+        targetTimeline: input.targetTimeline.trim(),
         minutesPerMission: input.dailyMinutes,
         horizonDays: input.horizonDays,
       }),
-      tools: [{ type: 'web_search', search_context_size: 'medium' }],
+      tools: [{ type: 'web_search', search_context_size: 'high' }],
       tool_choice: 'required',
-      max_tool_calls: 4,
-      text: { verbosity: 'medium' },
+      max_tool_calls: 6,
+      text: { verbosity: 'high' },
     },
   });
 
@@ -346,14 +382,33 @@ async function requestResearch(input, requestId, stageKey) {
     );
   }
 
+  const sources = extractWebSources(payload);
+  const meta = responseMeta(payload);
+  if ((meta.webSearchCount || 0) < 3) {
+    throw invalidProviderOutput(
+      'Web-research выполнил меньше трёх независимых поисков.',
+      'upstream_insufficient_research_searches',
+      'research',
+      payload,
+    );
+  }
+  if (sources.length < 2) {
+    throw invalidProviderOutput(
+      'Web-research завершился без двух проверяемых URL-источников.',
+      'upstream_missing_research_sources',
+      'research',
+      payload,
+    );
+  }
+
   return {
     brief,
-    sources: extractWebSources(payload),
-    meta: responseMeta(payload),
+    sources,
+    meta,
   };
 }
 
-async function requestStructuredPlan(input, research, requestId, stageKey) {
+async function requestStructuredPlan(input, trustedBaseline, research, requestId, stageKey) {
   return executeProviderStage({
     stageKey,
     stage: 'planning',
@@ -368,18 +423,22 @@ async function requestStructuredPlan(input, research, requestId, stageKey) {
       input: JSON.stringify({
         goal: input.prompt.trim(),
         startingPoint: input.currentLevel,
+        userBaseline: input.baseline.trim(),
+        trustedBaseline,
+        targetTimeline: input.targetTimeline.trim(),
         minutesPerMission: input.dailyMinutes,
         horizonDays: input.horizonDays,
         researchBrief: research.brief || null,
         verifiedSources: research.sources,
       }),
+      max_output_tokens: 30_000,
       text: {
-        verbosity: 'medium',
+        verbosity: 'high',
         format: {
           type: 'json_schema',
           name: 'actum_goal_plan',
           strict: true,
-          schema: createPlanSchema(input.dailyMinutes),
+          schema: createPlanSchema(input.dailyMinutes, input.horizonDays),
         },
       },
     },
@@ -455,9 +514,8 @@ async function executeProviderStage({ stageKey, stage, timeoutMs, requestId, bod
       } else if (error.operation === 'create' && !error.providerResponseId) {
         deletePersistedEntry(ambiguousCreates, stageKey);
       }
-      if (isTerminalProviderFailure(error)) {
-        deletePersistedEntry(backgroundJobs, stageKey);
-      }
+      // Keep a known response ID even for a terminal provider outcome. A retry can
+      // retrieve the same response without creating and billing a second POST.
     }
     throw error;
   }
@@ -468,10 +526,24 @@ function validateInput(input) {
   if (typeof input.prompt !== 'string' || input.prompt.trim().length < 5) {
     throw new Error('Цель слишком короткая.');
   }
-  if (![10, 20, 30].includes(input.dailyMinutes)) throw new Error('Некорректный лимит времени.');
-  if (![7, 14, 28].includes(input.horizonDays)) throw new Error('Некорректный горизонт.');
+  if (![10, 20, 30, 45, 60].includes(input.dailyMinutes)) {
+    throw new Error('Некорректный лимит времени.');
+  }
+  if (![7, 14, 30].includes(input.horizonDays)) throw new Error('Некорректный горизонт.');
   if (!['starting', 'some-experience', 'returning'].includes(input.currentLevel)) {
     throw new Error('Некорректная точка старта.');
+  }
+  if (typeof input.baseline !== 'string' || input.baseline.trim().length < 2) {
+    throw new Error('Опиши текущую измеренную точку старта.');
+  }
+  if (input.baseline.trim().length > 500) {
+    throw new Error('Описание точки старта слишком длинное.');
+  }
+  if (typeof input.targetTimeline !== 'string' || input.targetTimeline.trim().length < 2) {
+    throw new Error('Укажи желаемый срок большой цели.');
+  }
+  if (input.targetTimeline.trim().length > 80) {
+    throw new Error('Описание срока слишком длинное.');
   }
   if (input.researchMode != null && !['quick', 'web'].includes(input.researchMode)) {
     throw new Error('Некорректный режим исследования.');
@@ -526,16 +598,22 @@ function sumNumbers(...values) {
   return numbers.length ? numbers.reduce((sum, value) => sum + value, 0) : undefined;
 }
 
-function createPlanCacheKey(input) {
+export function createPlanCacheKey(input, identity = AI_PIPELINE_CACHE_IDENTITY) {
+  const usesWebResearch = input.researchMode !== 'quick';
   return createHash('sha256')
     .update(
       JSON.stringify({
-        promptVersion: PROMPT_VERSION,
-        contractVersion: PLAN_CONTRACT_VERSION,
-        model: MODEL,
-        researchModel: RESEARCH_MODEL,
+        promptVersion: identity.promptVersion,
+        researchPromptVersion: usesWebResearch ? identity.researchPromptVersion : 'not-used',
+        contractVersion: identity.contractVersion,
+        validatorVersion: identity.validatorVersion,
+        baselineParserVersion: identity.baselineParserVersion,
+        model: identity.model,
+        researchModel: usesWebResearch ? identity.researchModel : 'not-used',
         prompt: input.prompt.trim(),
         currentLevel: input.currentLevel,
+        baseline: input.baseline.trim(),
+        targetTimeline: input.targetTimeline.trim(),
         dailyMinutes: input.dailyMinutes,
         horizonDays: input.horizonDays,
         researchMode: input.researchMode === 'quick' ? 'quick' : 'web',
@@ -544,7 +622,26 @@ function createPlanCacheKey(input) {
     .digest('hex');
 }
 
-function providerStageKey(cacheKey, stage) {
+export function createResearchCacheKey(input, identity = AI_PIPELINE_CACHE_IDENTITY) {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        researchPromptVersion: identity.researchPromptVersion,
+        baselineParserVersion: identity.baselineParserVersion,
+        researchModel: identity.researchModel,
+        prompt: input.prompt.trim(),
+        currentLevel: input.currentLevel,
+        baseline: input.baseline.trim(),
+        targetTimeline: input.targetTimeline.trim(),
+        dailyMinutes: input.dailyMinutes,
+        horizonDays: input.horizonDays,
+        researchMode: input.researchMode === 'quick' ? 'quick' : 'web',
+      }),
+    )
+    .digest('hex');
+}
+
+export function providerStageKey(cacheKey, stage) {
   return `${stage}\u0000${cacheKey}`;
 }
 
@@ -636,17 +733,6 @@ function isAmbiguousCreateFailure(error) {
       'upstream_invalid_json',
       'upstream_invalid_response',
     ].includes(error.code)
-  );
-}
-
-function isTerminalProviderFailure(error) {
-  return (
-    error.terminal === true ||
-    error.status === 404 ||
-    error.code === 'refusal' ||
-    error.code === 'openai_http_404' ||
-    error.code === 'upstream_invalid_response_id' ||
-    /^response_(failed|cancelled|incomplete)$/.test(error.code || '')
   );
 }
 

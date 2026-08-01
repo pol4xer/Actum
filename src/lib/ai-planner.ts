@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { GeneratedGoal, GoalInput, Mission, QuestChapter } from '@/domain/types';
+import { addLocalCalendarDays, toLocalDateKey } from '@/lib/calendar-date';
 
 function contractText(minLength: number, maxLength: number) {
   return z
@@ -41,20 +42,40 @@ const routineUnit = z.enum([
   'attempts',
   'custom',
 ]);
+const discreteRoutineUnits = new Set(['reps', 'pages', 'items', 'words', 'attempts']);
+
+const routineLoadBasisSchema = z
+  .object({
+    percentage: z.number().min(0.01).max(1000),
+    baseValue: z.number().min(0).max(1_000_000_000),
+    baseUnit: contractText(1, 40),
+    result: z.number().min(0).max(1_000_000),
+  })
+  .strict();
 
 const routineActionSchema = z
   .object({
     title: contractText(2, 100),
-    instruction: contractText(8, 300),
+    instruction: contractText(8, 360),
     sets: z.number().int().min(1).max(20),
-    quantity: z.number().int().min(1).max(10000),
+    quantity: z.number().min(0.01).max(1_000_000),
+    workSecondsPerSet: z.number().int().min(1).max(7200),
     unit: routineUnit,
     unitLabel: contractText(1, 40).nullable(),
+    loadBasis: routineLoadBasisSchema.nullable(),
     restSeconds: z.number().int().min(0).max(1800),
     tempo: contractText(2, 100).nullable(),
-    successCriterion: contractText(5, 240),
+    successCriterion: contractText(5, 260),
   })
+  .strict()
   .superRefine((action, context) => {
+    if (discreteRoutineUnits.has(action.unit) && !Number.isInteger(action.quantity)) {
+      context.addIssue({
+        code: 'custom',
+        message: `Discrete unit ${action.unit} requires an integer quantity.`,
+        path: ['quantity'],
+      });
+    }
     if (action.unit === 'custom' && action.unitLabel == null) {
       context.addIssue({
         code: 'custom',
@@ -71,59 +92,88 @@ const routineActionSchema = z
     }
   });
 
-const executionSchema = z.discriminatedUnion('kind', [
-  z.object({
-    kind: z.literal('manual'),
-    durationSeconds: z.null(),
-    successCriterion: contractText(5, 300),
-  }),
-  z.object({
-    kind: z.literal('timer'),
-    durationSeconds: z.number().int().min(1).max(7200),
-    successCriterion: contractText(5, 300),
-  }),
-  z.object({
-    kind: z.literal('routine'),
-    actions: z.array(routineActionSchema).min(1).max(8),
-    successCriterion: contractText(5, 300),
-  }),
-]);
+function createExecutionSchema(maximumTimerSeconds: number) {
+  return z.discriminatedUnion('kind', [
+    z
+      .object({
+        kind: z.literal('manual'),
+        durationSeconds: z.null(),
+        successCriterion: contractText(5, 320),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal('timer'),
+        durationSeconds: z.number().int().min(1).max(maximumTimerSeconds),
+        successCriterion: contractText(5, 320),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal('routine'),
+        actions: z.array(routineActionSchema).min(1).max(10),
+        successCriterion: contractText(5, 320),
+      })
+      .strict(),
+  ]);
+}
 
-const aiPlanSchema = z.object({
-  title: contractText(3, 120),
-  domain: z.enum(['read', 'learn', 'practice', 'organize', 'move', 'habit']),
-  targetMetric: contractText(3, 180),
-  summary: contractText(10, 500),
-  safetyNotes: z.array(contractText(3, 300)).max(4),
-  assumptions: z.array(contractText(3, 300)).min(1).max(5),
-  // Keep this limit aligned with PLAN_SCHEMA in scripts/ai/contracts/plan-v1.mjs.
-  sourceLabels: z.array(contractText(2, 160)).min(1).max(6),
-  chapters: z
-    .array(
-      z.object({
-        title: contractText(2, 100),
-        subtitle: contractText(2, 160),
-        missions: z
-          .array(
-            z.object({
-              title: contractText(2, 120),
-              description: contractText(5, 500),
-              type: missionType,
-              estimatedMinutes: z.number().int().min(1).max(120),
-              repeatCount: z.number().int().min(1).max(28),
-              xp: z.number().int().min(10).max(60),
-              steps: z.array(contractText(2, 260)).min(1).max(6),
-              execution: executionSchema,
-              progressionRule: contractText(8, 360),
-              warning: contractText(3, 300).nullable(),
-            }),
-          )
-          .min(2)
-          .max(3),
-      }),
-    )
-    .length(3),
-});
+function createAIPlanSchema(dailyMinutes: number, horizonDays: number) {
+  const maximumMinutes = Math.max(1, Math.min(120, Math.round(dailyMinutes)));
+  const calendarDays = Math.max(1, Math.min(30, Math.round(horizonDays)));
+  const daySchema = z
+    .object({
+      dayNumber: z.number().int().min(1).max(calendarDays),
+      phaseIndex: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+      title: contractText(2, 120),
+      description: contractText(5, 560),
+      type: missionType,
+      estimatedMinutes: z.number().int().min(1).max(maximumMinutes),
+      xp: z.number().int().min(5).max(60),
+      steps: z.array(contractText(2, 300)).min(1).max(8),
+      execution: createExecutionSchema(maximumMinutes * 60),
+      progressionRule: contractText(8, 420),
+      warning: contractText(3, 300).nullable(),
+    })
+    .strict();
+
+  return z
+    .object({
+      title: contractText(3, 120),
+      domain: z.enum(['read', 'learn', 'practice', 'organize', 'move', 'habit']),
+      targetMetric: contractText(3, 220),
+      targetTimeline: contractText(2, 80),
+      summary: contractText(10, 600),
+      baseline: z
+        .object({
+          userStatement: contractText(2, 500),
+          normalizedMetric: contractText(2, 180),
+          value: z.number().min(0).nullable(),
+          unit: contractText(1, 40).nullable(),
+          calculationRule: contractText(8, 360),
+        })
+        .strict(),
+      safetyNotes: z.array(contractText(3, 300)).max(4),
+      assumptions: z.array(contractText(3, 300)).min(1).max(6),
+      sourceLabels: z.array(contractText(2, 180)).min(1).max(8),
+      phases: z
+        .array(
+          z
+            .object({
+              title: contractText(2, 100),
+              subtitle: contractText(2, 180),
+              startDay: z.number().int().min(1).max(calendarDays),
+              endDay: z.number().int().min(1).max(calendarDays),
+            })
+            .strict(),
+        )
+        .length(3),
+      days: z.array(daySchema).length(calendarDays),
+    })
+    .strict();
+}
+
+type AIPlanDraft = z.infer<ReturnType<typeof createAIPlanSchema>>;
 
 const serverMetaSchema = z.object({
   requestId: z.string().min(4).max(120),
@@ -131,7 +181,7 @@ const serverMetaSchema = z.object({
   researchResponseId: z.string().min(4).max(180).optional(),
   model: z.string().min(2).max(100),
   promptVersion: z.string().min(2).max(120),
-  contractVersion: z.string().min(2).max(120),
+  contractVersion: z.literal('plan-v4'),
   durationMs: z.number().int().nonnegative(),
   webSearchCount: z.number().int().nonnegative(),
   inputTokens: z.number().int().nonnegative().optional(),
@@ -144,9 +194,16 @@ const serverMetaSchema = z.object({
       }),
     )
     .max(8),
-});
+}).strict();
 
-const serverResponseSchema = z.object({ plan: aiPlanSchema, meta: serverMetaSchema });
+function createServerResponseSchema(input: GoalInput) {
+  return z
+    .object({
+      plan: createAIPlanSchema(input.dailyMinutes, input.horizonDays),
+      meta: serverMetaSchema,
+    })
+    .strict();
+}
 
 const DEFAULT_AI_URL = 'http://127.0.0.1:8787';
 const QUICK_CLIENT_TIMEOUT_MS = 14 * 60_000;
@@ -217,7 +274,7 @@ export async function generateGoalWithAI(input: GoalInput): Promise<GeneratedGoa
       );
     }
 
-    const parsed = serverResponseSchema.safeParse(raw);
+    const parsed = createServerResponseSchema(input).safeParse(raw);
     if (!parsed.success) {
       const firstIssue = parsed.error.issues[0];
       const issuePath = firstIssue?.path.length ? firstIssue.path.join('.') : 'response';
@@ -263,7 +320,10 @@ function mapServerErrorCode(raw: unknown, status: number): AIPlannerErrorCode {
   if (
     code === 'upstream_invalid_plan_contract' ||
     code === 'upstream_invalid_plan_json' ||
-    code === 'upstream_missing_plan'
+    code === 'upstream_missing_plan' ||
+    code === 'upstream_missing_research_brief' ||
+    code === 'upstream_insufficient_research_searches' ||
+    code === 'upstream_missing_research_sources'
   ) {
     return 'INVALID_RESPONSE';
   }
@@ -299,60 +359,60 @@ function readResponseRequestId(raw: unknown) {
 
 function toGeneratedGoal(
   input: GoalInput,
-  planDraft: z.infer<typeof aiPlanSchema>,
+  planDraft: AIPlanDraft,
   meta: z.infer<typeof serverMetaSchema>,
 ): GeneratedGoal {
   const now = new Date();
   const id = createIdFactory();
-  const chapterIds = planDraft.chapters.map(() => id('chapter'));
-  const chapters: QuestChapter[] = planDraft.chapters.map((chapter, index) => ({
+  const chapterIds = planDraft.phases.map(() => id('chapter'));
+  const chapters: QuestChapter[] = planDraft.phases.map((phase, index) => ({
     id: chapterIds[index],
-    title: chapter.title,
-    subtitle: chapter.subtitle,
+    title: phase.title,
+    subtitle: phase.subtitle,
     order: index + 1,
+    startDay: phase.startDay,
+    endDay: phase.endDay,
   }));
-  let missionSequence = 0;
-  const missions: Mission[] = planDraft.chapters.flatMap((chapter, chapterIndex) =>
-    chapter.missions.flatMap((mission) =>
-      Array.from({ length: mission.repeatCount }, (_, repeatIndex) => ({
-        id: id('mission'),
-        chapterId: chapterIds[chapterIndex],
-        sequence: ++missionSequence,
-        title: mission.title,
-        description: mission.description,
-        type: mission.type,
-        estimatedMinutes: mission.estimatedMinutes,
-        xp: mission.xp,
-        outcome: 'pending' as const,
-        repeatIndex: repeatIndex + 1,
-        repeatTotal: mission.repeatCount,
-        steps: mission.steps,
-        execution:
-          mission.execution.kind === 'timer'
-            ? { kind: 'timer' as const, durationSeconds: mission.execution.durationSeconds }
-            : mission.execution.kind === 'routine'
-              ? {
-                  kind: 'routine' as const,
-                  actions: mission.execution.actions.map((action) => ({
-                    title: action.title,
-                    instruction: action.instruction,
-                    sets: action.sets,
-                    quantity: action.quantity,
-                    unit: action.unit,
-                    unitLabel: action.unitLabel ?? undefined,
-                    restSeconds: action.restSeconds,
-                    tempo: action.tempo ?? undefined,
-                    successCriterion: action.successCriterion,
-                  })),
-                }
-              : { kind: 'manual' as const },
-        completionCriterion: mission.execution.successCriterion,
-        progressionRule: mission.progressionRule,
-        warning: mission.warning ?? undefined,
-      })),
-    ),
-  );
-  const targetDate = new Date(now.getTime() + input.horizonDays * 86_400_000);
+  const missions: Mission[] = planDraft.days.map((day) => ({
+    id: id('mission'),
+    chapterId: chapterIds[day.phaseIndex - 1],
+    sequence: day.dayNumber,
+    dayNumber: day.dayNumber,
+    scheduledDate: toLocalDateKey(addLocalCalendarDays(now, day.dayNumber - 1)),
+    title: day.title,
+    description: day.description,
+    type: day.type,
+    estimatedMinutes: day.estimatedMinutes,
+    xp: day.xp,
+    outcome: 'pending' as const,
+    steps: day.steps,
+    execution:
+      day.execution.kind === 'timer'
+        ? { kind: 'timer' as const, durationSeconds: day.execution.durationSeconds }
+        : day.execution.kind === 'routine'
+          ? {
+              kind: 'routine' as const,
+              actions: day.execution.actions.map((action) => ({
+                title: action.title,
+                instruction: action.instruction,
+                sets: action.sets,
+                quantity: action.quantity,
+                workSecondsPerSet: action.workSecondsPerSet,
+                unit: action.unit,
+                unitLabel: action.unitLabel ?? undefined,
+                loadBasis: action.loadBasis ?? undefined,
+                restSeconds: action.restSeconds,
+                tempo: action.tempo ?? undefined,
+                successCriterion: action.successCriterion,
+              })),
+            }
+          : { kind: 'manual' as const },
+    completionCriterion: day.execution.successCriterion,
+    progressionRule: day.progressionRule,
+    warning: day.warning ?? undefined,
+  }));
+  const targetDate = addLocalCalendarDays(now, input.horizonDays - 1);
+  const targetTimeline = planDraft.targetTimeline;
 
   const goalId = id('goal');
   return {
@@ -363,6 +423,8 @@ function toGeneratedGoal(
       domain: planDraft.domain,
       targetDate: targetDate.toISOString(),
       targetMetric: planDraft.targetMetric,
+      baseline: planDraft.baseline,
+      targetTimeline,
       status: 'active',
       createdAt: now.toISOString(),
     },
@@ -373,6 +435,8 @@ function toGeneratedGoal(
       dailyMinutes: input.dailyMinutes,
       horizonDays: input.horizonDays,
       summary: planDraft.summary,
+      baseline: planDraft.baseline,
+      targetTimeline,
       chapters,
       missions,
       research: {

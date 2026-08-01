@@ -5,7 +5,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { AppButton, Pill, ProgressBar } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
-import type { Mission, RoutineAction } from '@/domain/types';
+import type { Mission, RoutineAction, RoutineLoadBasis } from '@/domain/types';
+import { formatCalendarDate } from '@/lib/calendar-date';
 
 type RunnerPhase = 'instructions' | 'running' | 'finished';
 type FinishReason = 'completed' | 'elapsed' | 'stopped';
@@ -14,11 +15,13 @@ type RoutineStage = 'work' | 'rest';
 export function MissionRunner({
   mission,
   visible,
+  readOnly = false,
   onClose,
   onCheckIn,
 }: {
   mission?: Mission;
   visible: boolean;
+  readOnly?: boolean;
   onClose(): void;
   onCheckIn(): void;
 }) {
@@ -222,12 +225,14 @@ export function MissionRunner({
     : steps[Math.min(stepIndex, steps.length - 1)];
   const hasStageCountdown = Boolean(endAt) && (isLegacyTimed || isRoutine);
   const shownSeconds = Math.ceil((hasStageCountdown ? remainingMs : elapsedMs) / 1000);
-  const repeatRemaining = Math.max(
-    0,
-    (mission.repeatTotal ?? 1) - (mission.repeatIndex ?? 1),
-  );
+  const legacyRepeatRemaining =
+    typeof mission.repeatTotal === 'number'
+      ? Math.max(0, mission.repeatTotal - (mission.repeatIndex ?? 1))
+      : undefined;
+  const scheduledDate = formatCalendarDate(mission.scheduledDate);
 
   const start = () => {
+    if (readOnly) return;
     const startTime = Date.now();
     setStartedAt(startTime);
     setNow(startTime);
@@ -282,22 +287,25 @@ export function MissionRunner({
         <View style={styles.handle} />
         <View style={styles.header}>
           <View style={styles.headerCopy}>
-            <Pill tone={phase === 'running' ? 'success' : 'gold'}>
-              {phase === 'instructions'
-                ? 'подготовка'
-                : phase === 'running'
-                  ? 'миссия идёт'
-                  : 'выполнение завершено'}
+            <Pill tone={phase === 'running' ? 'success' : readOnly ? 'violet' : 'gold'}>
+              {readOnly
+                ? 'просмотр плана'
+                : phase === 'instructions'
+                  ? 'подготовка'
+                  : phase === 'running'
+                    ? 'миссия идёт'
+                    : 'выполнение завершено'}
             </Pill>
             <ThemedText type="small" style={styles.muted}>
-              Миссия {mission.sequence}
-              {mission.repeatTotal && mission.repeatTotal > 1
+              День {mission.dayNumber ?? mission.sequence}
+              {scheduledDate ? ` · ${scheduledDate}` : ''}
+              {typeof mission.repeatTotal === 'number' && mission.repeatTotal > 1
                 ? ` · повтор ${mission.repeatIndex ?? 1}/${mission.repeatTotal}`
                 : ''}
             </ThemedText>
           </View>
           <Pressable
-            accessibilityLabel="Закрыть миссию"
+            accessibilityLabel={readOnly ? 'Закрыть просмотр дня' : 'Закрыть миссию'}
             accessibilityRole="button"
             onPress={onClose}
             style={({ pressed }) => [styles.close, pressed && styles.pressed]}>
@@ -330,11 +338,13 @@ export function MissionRunner({
                         : 'Выполнение в своём темпе'}
                   </ThemedText>
                   <ThemedText type="small" style={styles.muted}>
-                    {isLegacyTimed
-                      ? 'Отсчёт начнётся только после нажатия кнопки.'
-                      : isRoutine
-                        ? 'Приложение проведёт по каждому подходу, включит рабочие таймеры и отдых.'
-                        : 'Во время миссии будет виден прошедший срок и текущий шаг.'}
+                    {readOnly
+                      ? 'Ниже показана полная схема дня. Запуск и check-in остаются у текущего дня.'
+                      : isLegacyTimed
+                        ? 'Отсчёт начнётся только после нажатия кнопки.'
+                        : isRoutine
+                          ? 'Приложение проведёт по каждому подходу, включит рабочие таймеры и отдых.'
+                          : 'Во время миссии будет виден прошедший срок и текущий шаг.'}
                   </ThemedText>
                 </View>
               </View>
@@ -346,25 +356,37 @@ export function MissionRunner({
               <MissionOutcomeDetails
                 completionCriterion={mission.completionCriterion}
                 progressionRule={mission.progressionRule}
-                repeatRemaining={repeatRemaining}
+                legacyRepeatRemaining={legacyRepeatRemaining}
               />
               {mission.warning ? <MissionWarning warning={mission.warning} /> : null}
 
               <View style={styles.footerActions}>
-                <AppButton
-                  label={
-                    isLegacyTimed
-                      ? `Запустить ${formatDuration(timerSeconds)}`
-                      : isRoutine
-                        ? 'Начать первый подход'
-                        : 'Начать выполнение'
-                  }
-                  icon="→"
-                  onPress={start}
-                />
-                <ThemedText type="small" style={[styles.muted, styles.center]}>
-                  Результат не запишется автоматически — после выполнения ты сам его оценишь.
-                </ThemedText>
+                {readOnly ? (
+                  <>
+                    <AppButton label="Закрыть просмотр" variant="secondary" onPress={onClose} />
+                    <ThemedText type="small" style={[styles.muted, styles.center]}>
+                      Это другой день календаря. Здесь можно проверить точную нагрузку, но check-in
+                      остаётся у текущего дня.
+                    </ThemedText>
+                  </>
+                ) : (
+                  <>
+                    <AppButton
+                      label={
+                        isLegacyTimed
+                          ? `Запустить ${formatDuration(timerSeconds)}`
+                          : isRoutine
+                            ? 'Начать первый подход'
+                            : 'Начать выполнение'
+                      }
+                      icon="→"
+                      onPress={start}
+                    />
+                    <ThemedText type="small" style={[styles.muted, styles.center]}>
+                      Результат не запишется автоматически — после выполнения ты сам его оценишь.
+                    </ThemedText>
+                  </>
+                )}
               </View>
             </>
           ) : null}
@@ -538,11 +560,15 @@ export function MissionRunner({
               <MissionOutcomeDetails
                 completionCriterion={mission.completionCriterion}
                 progressionRule={mission.progressionRule}
-                repeatRemaining={repeatRemaining}
+                legacyRepeatRemaining={legacyRepeatRemaining}
               />
 
               <View style={styles.footerActions}>
-                <AppButton label="Перейти к check-in" icon="→" onPress={onCheckIn} />
+                {readOnly ? (
+                  <AppButton label="Закрыть просмотр" variant="secondary" onPress={onClose} />
+                ) : (
+                  <AppButton label="Перейти к check-in" icon="→" onPress={onCheckIn} />
+                )}
                 <AppButton label="Повторить миссию" variant="ghost" onPress={restart} />
               </View>
             </>
@@ -580,6 +606,12 @@ function RoutinePlan({ actions }: { actions: RoutineAction[] }) {
                 label="объём"
                 value={`${formatCount(action.sets, ['подход', 'подхода', 'подходов'])} × ${formatRoutineQuantity(action)}`}
               />
+              {action.workSecondsPerSet ? (
+                <PrescriptionValue
+                  label="время подхода"
+                  value={`≈ ${formatDuration(action.workSecondsPerSet)}`}
+                />
+              ) : null}
               <PrescriptionValue
                 label="отдых"
                 value={
@@ -589,6 +621,12 @@ function RoutinePlan({ actions }: { actions: RoutineAction[] }) {
                 }
               />
               {action.tempo ? <PrescriptionValue label="темп" value={action.tempo} /> : null}
+              {action.loadBasis ? (
+                <PrescriptionValue
+                  label="расчёт нагрузки"
+                  value={formatLoadBasis(action.loadBasis)}
+                />
+              ) : null}
             </View>
 
             <View style={styles.actionCriterion}>
@@ -625,6 +663,7 @@ function ActiveRoutineAction({
         <ThemedText style={styles.muted}>
           Подход {setIndex + 1} из {action.sets} · {formatRoutineQuantity(action)}
         </ThemedText>
+        {action.loadBasis ? <LoadBasis value={action.loadBasis} /> : null}
       </View>
     );
   }
@@ -645,6 +684,12 @@ function ActiveRoutineAction({
             Темп: {action.tempo}
           </ThemedText>
         ) : null}
+        {action.workSecondsPerSet && !getRoutineActionSeconds(action) ? (
+          <ThemedText type="small" style={styles.muted}>
+            Расчётное время подхода: ≈ {formatDuration(action.workSecondsPerSet)}
+          </ThemedText>
+        ) : null}
+        {action.loadBasis ? <LoadBasis value={action.loadBasis} /> : null}
       </View>
       <View style={styles.actionCriterion}>
         <ThemedText type="eyebrow" style={styles.successLabel}>
@@ -667,16 +712,27 @@ function PrescriptionValue({ label, value }: { label: string; value: string }) {
   );
 }
 
+function LoadBasis({ value }: { value: RoutineLoadBasis | string }) {
+  return (
+    <View style={styles.loadBasis}>
+      <ThemedText type="eyebrow" style={styles.muted}>
+        расчёт нагрузки
+      </ThemedText>
+      <ThemedText type="small">{formatLoadBasis(value)}</ThemedText>
+    </View>
+  );
+}
+
 function MissionOutcomeDetails({
   completionCriterion,
   progressionRule,
-  repeatRemaining = 0,
+  legacyRepeatRemaining,
 }: {
   completionCriterion?: string;
   progressionRule?: string;
-  repeatRemaining?: number;
+  legacyRepeatRemaining?: number;
 }) {
-  if (!completionCriterion && !progressionRule && repeatRemaining < 1) return null;
+  if (!completionCriterion && !progressionRule && !legacyRepeatRemaining) return null;
 
   return (
     <View style={styles.outcomeCard}>
@@ -688,26 +744,26 @@ function MissionOutcomeDetails({
           <ThemedText>{completionCriterion}</ThemedText>
         </View>
       ) : null}
-      {repeatRemaining > 0 ? (
+      {legacyRepeatRemaining !== undefined && legacyRepeatRemaining > 0 ? (
         <View style={styles.outcomeSection}>
           <ThemedText type="eyebrow" style={styles.cyan}>
             сначала закрепи эту дозировку
           </ThemedText>
           <ThemedText>
             После check-in впереди ещё{' '}
-            {formatCount(repeatRemaining, ['такая же сессия', 'такие же сессии', 'таких же сессий'])}.
+            {formatCount(legacyRepeatRemaining, ['такая же сессия', 'такие же сессии', 'таких же сессий'])}.
             Числа останутся прежними.
           </ThemedText>
         </View>
       ) : progressionRule ? (
         <View style={styles.outcomeSection}>
           <ThemedText type="eyebrow" style={styles.cyan}>
-            как корректировать следующую попытку
+            правило корректировки календарной нагрузки
           </ThemedText>
           <ThemedText>{progressionRule}</ThemedText>
           <ThemedText type="small" style={styles.muted}>
-            В этом MVP правило не меняет дозировку автоматически. Если критерий не выполнен,
-            повтори миссию до check-in или следуй указанной ветке вручную.
+            Используй это правило как ориентир при пересмотре нагрузки следующих дней после
+            check-in.
           </ThemedText>
         </View>
       ) : null}
@@ -766,16 +822,18 @@ function formatClock(totalSeconds: number) {
 }
 
 function formatDuration(totalSeconds: number) {
-  const safeSeconds = Math.max(1, Math.round(totalSeconds));
-  if (safeSeconds < 60) return `${safeSeconds} сек`;
-  if (safeSeconds % 60 === 0) return `${safeSeconds / 60} мин`;
-  return `${Math.floor(safeSeconds / 60)} мин ${safeSeconds % 60} сек`;
+  const safeSeconds = Math.max(0.01, totalSeconds);
+  if (safeSeconds < 60) return `${formatNumber(safeSeconds)} сек`;
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds - minutes * 60;
+  if (Math.abs(seconds) < 0.001) return `${minutes} мин`;
+  return `${minutes} мин ${formatNumber(seconds)} сек`;
 }
 
 function getRoutineActionSeconds(action?: RoutineAction) {
   if (!action) return 0;
-  if (action.unit === 'seconds') return Math.max(1, Math.round(action.quantity));
-  if (action.unit === 'minutes') return Math.max(1, Math.round(action.quantity * 60));
+  if (action.unit === 'seconds') return Math.max(0.01, action.quantity);
+  if (action.unit === 'minutes') return Math.max(0.01, action.quantity * 60);
   return 0;
 }
 
@@ -799,9 +857,17 @@ function formatRoutineQuantity(action: RoutineAction) {
   return `${quantity} ${units[action.unit]}`;
 }
 
+function formatLoadBasis(value: RoutineLoadBasis | string) {
+  if (typeof value === 'string') return value;
+  const percentage = formatNumber(value.percentage);
+  const baseValue = formatNumber(value.baseValue);
+  const result = formatNumber(value.result);
+  return `${percentage}% × ${baseValue} ${value.baseUnit} = ${result} ${value.baseUnit}`;
+}
+
 function formatNumber(value: number) {
   if (Number.isInteger(value)) return String(value);
-  return String(Number(value.toFixed(2))).replace('.', ',');
+  return String(Number(value.toFixed(4))).replace('.', ',');
 }
 
 function formatCount(value: number, forms: [string, string, string]) {
@@ -967,6 +1033,12 @@ const styles = StyleSheet.create({
     borderRadius: Radius.small,
     backgroundColor: '#20273A',
     padding: Spacing.twoHalf,
+    gap: Spacing.one,
+  },
+  loadBasis: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Palette.line,
+    paddingTop: Spacing.two,
     gap: Spacing.one,
   },
   outcomeCard: {

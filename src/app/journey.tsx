@@ -1,9 +1,13 @@
+import { useState } from 'react';
 import { Linking, Pressable, StyleSheet, View } from 'react-native';
 
+import { CheckInModal } from '@/components/check-in-modal';
+import { MissionRunner } from '@/components/mission-runner';
 import { ThemedText } from '@/components/themed-text';
 import { Card, Pill, ProgressBar, Screen, ScreenHeader } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
-import { Mission, MissionOutcome } from '@/domain/types';
+import { Mission, MissionOutcome, PlanBaseline } from '@/domain/types';
+import { formatCalendarDate } from '@/lib/calendar-date';
 import { useApp } from '@/state/app-context';
 
 const OUTCOME_META: Record<MissionOutcome, { icon: string; color: string; label: string }> = {
@@ -14,7 +18,9 @@ const OUTCOME_META: Record<MissionOutcome, { icon: string; color: string; label:
 };
 
 export default function JourneyScreen() {
-  const { state, currentMission } = useApp();
+  const { state, currentMission, reportMission } = useApp();
+  const [detailMissionId, setDetailMissionId] = useState<string>();
+  const [checkInMissionId, setCheckInMissionId] = useState<string>();
 
   if (!state.activeGoal || !state.activePlan) {
     return (
@@ -36,178 +42,265 @@ export default function JourneyScreen() {
 
   const reported = state.activePlan.missions.filter((mission) => mission.outcome !== 'pending').length;
   const progress = reported / state.activePlan.missions.length;
+  const detailMission = state.activePlan.missions.find((mission) => mission.id === detailMissionId);
+  const checkInMission = state.activePlan.missions.find(
+    (mission) => mission.id === checkInMissionId,
+  );
+  const detailIsCurrent = detailMission?.id === currentMission?.id;
+  const baseline = state.activePlan.baseline ?? state.activeGoal.baseline;
+  const targetTimeline = state.activePlan.targetTimeline ?? state.activeGoal.targetTimeline;
 
   return (
-    <Screen>
-      <ScreenHeader
-        eyebrow="Карта пути"
-        title="Главная миссия"
-        subtitle={state.activeGoal.title}
-      />
+    <>
+      <Screen>
+        <ScreenHeader
+          eyebrow="Карта пути"
+          title="Главная миссия"
+          subtitle={state.activeGoal.title}
+        />
 
-      <Card accent>
-        <View style={styles.questHeader}>
-          <View style={styles.questCopy}>
-            <Pill tone={state.activeGoal.status === 'completed' ? 'success' : 'gold'}>
-              {state.activeGoal.status === 'completed' ? 'маршрут завершён' : 'активная цель'}
-            </Pill>
-            <ThemedText type="subtitle">{state.activeGoal.targetMetric}</ThemedText>
+        <Card accent>
+          <View style={styles.questHeader}>
+            <View style={styles.questCopy}>
+              <Pill tone={state.activeGoal.status === 'completed' ? 'success' : 'gold'}>
+                {state.activeGoal.status === 'completed' ? 'маршрут завершён' : 'активная цель'}
+              </Pill>
+              <ThemedText type="subtitle">{state.activeGoal.targetMetric}</ThemedText>
+            </View>
+            <View style={styles.percentCircle}>
+              <ThemedText type="smallBold" style={styles.gold}>
+                {Math.round(progress * 100)}%
+              </ThemedText>
+            </View>
           </View>
-          <View style={styles.percentCircle}>
-            <ThemedText type="smallBold" style={styles.gold}>
-              {Math.round(progress * 100)}%
+          <ProgressBar value={progress} />
+          <ThemedText type="small" style={styles.muted}>
+            План v{state.activePlan.version} · {state.activePlan.dailyMinutes} минут в день ·{' '}
+            {state.activePlan.research.confidence === 'high' ? 'высокая' : 'средняя'} уверенность
+            шаблона
+          </ThemedText>
+        </Card>
+
+        {baseline || targetTimeline ? (
+          <Card style={styles.baselineCard}>
+            <ThemedText type="eyebrow" style={styles.violet}>
+              Основа расчёта плана
             </ThemedText>
-          </View>
-        </View>
-        <ProgressBar value={progress} />
-        <ThemedText type="small" style={styles.muted}>
-          План v{state.activePlan.version} · {state.activePlan.dailyMinutes} минут в день ·{' '}
-          {state.activePlan.research.confidence === 'high' ? 'высокая' : 'средняя'} уверенность шаблона
-        </ThemedText>
-      </Card>
-
-      <View style={styles.timeline}>
-        {state.activePlan.chapters.map((chapter, chapterIndex) => {
-          const missions = state.activePlan?.missions.filter(
-            (mission) => mission.chapterId === chapter.id,
-          ) ?? [];
-          const complete = missions.every((mission) => mission.outcome !== 'pending');
-          const active = missions.some((mission) => mission.id === currentMission?.id);
-
-          return (
-            <View key={chapter.id} style={styles.chapterRow}>
-              <View style={styles.rail}>
-                <View
-                  style={[
-                    styles.chapterNode,
-                    complete && styles.chapterNodeComplete,
-                    active && styles.chapterNodeActive,
-                  ]}>
-                  <ThemedText type="smallBold" style={complete ? styles.nodeCompleteText : styles.nodeText}>
-                    {complete ? '✓' : chapterIndex + 1}
-                  </ThemedText>
-                </View>
-                {chapterIndex < state.activePlan!.chapters.length - 1 ? (
-                  <View style={[styles.railLine, complete && styles.railLineComplete]} />
-                ) : null}
+            {baseline ? (
+              <View style={styles.baselineSection}>
+                <ThemedText type="smallBold">{baseline.userStatement}</ThemedText>
+                <ThemedText type="small" style={styles.baselineMetric}>
+                  {baselineMetricLabel(baseline)}
+                </ThemedText>
+                <ThemedText type="small" style={styles.muted}>
+                  {baseline.calculationRule}
+                </ThemedText>
               </View>
-              <Card style={[styles.chapterCard, active && styles.chapterCardActive]}>
-                <View style={styles.chapterTitle}>
-                  <View style={styles.questCopy}>
-                    <ThemedText type="smallBold">{chapter.title}</ThemedText>
-                    <ThemedText type="small" style={styles.muted}>
-                      {chapter.subtitle}
+            ) : null}
+            {targetTimeline ? (
+              <View style={styles.baselineSection}>
+                <ThemedText type="eyebrow" style={styles.muted}>
+                  срок большой цели
+                </ThemedText>
+                <ThemedText type="smallBold">{targetTimeline}</ThemedText>
+              </View>
+            ) : null}
+          </Card>
+        ) : null}
+
+        <View style={styles.timeline}>
+          {state.activePlan.chapters.map((chapter, chapterIndex) => {
+            const missions = state.activePlan?.missions.filter(
+              (mission) => mission.chapterId === chapter.id,
+            ) ?? [];
+            const complete = missions.every((mission) => mission.outcome !== 'pending');
+            const active = missions.some((mission) => mission.id === currentMission?.id);
+
+            return (
+              <View key={chapter.id} style={styles.chapterRow}>
+                <View style={styles.rail}>
+                  <View
+                    style={[
+                      styles.chapterNode,
+                      complete && styles.chapterNodeComplete,
+                      active && styles.chapterNodeActive,
+                    ]}>
+                    <ThemedText
+                      type="smallBold"
+                      style={complete ? styles.nodeCompleteText : styles.nodeText}>
+                      {complete ? '✓' : chapterIndex + 1}
                     </ThemedText>
                   </View>
-                  {active ? <Pill tone="violet">сейчас</Pill> : null}
-                </View>
-                <View style={styles.missionList}>
-                  {missions.map((mission) => (
-                    <MissionRow
-                      key={mission.id}
-                      mission={mission}
-                      isCurrent={mission.id === currentMission?.id}
-                    />
-                  ))}
-                </View>
-              </Card>
-            </View>
-          );
-        })}
-      </View>
-
-      <Card style={styles.methodCard}>
-        <View style={styles.questHeader}>
-          <View style={styles.questCopy}>
-            <ThemedText type="eyebrow" style={styles.violet}>
-              Research dossier
-            </ThemedText>
-            <ThemedText type="subtitle">Почему план выглядит так</ThemedText>
-          </View>
-          <Pill tone="neutral">
-            {state.activePlan.research.method === 'openai-web-research-v1'
-              ? 'web research v1'
-              : state.activePlan.research.method === 'openai-responses-v1'
-                ? 'GPT v1'
-                : 'local v1'}
-          </Pill>
-        </View>
-        {state.activePlan.research.assumptions.map((assumption) => (
-          <Bullet key={assumption}>{assumption}</Bullet>
-        ))}
-        {state.activePlan.research.safetyNotes.map((note) => (
-          <Bullet key={note} tone="warning">
-            {note}
-          </Bullet>
-        ))}
-        {state.activePlan.research.sources?.length ? (
-          <View style={styles.sources}>
-            <ThemedText type="eyebrow" style={styles.muted}>
-              Использованные источники
-            </ThemedText>
-            {state.activePlan.research.sources.map((source) => (
-              <Pressable
-                accessibilityRole="link"
-                key={source.url}
-                onPress={() => Linking.openURL(source.url).catch(() => undefined)}
-                style={({ pressed }) => [styles.sourceLink, pressed && styles.pressed]}>
-                <ThemedText type="small" numberOfLines={2} style={styles.sourceText}>
-                  ↗ {source.title}
-                </ThemedText>
-              </Pressable>
-            ))}
-          </View>
-        ) : null}
-        {state.activePlan.research.request ? (
-          <ThemedText type="small" selectable style={styles.requestMeta}>
-            OpenAI {state.activePlan.research.request.model} ·{' '}
-            {state.activePlan.research.request.webSearchCount} search ·{' '}
-            {state.activePlan.research.request.requestId}
-          </ThemedText>
-        ) : null}
-      </Card>
-
-      {state.checkIns.length ? (
-        <View style={styles.history}>
-          <ThemedText type="eyebrow" style={styles.muted}>
-            Журнал событий
-          </ThemedText>
-          {state.checkIns.slice(0, 5).map((checkIn) => {
-            const mission = state.activePlan?.missions.find((item) => item.id === checkIn.missionId);
-            const meta = OUTCOME_META[checkIn.outcome];
-            return (
-              <View key={checkIn.id} style={styles.historyRow}>
-                <View style={[styles.historyDot, { backgroundColor: meta.color }]} />
-                <View style={styles.questCopy}>
-                  <ThemedText type="smallBold">{mission?.title ?? 'Миссия'}</ThemedText>
-                  <ThemedText type="small" style={styles.muted}>
-                    {meta.label} · {checkIn.xpDelta > 0 ? `+${checkIn.xpDelta} XP` : 'без XP'}
-                  </ThemedText>
-                  {checkIn.note ? (
-                    <ThemedText type="small" style={styles.note}>
-                      «{checkIn.note}»
-                    </ThemedText>
+                  {chapterIndex < state.activePlan!.chapters.length - 1 ? (
+                    <View style={[styles.railLine, complete && styles.railLineComplete]} />
                   ) : null}
                 </View>
+                <Card style={[styles.chapterCard, active && styles.chapterCardActive]}>
+                  <View style={styles.chapterTitle}>
+                    <View style={styles.questCopy}>
+                      <ThemedText type="smallBold">{chapter.title}</ThemedText>
+                      <ThemedText type="small" style={styles.muted}>
+                        {chapter.subtitle}
+                      </ThemedText>
+                    </View>
+                    {active ? <Pill tone="violet">сейчас</Pill> : null}
+                  </View>
+                  <View style={styles.missionList}>
+                    {missions.map((mission) => (
+                      <MissionRow
+                        key={mission.id}
+                        mission={mission}
+                        isCurrent={mission.id === currentMission?.id}
+                        onPress={() => setDetailMissionId(mission.id)}
+                      />
+                    ))}
+                  </View>
+                </Card>
               </View>
             );
           })}
         </View>
-      ) : null}
-    </Screen>
+
+        <Card style={styles.methodCard}>
+          <View style={styles.questHeader}>
+            <View style={styles.questCopy}>
+              <ThemedText type="eyebrow" style={styles.violet}>
+                Research dossier
+              </ThemedText>
+              <ThemedText type="subtitle">Почему план выглядит так</ThemedText>
+            </View>
+            <Pill tone="neutral">
+              {state.activePlan.research.method === 'openai-web-research-v1'
+                ? 'web research v1'
+                : state.activePlan.research.method === 'openai-responses-v1'
+                  ? 'GPT v1'
+                  : 'local v1'}
+            </Pill>
+          </View>
+          {state.activePlan.research.assumptions.map((assumption) => (
+            <Bullet key={assumption}>{assumption}</Bullet>
+          ))}
+          {state.activePlan.research.safetyNotes.map((note) => (
+            <Bullet key={note} tone="warning">
+              {note}
+            </Bullet>
+          ))}
+          {state.activePlan.research.sources?.length ? (
+            <View style={styles.sources}>
+              <ThemedText type="eyebrow" style={styles.muted}>
+                Использованные источники
+              </ThemedText>
+              {state.activePlan.research.sources.map((source) => (
+                <Pressable
+                  accessibilityRole="link"
+                  key={source.url}
+                  onPress={() => Linking.openURL(source.url).catch(() => undefined)}
+                  style={({ pressed }) => [styles.sourceLink, pressed && styles.pressed]}>
+                  <ThemedText type="small" numberOfLines={2} style={styles.sourceText}>
+                    ↗ {source.title}
+                  </ThemedText>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+          {state.activePlan.research.request ? (
+            <ThemedText type="small" selectable style={styles.requestMeta}>
+              OpenAI {state.activePlan.research.request.model} ·{' '}
+              {state.activePlan.research.request.webSearchCount} search ·{' '}
+              {state.activePlan.research.request.requestId}
+            </ThemedText>
+          ) : null}
+        </Card>
+
+        {state.checkIns.length ? (
+          <View style={styles.history}>
+            <ThemedText type="eyebrow" style={styles.muted}>
+              Журнал событий
+            </ThemedText>
+            {state.checkIns.slice(0, 5).map((checkIn) => {
+              const mission = state.activePlan?.missions.find(
+                (item) => item.id === checkIn.missionId,
+              );
+              const meta = OUTCOME_META[checkIn.outcome];
+              return (
+                <View key={checkIn.id} style={styles.historyRow}>
+                  <View style={[styles.historyDot, { backgroundColor: meta.color }]} />
+                  <View style={styles.questCopy}>
+                    <ThemedText type="smallBold">{mission?.title ?? 'Миссия'}</ThemedText>
+                    <ThemedText type="small" style={styles.muted}>
+                      {meta.label} · {checkIn.xpDelta > 0 ? `+${checkIn.xpDelta} XP` : 'без XP'}
+                    </ThemedText>
+                    {checkIn.note ? (
+                      <ThemedText type="small" style={styles.note}>
+                        «{checkIn.note}»
+                      </ThemedText>
+                    ) : null}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        ) : null}
+      </Screen>
+
+      <MissionRunner
+        mission={detailMission}
+        visible={Boolean(detailMission)}
+        readOnly={!detailIsCurrent}
+        onClose={() => setDetailMissionId(undefined)}
+        onCheckIn={() => {
+          if (!detailMission || !detailIsCurrent) return;
+          setDetailMissionId(undefined);
+          setCheckInMissionId(detailMission.id);
+        }}
+      />
+
+      <CheckInModal
+        mission={checkInMission}
+        visible={Boolean(checkInMission)}
+        onClose={() => setCheckInMissionId(undefined)}
+        onSubmit={(outcome, note) => {
+          if (checkInMission && checkInMission.id === currentMission?.id) {
+            reportMission(checkInMission.id, outcome, note);
+          }
+          setCheckInMissionId(undefined);
+        }}
+      />
+    </>
   );
 }
 
-function MissionRow({ mission, isCurrent }: { mission: Mission; isCurrent: boolean }) {
+function MissionRow({
+  mission,
+  isCurrent,
+  onPress,
+}: {
+  mission: Mission;
+  isCurrent: boolean;
+  onPress(): void;
+}) {
   const meta = OUTCOME_META[mission.outcome];
+  const scheduledDate = formatCalendarDate(mission.scheduledDate);
   return (
-    <View style={[styles.missionRow, isCurrent && styles.missionRowActive]}>
+    <Pressable
+      accessibilityLabel={`Открыть день ${mission.dayNumber ?? mission.sequence}: ${mission.title}`}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.missionRow,
+        isCurrent && styles.missionRowActive,
+        pressed && styles.pressed,
+      ]}>
       <View style={[styles.outcomeIcon, { borderColor: meta.color }]}>
         <ThemedText type="smallBold" style={{ color: meta.color }}>
           {meta.icon || mission.sequence}
         </ThemedText>
       </View>
       <View style={styles.questCopy}>
+        <ThemedText type="eyebrow" style={styles.missionDay}>
+          День {mission.dayNumber ?? mission.sequence}
+          {scheduledDate ? ` · ${scheduledDate}` : ''}
+        </ThemedText>
         <ThemedText type="smallBold" style={mission.outcome === 'skipped' && styles.strike}>
           {mission.title}
         </ThemedText>
@@ -215,7 +308,8 @@ function MissionRow({ mission, isCurrent }: { mission: Mission; isCurrent: boole
           {missionDurationLabel(mission)} · {mission.xp} XP
         </ThemedText>
       </View>
-    </View>
+      <ThemedText style={styles.chevron}>›</ThemedText>
+    </Pressable>
   );
 }
 
@@ -230,6 +324,17 @@ function missionDurationLabel(mission: Mission) {
     return `${timer} таймер · ≈ ${mission.estimatedMinutes} мин всего`;
   }
   return `${mission.estimatedMinutes} мин`;
+}
+
+function baselineMetricLabel(baseline: PlanBaseline) {
+  if (baseline.value == null || baseline.unit == null) {
+    return `${baseline.normalizedMetric} · числовое значение не выделено`;
+  }
+
+  const value = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 4 }).format(
+    baseline.value,
+  );
+  return `${baseline.normalizedMetric} · ${value} ${baseline.unit}`;
 }
 
 function Bullet({ children, tone = 'neutral' }: { children: string; tone?: 'neutral' | 'warning' }) {
@@ -247,6 +352,8 @@ const styles = StyleSheet.create({
   muted: { color: Palette.textMuted },
   gold: { color: Palette.goldBright },
   violet: { color: Palette.violetSoft },
+  baselineMetric: { color: Palette.cyan },
+  missionDay: { color: Palette.goldBright },
   questHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
   questCopy: { flex: 1, gap: 4 },
   pressed: { opacity: 0.7 },
@@ -258,6 +365,13 @@ const styles = StyleSheet.create({
   },
   sourceText: { color: Palette.violetSoft },
   requestMeta: { color: Palette.textDim, paddingTop: Spacing.two },
+  baselineCard: { gap: Spacing.two },
+  baselineSection: {
+    gap: 4,
+    paddingTop: Spacing.two,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Palette.line,
+  },
   percentCircle: {
     width: 54,
     height: 54,
@@ -301,6 +415,7 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.inkRaised,
   },
   missionRowActive: { backgroundColor: '#1F1B34', borderWidth: 1, borderColor: '#463D73' },
+  chevron: { color: Palette.textDim, fontSize: 24 },
   outcomeIcon: {
     width: 32,
     height: 32,
