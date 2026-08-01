@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Linking, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { CheckInModal } from '@/components/check-in-modal';
+import { RunSummary } from '@/components/in-app-mission-runner';
 import { MissionRunner } from '@/components/mission-runner';
 import { ThemedText } from '@/components/themed-text';
 import { Card, Pill, ProgressBar, Screen, ScreenHeader } from '@/components/ui/primitives';
@@ -18,9 +19,10 @@ const OUTCOME_META: Record<MissionOutcome, { icon: string; color: string; label:
 };
 
 export default function JourneyScreen() {
-  const { state, currentMission, reportMission } = useApp();
+  const { state, currentMission, mutateMissionRun, reportMission } = useApp();
   const [detailMissionId, setDetailMissionId] = useState<string>();
   const [checkInMissionId, setCheckInMissionId] = useState<string>();
+  const [checkInRunId, setCheckInRunId] = useState<string>();
 
   if (!state.activeGoal || !state.activePlan) {
     return (
@@ -46,6 +48,7 @@ export default function JourneyScreen() {
   const checkInMission = state.activePlan.missions.find(
     (mission) => mission.id === checkInMissionId,
   );
+  const checkInRun = checkInMission ? state.missionRuns[checkInMission.id] : undefined;
   const detailIsCurrent = detailMission?.id === currentMission?.id;
   const baseline = state.activePlan.baseline ?? state.activeGoal.baseline;
   const targetTimeline = state.activePlan.targetTimeline ?? state.activeGoal.targetTimeline;
@@ -190,16 +193,18 @@ export default function JourneyScreen() {
               <ThemedText type="eyebrow" style={styles.muted}>
                 Использованные источники
               </ThemedText>
+              <ThemedText type="small" style={styles.muted}>
+                Research уже учтён в назначениях — открывать сайты для выполнения не нужно.
+              </ThemedText>
               {state.activePlan.research.sources.map((source) => (
-                <Pressable
-                  accessibilityRole="link"
-                  key={source.url}
-                  onPress={() => Linking.openURL(source.url).catch(() => undefined)}
-                  style={({ pressed }) => [styles.sourceLink, pressed && styles.pressed]}>
-                  <ThemedText type="small" numberOfLines={2} style={styles.sourceText}>
-                    ↗ {source.title}
+                <View key={source.url} style={styles.sourceRecord}>
+                  <ThemedText type="smallBold" style={styles.sourceText}>
+                    {source.title}
                   </ThemedText>
-                </Pressable>
+                  <ThemedText type="small" style={styles.sourceDomain}>
+                    {sourceDomain(source.url)}
+                  </ThemedText>
+                </View>
               ))}
             </View>
           ) : null}
@@ -217,25 +222,36 @@ export default function JourneyScreen() {
             <ThemedText type="eyebrow" style={styles.muted}>
               Журнал событий
             </ThemedText>
-            {state.checkIns.slice(0, 5).map((checkIn) => {
+            {state.checkIns.map((checkIn) => {
               const mission = state.activePlan?.missions.find(
                 (item) => item.id === checkIn.missionId,
               );
+              const run = state.missionRuns[checkIn.missionId];
+              const recordedRun = run?.id === checkIn.runId ? run : undefined;
               const meta = OUTCOME_META[checkIn.outcome];
               return (
-                <View key={checkIn.id} style={styles.historyRow}>
-                  <View style={[styles.historyDot, { backgroundColor: meta.color }]} />
-                  <View style={styles.questCopy}>
-                    <ThemedText type="smallBold">{mission?.title ?? 'Миссия'}</ThemedText>
-                    <ThemedText type="small" style={styles.muted}>
-                      {meta.label} · {checkIn.xpDelta > 0 ? `+${checkIn.xpDelta} XP` : 'без XP'}
-                    </ThemedText>
-                    {checkIn.note ? (
-                      <ThemedText type="small" style={styles.note}>
-                        «{checkIn.note}»
+                <View key={checkIn.id} style={styles.historyEntry}>
+                  <View style={styles.historyRow}>
+                    <View style={[styles.historyDot, { backgroundColor: meta.color }]} />
+                    <View style={styles.questCopy}>
+                      <ThemedText type="smallBold">{mission?.title ?? 'Миссия'}</ThemedText>
+                      <ThemedText type="small" style={styles.muted}>
+                        {meta.label} · {checkIn.xpDelta > 0 ? `+${checkIn.xpDelta} XP` : 'без XP'} ·{' '}
+                        {formatCheckInDate(checkIn.createdAt)}
                       </ThemedText>
-                    ) : null}
+                    </View>
                   </View>
+                  {mission && recordedRun ? <RunSummary mission={mission} run={recordedRun} /> : null}
+                  {checkIn.note ? (
+                    <View style={styles.finalNote}>
+                      <ThemedText type="eyebrow" style={styles.muted}>
+                        итоговый комментарий и недочёты
+                      </ThemedText>
+                      <ThemedText type="small" style={styles.note}>
+                        {checkIn.note}
+                      </ThemedText>
+                    </View>
+                  ) : null}
                 </View>
               );
             })}
@@ -248,22 +264,33 @@ export default function JourneyScreen() {
         visible={Boolean(detailMission)}
         readOnly={!detailIsCurrent}
         onClose={() => setDetailMissionId(undefined)}
-        onCheckIn={() => {
+        onCheckIn={(runId) => {
           if (!detailMission || !detailIsCurrent) return;
           setDetailMissionId(undefined);
           setCheckInMissionId(detailMission.id);
+          setCheckInRunId(runId);
         }}
       />
 
       <CheckInModal
         mission={checkInMission}
+        run={checkInRun}
         visible={Boolean(checkInMission)}
-        onClose={() => setCheckInMissionId(undefined)}
+        onSaveComment={(runId, value) => {
+          if (checkInMission) {
+            mutateMissionRun(checkInMission.id, runId, { kind: 'set-final-comment', value });
+          }
+        }}
+        onClose={() => {
+          setCheckInMissionId(undefined);
+          setCheckInRunId(undefined);
+        }}
         onSubmit={(outcome, note) => {
           if (checkInMission && checkInMission.id === currentMission?.id) {
-            reportMission(checkInMission.id, outcome, note);
+            reportMission(checkInMission.id, outcome, note, checkInRunId);
           }
           setCheckInMissionId(undefined);
+          setCheckInRunId(undefined);
         }}
       />
     </>
@@ -314,6 +341,13 @@ function MissionRow({
 }
 
 function missionDurationLabel(mission: Mission) {
+  if (mission.execution?.kind === 'in_app') {
+    const records = mission.execution.blocks.reduce(
+      (total, block) => total + (block.kind === 'timer' || block.kind === 'counter' ? block.sets : 1),
+      0,
+    );
+    return `${mission.execution.blocks.length} блоков · ${records} записей · ≈ ${mission.estimatedMinutes} мин`;
+  }
   if (mission.execution?.kind === 'routine') {
     const sets = mission.execution.actions.reduce((total, action) => total + action.sets, 0);
     return `${mission.execution.actions.length} действий · ${sets} подходов · ≈ ${mission.estimatedMinutes} мин`;
@@ -337,6 +371,26 @@ function baselineMetricLabel(baseline: PlanBaseline) {
   return `${baseline.normalizedMetric} · ${value} ${baseline.unit}`;
 }
 
+function sourceDomain(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return 'источник сохранён в плане';
+  }
+}
+
+function formatCheckInDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'в журнале Actum';
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
 function Bullet({ children, tone = 'neutral' }: { children: string; tone?: 'neutral' | 'warning' }) {
   return (
     <View style={styles.bulletRow}>
@@ -358,12 +412,14 @@ const styles = StyleSheet.create({
   questCopy: { flex: 1, gap: 4 },
   pressed: { opacity: 0.7 },
   sources: { gap: Spacing.two, paddingTop: Spacing.two },
-  sourceLink: {
+  sourceRecord: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Palette.line,
     paddingTop: Spacing.two,
+    gap: 3,
   },
   sourceText: { color: Palette.violetSoft },
+  sourceDomain: { color: Palette.textDim },
   requestMeta: { color: Palette.textDim, paddingTop: Spacing.two },
   baselineCard: { gap: Spacing.two },
   baselineSection: {
@@ -431,13 +487,22 @@ const styles = StyleSheet.create({
   bulletWarning: { backgroundColor: Palette.warning },
   bulletText: { flex: 1, color: Palette.textMuted },
   history: { gap: Spacing.two },
-  historyRow: {
-    flexDirection: 'row',
-    gap: Spacing.twoHalf,
+  historyEntry: {
+    gap: Spacing.two,
     padding: Spacing.three,
     borderRadius: Radius.medium,
     backgroundColor: Palette.surface,
   },
+  historyRow: {
+    flexDirection: 'row',
+    gap: Spacing.twoHalf,
+  },
   historyDot: { width: 9, height: 9, borderRadius: 5, marginTop: 7 },
   note: { color: Palette.text, fontStyle: 'italic', marginTop: 4 },
+  finalNote: {
+    gap: 2,
+    paddingTop: Spacing.two,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Palette.line,
+  },
 });

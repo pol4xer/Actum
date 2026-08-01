@@ -48,10 +48,78 @@ export type RoutineAction = {
   successCriterion: string;
 };
 
-export type MissionExecution =
+export type CounterUnit =
+  | 'reps'
+  | 'pages'
+  | 'items'
+  | 'words'
+  | 'meters'
+  | 'attempts'
+  | 'custom';
+
+export type TimerExecutionBlock = {
+  kind: 'timer';
+  title: string;
+  instruction: string;
+  sets: number;
+  durationSecondsPerSet: number;
+  restSeconds: number;
+  loadBasis?: RoutineLoadBasis;
+  successCriterion: string;
+};
+
+export type CounterExecutionBlock = {
+  kind: 'counter';
+  title: string;
+  instruction: string;
+  sets: number;
+  targetPerSet: number;
+  unit: CounterUnit;
+  unitLabel?: string;
+  workSecondsPerSet: number;
+  restSeconds: number;
+  tempo?: string;
+  loadBasis?: RoutineLoadBasis;
+  successCriterion: string;
+};
+
+export type ChecklistExecutionBlock = {
+  kind: 'checklist';
+  title: string;
+  items: string[];
+  estimatedSeconds: number;
+  successCriterion: string;
+};
+
+export type TextLogExecutionBlock = {
+  kind: 'text_log';
+  title: string;
+  prompt: string;
+  minCharacters: number;
+  maxCharacters: number;
+  estimatedSeconds: number;
+  successCriterion: string;
+};
+
+export type MissionExecutionBlock =
+  | TimerExecutionBlock
+  | CounterExecutionBlock
+  | ChecklistExecutionBlock
+  | TextLogExecutionBlock;
+
+export type InAppMissionExecution = {
+  kind: 'in_app';
+  blocks: MissionExecutionBlock[];
+  successCriterion: string;
+};
+
+/** Persisted plan-v1 through plan-v4 executions remain readable. */
+export type LegacyMissionExecution =
   | { kind: 'manual' }
   | { kind: 'timer'; durationSeconds: number }
   | { kind: 'routine'; actions: RoutineAction[] };
+
+export type MissionExecution = InAppMissionExecution | LegacyMissionExecution;
 
 export type Profile = {
   name: string;
@@ -157,7 +225,10 @@ export type PlanVersion = {
 export type CheckIn = {
   id: string;
   missionId: string;
+  runId?: string;
   outcome: Exclude<MissionOutcome, 'pending'>;
+  /** Mission-level reflection; note is retained as its legacy UI alias. */
+  comment?: string;
   note?: string;
   xpDelta: number;
   energyDelta: number;
@@ -177,14 +248,108 @@ export type AppSettings = {
   reminderMinute: number;
 };
 
+export type MissionRunStatus = 'running' | 'awaiting_checkin' | 'reported';
+export type MissionRunFinishReason = 'completed' | 'stopped';
+export type MissionRunCursorStage = 'ready' | 'work' | 'rest' | 'review' | 'complete';
+
+export type MissionRunCursor = {
+  blockIndex: number;
+  setIndex: number;
+  stage: MissionRunCursorStage;
+};
+
+type MissionRunSetResultBase = {
+  setIndex: number;
+  targetMet: boolean;
+  startedAt?: string;
+  completedAt?: string;
+};
+
+export type TimerRunSetResult = MissionRunSetResultBase & {
+  targetDurationSeconds: number;
+  actualDurationSeconds: number;
+};
+
+export type CounterRunSetResult = MissionRunSetResultBase & {
+  targetQuantity: number;
+  actualQuantity: number;
+  targetDurationSeconds: number;
+  actualDurationSeconds: number;
+};
+
+export type MissionRunSetResult = TimerRunSetResult | CounterRunSetResult;
+
+type MissionRunBlockResultBase = {
+  blockIndex: number;
+  title: string;
+  completed: boolean;
+  /** Explicit in-app answer to this block's success criterion. */
+  criterionMet?: boolean;
+  comment?: string;
+  startedAt?: string;
+  completedAt?: string;
+};
+
+export type TimerRunBlockResult = MissionRunBlockResultBase & {
+  kind: 'timer';
+  sets: TimerRunSetResult[];
+};
+
+export type CounterRunBlockResult = MissionRunBlockResultBase & {
+  kind: 'counter';
+  unit: CounterUnit;
+  unitLabel?: string;
+  sets: CounterRunSetResult[];
+};
+
+export type ChecklistRunBlockResult = MissionRunBlockResultBase & {
+  kind: 'checklist';
+  checkedIndexes: number[];
+};
+
+export type TextLogRunBlockResult = MissionRunBlockResultBase & {
+  kind: 'text_log';
+  value: string;
+};
+
+export type MissionRunBlockResult =
+  | TimerRunBlockResult
+  | CounterRunBlockResult
+  | ChecklistRunBlockResult
+  | TextLogRunBlockResult;
+
+export type MissionRun = {
+  id: string;
+  missionId: string;
+  status: MissionRunStatus;
+  cursor: MissionRunCursor;
+  startedAt: string;
+  updatedAt: string;
+  stageStartedAt?: string;
+  stageEndsAt?: string;
+  finishedAt?: string;
+  finishReason?: MissionRunFinishReason;
+  finalCommentDraft?: string;
+  blockResults: MissionRunBlockResult[];
+};
+
+export type MissionRunMutation =
+  | { kind: 'set-counter'; blockIndex: number; setIndex: number; value: number }
+  | { kind: 'toggle-checklist'; blockIndex: number; itemIndex: number }
+  | { kind: 'set-text-log'; blockIndex: number; value: string }
+  | { kind: 'set-block-comment'; blockIndex: number; value: string }
+  | { kind: 'set-block-criterion'; blockIndex: number; value: boolean }
+  | { kind: 'set-final-comment'; value: string };
+
 export type AppState = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   onboardingCompleted: boolean;
   profile?: Profile;
   character: CharacterState;
   activeGoal?: Goal;
   activePlan?: PlanVersion;
   checkIns: CheckIn[];
+  missionRuns: Record<string, MissionRun>;
   recovery?: RecoveryFlow;
   settings: AppSettings;
   lastUpdatedAt: string;

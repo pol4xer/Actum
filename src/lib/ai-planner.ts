@@ -31,10 +31,8 @@ const missionType = z.enum([
   'check',
 ]);
 
-const routineUnit = z.enum([
+const counterUnit = z.enum([
   'reps',
-  'seconds',
-  'minutes',
   'pages',
   'items',
   'words',
@@ -42,7 +40,7 @@ const routineUnit = z.enum([
   'attempts',
   'custom',
 ]);
-const discreteRoutineUnits = new Set(['reps', 'pages', 'items', 'words', 'attempts']);
+const discreteCounterUnits = new Set(['reps', 'pages', 'items', 'words', 'attempts']);
 
 const routineLoadBasisSchema = z
   .object({
@@ -53,27 +51,41 @@ const routineLoadBasisSchema = z
   })
   .strict();
 
-const routineActionSchema = z
+const timerBlockSchema = z
   .object({
+    kind: z.literal('timer'),
     title: contractText(2, 100),
     instruction: contractText(8, 360),
     sets: z.number().int().min(1).max(20),
-    quantity: z.number().min(0.01).max(1_000_000),
-    workSecondsPerSet: z.number().int().min(1).max(7200),
-    unit: routineUnit,
-    unitLabel: contractText(1, 40).nullable(),
+    durationSecondsPerSet: z.number().int().min(1).max(7200),
     loadBasis: routineLoadBasisSchema.nullable(),
     restSeconds: z.number().int().min(0).max(1800),
+    successCriterion: contractText(5, 260),
+  })
+  .strict();
+
+const counterBlockSchema = z
+  .object({
+    kind: z.literal('counter'),
+    title: contractText(2, 100),
+    instruction: contractText(8, 360),
+    sets: z.number().int().min(1).max(20),
+    targetPerSet: z.number().min(0.01).max(1_000_000),
+    unit: counterUnit,
+    unitLabel: contractText(1, 40).nullable(),
+    workSecondsPerSet: z.number().int().min(1).max(7200),
+    restSeconds: z.number().int().min(0).max(1800),
     tempo: contractText(2, 100).nullable(),
+    loadBasis: routineLoadBasisSchema.nullable(),
     successCriterion: contractText(5, 260),
   })
   .strict()
   .superRefine((action, context) => {
-    if (discreteRoutineUnits.has(action.unit) && !Number.isInteger(action.quantity)) {
+    if (discreteCounterUnits.has(action.unit) && !Number.isInteger(action.targetPerSet)) {
       context.addIssue({
         code: 'custom',
         message: `Discrete unit ${action.unit} requires an integer quantity.`,
-        path: ['quantity'],
+        path: ['targetPerSet'],
       });
     }
     if (action.unit === 'custom' && action.unitLabel == null) {
@@ -92,30 +104,64 @@ const routineActionSchema = z
     }
   });
 
+const checklistBlockSchema = z
+  .object({
+    kind: z.literal('checklist'),
+    title: contractText(2, 100),
+    items: z.array(contractText(2, 260)).min(1).max(8),
+    estimatedSeconds: z.number().int().min(1).max(7200),
+    successCriterion: contractText(5, 260),
+  })
+  .strict();
+
+const textLogBlockSchema = z
+  .object({
+    kind: z.literal('text_log'),
+    title: contractText(2, 100),
+    prompt: contractText(5, 360),
+    minCharacters: z.number().int().min(1).max(2_000),
+    maxCharacters: z.number().int().min(1).max(4_000),
+    estimatedSeconds: z.number().int().min(1).max(7200),
+    successCriterion: contractText(5, 260),
+  })
+  .strict()
+  .superRefine((block, context) => {
+    if (block.maxCharacters < block.minCharacters) {
+      context.addIssue({
+        code: 'custom',
+        message: 'maxCharacters must be greater than or equal to minCharacters.',
+        path: ['maxCharacters'],
+      });
+    }
+  });
+
 function createExecutionSchema(maximumTimerSeconds: number) {
-  return z.discriminatedUnion('kind', [
-    z
-      .object({
-        kind: z.literal('manual'),
-        durationSeconds: z.null(),
-        successCriterion: contractText(5, 320),
-      })
-      .strict(),
-    z
-      .object({
-        kind: z.literal('timer'),
-        durationSeconds: z.number().int().min(1).max(maximumTimerSeconds),
-        successCriterion: contractText(5, 320),
-      })
-      .strict(),
-    z
-      .object({
-        kind: z.literal('routine'),
-        actions: z.array(routineActionSchema).min(1).max(10),
-        successCriterion: contractText(5, 320),
-      })
-      .strict(),
-  ]);
+  const timer = timerBlockSchema.refine(
+    (block) => block.durationSecondsPerSet <= maximumTimerSeconds,
+    { message: 'Timer block exceeds the daily limit.', path: ['durationSecondsPerSet'] },
+  );
+  const counter = counterBlockSchema.refine(
+    (block) =>
+      block.workSecondsPerSet <= maximumTimerSeconds &&
+      block.restSeconds <= maximumTimerSeconds,
+    { message: 'Counter block exceeds the daily limit.' },
+  );
+  const checklist = checklistBlockSchema.refine(
+    (block) => block.estimatedSeconds <= maximumTimerSeconds,
+    { message: 'Checklist block exceeds the daily limit.', path: ['estimatedSeconds'] },
+  );
+  const textLog = textLogBlockSchema.refine(
+    (block) => block.estimatedSeconds <= maximumTimerSeconds,
+    { message: 'Text log block exceeds the daily limit.', path: ['estimatedSeconds'] },
+  );
+
+  return z
+    .object({
+      kind: z.literal('in_app'),
+      blocks: z.array(z.union([timer, counter, checklist, textLog])).min(1).max(12),
+      successCriterion: contractText(5, 320),
+    })
+    .strict();
 }
 
 function createAIPlanSchema(dailyMinutes: number, horizonDays: number) {
@@ -130,9 +176,7 @@ function createAIPlanSchema(dailyMinutes: number, horizonDays: number) {
       type: missionType,
       estimatedMinutes: z.number().int().min(1).max(maximumMinutes),
       xp: z.number().int().min(5).max(60),
-      steps: z.array(contractText(2, 300)).min(1).max(8),
       execution: createExecutionSchema(maximumMinutes * 60),
-      progressionRule: contractText(8, 420),
       warning: contractText(3, 300).nullable(),
     })
     .strict();
@@ -181,7 +225,7 @@ const serverMetaSchema = z.object({
   researchResponseId: z.string().min(4).max(180).optional(),
   model: z.string().min(2).max(100),
   promptVersion: z.string().min(2).max(120),
-  contractVersion: z.literal('plan-v4'),
+  contractVersion: z.literal('plan-v5'),
   durationMs: z.number().int().nonnegative(),
   webSearchCount: z.number().int().nonnegative(),
   inputTokens: z.number().int().nonnegative().optional(),
@@ -385,30 +429,59 @@ function toGeneratedGoal(
     estimatedMinutes: day.estimatedMinutes,
     xp: day.xp,
     outcome: 'pending' as const,
-    steps: day.steps,
-    execution:
-      day.execution.kind === 'timer'
-        ? { kind: 'timer' as const, durationSeconds: day.execution.durationSeconds }
-        : day.execution.kind === 'routine'
-          ? {
-              kind: 'routine' as const,
-              actions: day.execution.actions.map((action) => ({
-                title: action.title,
-                instruction: action.instruction,
-                sets: action.sets,
-                quantity: action.quantity,
-                workSecondsPerSet: action.workSecondsPerSet,
-                unit: action.unit,
-                unitLabel: action.unitLabel ?? undefined,
-                loadBasis: action.loadBasis ?? undefined,
-                restSeconds: action.restSeconds,
-                tempo: action.tempo ?? undefined,
-                successCriterion: action.successCriterion,
-              })),
-            }
-          : { kind: 'manual' as const },
+    execution: {
+      kind: 'in_app' as const,
+      successCriterion: day.execution.successCriterion,
+      blocks: day.execution.blocks.map((block) => {
+        if (block.kind === 'timer') {
+          return {
+            kind: 'timer' as const,
+            title: block.title,
+            instruction: block.instruction,
+            sets: block.sets,
+            durationSecondsPerSet: block.durationSecondsPerSet,
+            restSeconds: block.restSeconds,
+            loadBasis: block.loadBasis ?? undefined,
+            successCriterion: block.successCriterion,
+          };
+        }
+        if (block.kind === 'counter') {
+          return {
+            kind: 'counter' as const,
+            title: block.title,
+            instruction: block.instruction,
+            sets: block.sets,
+            targetPerSet: block.targetPerSet,
+            unit: block.unit,
+            unitLabel: block.unitLabel ?? undefined,
+            workSecondsPerSet: block.workSecondsPerSet,
+            restSeconds: block.restSeconds,
+            tempo: block.tempo ?? undefined,
+            loadBasis: block.loadBasis ?? undefined,
+            successCriterion: block.successCriterion,
+          };
+        }
+        if (block.kind === 'checklist') {
+          return {
+            kind: 'checklist' as const,
+            title: block.title,
+            items: block.items,
+            estimatedSeconds: block.estimatedSeconds,
+            successCriterion: block.successCriterion,
+          };
+        }
+        return {
+          kind: 'text_log' as const,
+          title: block.title,
+          prompt: block.prompt,
+          minCharacters: block.minCharacters,
+          maxCharacters: block.maxCharacters,
+          estimatedSeconds: block.estimatedSeconds,
+          successCriterion: block.successCriterion,
+        };
+      }),
+    },
     completionCriterion: day.execution.successCriterion,
-    progressionRule: day.progressionRule,
     warning: day.warning ?? undefined,
   }));
   const targetDate = addLocalCalendarDays(now, input.horizonDays - 1);
@@ -430,7 +503,7 @@ function toGeneratedGoal(
     },
     plan: {
       id: id('plan'),
-      version: 1,
+      version: 5,
       createdAt: now.toISOString(),
       dailyMinutes: input.dailyMinutes,
       horizonDays: input.horizonDays,

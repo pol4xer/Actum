@@ -1,43 +1,52 @@
-import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useState } from 'react';
-
 import {
+  createContext,
+  PropsWithChildren,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from 'react';
+
+import { createMissionRun } from '@/domain/mission-run';
+import type {
   AppState,
   Archetype,
   GeneratedGoal,
   MissionOutcome,
+  MissionRun,
+  MissionRunFinishReason,
+  MissionRunMutation,
   Profile,
   StrictnessMode,
 } from '@/domain/types';
 import { disableDailyReminder } from '@/lib/notifications';
 import storage from '@/lib/storage';
 
-const STORAGE_KEY = 'actum.app-state.v1';
+import {
+  APP_STATE_STORAGE_KEY,
+  appStateReducer,
+  createInitialAppState,
+  restoreAppState,
+  type RestoreAppStateResult,
+} from './app-state';
 
-const INITIAL_STATE: AppState = {
-  schemaVersion: 1,
-  onboardingCompleted: false,
-  character: {
-    level: 1,
-    xp: 0,
-    energy: 76,
-    streak: 0,
-    worldLight: 18,
-    buffs: ['Первый шаг'],
-    debuffs: [],
-  },
-  checkIns: [],
-  settings: {
-    notificationsEnabled: false,
-    reminderHour: 9,
-    reminderMinute: 0,
-  },
-  lastUpdatedAt: new Date(0).toISOString(),
+type HydrationIssue = Extract<RestoreAppStateResult, { status: 'blocked' }> | {
+  reason: 'storage-error';
 };
 
-type AppContextValue = {
+export type PersistenceStatus = 'loading' | 'saving' | 'saved' | 'error';
+
+export type AppContextValue = {
   state: AppState;
   isHydrated: boolean;
-  currentMission: AppState['activePlan'] extends infer _T ? ReturnType<typeof getCurrentMission> : never;
+  /** Present when persistence is deliberately disabled to protect unreadable stored data. */
+  hydrationIssue?: HydrationIssue;
+  persistenceStatus: PersistenceStatus;
+  retryPersistence(): Promise<boolean>;
+  currentMission: ReturnType<typeof getCurrentMission>;
   completedCount: number;
   finishOnboarding(input: {
     name: string;
@@ -45,8 +54,17 @@ type AppContextValue = {
     strictness: StrictnessMode;
   }): void;
   createGoal(generated: GeneratedGoal): void;
-  reportMission(missionId: string, outcome: Exclude<MissionOutcome, 'pending'>, note?: string): void;
-  completeRecovery(): void;
+  beginMissionRun(missionId: string): MissionRun | undefined;
+  restartMissionRun(missionId: string): MissionRun | undefined;
+  saveMissionRun(run: MissionRun): void;
+  mutateMissionRun(missionId: string, runId: string, mutation: MissionRunMutation): void;
+  finishMissionRun(run: MissionRun, finishReason?: MissionRunFinishReason): void;
+  reportMission(
+    missionId: string,
+    outcome: Exclude<MissionOutcome, 'pending'>,
+    note?: string,
+    runId?: string,
+  ): void;
   startNewGoal(): void;
   setNotificationsEnabled(enabled: boolean): void;
   resetProgress(): Promise<void>;
@@ -58,26 +76,78 @@ function getCurrentMission(state: AppState) {
   return state.activePlan?.missions.find((mission) => mission.outcome === 'pending');
 }
 
-function withTimestamp(state: AppState): AppState {
-  return { ...state, lastUpdatedAt: new Date().toISOString() };
+function now(): string {
+  return new Date().toISOString();
+}
+
+function checkInId(at: string): string {
+  return `checkin-${Date.parse(at).toString(36)}`;
 }
 
 export function AppProvider({ children }: PropsWithChildren) {
-  const [state, setState] = useState<AppState>(INITIAL_STATE);
+  const [state, dispatch] = useReducer(appStateReducer, undefined, () => createInitialAppState());
   const [isHydrated, setIsHydrated] = useState(false);
+  const [persistenceEnabled, setPersistenceEnabled] = useState(false);
+  const [hydrationIssue, setHydrationIssue] = useState<HydrationIssue>();
+  const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>('loading');
+  const latestStateRef = useRef(state);
+  const pendingPersistenceRef = useRef<string | undefined>(undefined);
+  const persistenceWriteRef = useRef<Promise<boolean> | undefined>(undefined);
+  latestStateRef.current = state;
+
+  const flushPersistence = useCallback((): Promise<boolean> => {
+    if (persistenceWriteRef.current) return persistenceWriteRef.current;
+
+    const write = (async () => {
+      try {
+        while (pendingPersistenceRef.current !== undefined) {
+          const payload = pendingPersistenceRef.current;
+          pendingPersistenceRef.current = undefined;
+          await storage.setItem(APP_STATE_STORAGE_KEY, payload);
+        }
+        setPersistenceStatus('saved');
+        return true;
+      } catch {
+        pendingPersistenceRef.current = JSON.stringify(latestStateRef.current);
+        setPersistenceEnabled(false);
+        setHydrationIssue({ reason: 'storage-error' });
+        setPersistenceStatus('error');
+        return false;
+      }
+    })();
+
+    persistenceWriteRef.current = write;
+    void write.finally(() => {
+      if (persistenceWriteRef.current === write) persistenceWriteRef.current = undefined;
+    });
+    return write;
+  }, []);
 
   useEffect(() => {
     let active = true;
 
     storage
-      .getItem(STORAGE_KEY)
+      .getItem(APP_STATE_STORAGE_KEY)
       .then((raw) => {
-        if (!active || !raw) return;
-        const restored = JSON.parse(raw) as AppState;
-        if (restored.schemaVersion === 1) setState(restored);
+        if (!active) return;
+        const restored = restoreAppState(raw);
+        if (restored.status === 'ready') {
+          dispatch({ type: 'reset', state: restored.state });
+          setPersistenceEnabled(true);
+          setHydrationIssue(undefined);
+          setPersistenceStatus('saved');
+        } else {
+          // Keep the unknown/corrupt bytes intact until the user explicitly resets progress.
+          setPersistenceEnabled(false);
+          setHydrationIssue(restored);
+          setPersistenceStatus('error');
+        }
       })
       .catch(() => {
-        // A fresh local state is a safe fallback if persisted data is unreadable.
+        if (!active) return;
+        setPersistenceEnabled(false);
+        setHydrationIssue({ reason: 'storage-error' });
+        setPersistenceStatus('error');
       })
       .finally(() => {
         if (active) setIsHydrated(true);
@@ -89,173 +159,147 @@ export function AppProvider({ children }: PropsWithChildren) {
   }, []);
 
   useEffect(() => {
-    if (!isHydrated) return;
-    storage.setItem(STORAGE_KEY, JSON.stringify(state)).catch(() => {
-      // The UI remains usable in-memory when storage is unavailable.
-    });
-  }, [isHydrated, state]);
+    if (!isHydrated || !persistenceEnabled) return;
+    pendingPersistenceRef.current = JSON.stringify(state);
+    setPersistenceStatus('saving');
+    void flushPersistence();
+  }, [flushPersistence, isHydrated, persistenceEnabled, state]);
+
+  const retryPersistence = useCallback(async () => {
+    if (hydrationIssue && hydrationIssue.reason !== 'storage-error') return false;
+    pendingPersistenceRef.current = JSON.stringify(latestStateRef.current);
+    setPersistenceStatus('saving');
+    const saved = await flushPersistence();
+    if (saved) {
+      setHydrationIssue(undefined);
+      setPersistenceEnabled(true);
+    }
+    return saved;
+  }, [flushPersistence, hydrationIssue]);
 
   const value = useMemo<AppContextValue>(() => {
     const finishOnboarding: AppContextValue['finishOnboarding'] = (input) => {
+      const at = now();
       const profile: Profile = {
         ...input,
         name: input.name.trim() || 'Путник',
-        contractAcceptedAt: new Date().toISOString(),
+        contractAcceptedAt: at,
       };
-      setState((previous) =>
-        withTimestamp({ ...previous, onboardingCompleted: true, profile }),
-      );
+      dispatch({ type: 'finish-onboarding', profile, now: at });
     };
 
     const createGoal: AppContextValue['createGoal'] = (generated) => {
-      setState((previous) =>
-        withTimestamp({
-          ...previous,
-          activeGoal: generated.goal,
-          activePlan: generated.plan,
-          checkIns: [],
-          recovery: undefined,
-          character: {
-            ...previous.character,
-            energy: Math.max(previous.character.energy, 76),
-            buffs: ['Ясное намерение'],
-            debuffs: [],
-          },
-        }),
+      dispatch({ type: 'create-goal', generated, now: now() });
+    };
+
+    const beginMissionRun: AppContextValue['beginMissionRun'] = (missionId) => {
+      const existing = state.missionRuns[missionId];
+      if (existing) return existing;
+      const mission = state.activePlan?.missions.find(
+        (item) => item.id === missionId && item.outcome === 'pending',
       );
+      if (!mission) return undefined;
+      const at = now();
+      const run = createMissionRun(mission, at);
+      dispatch({ type: 'begin-mission-run', run, now: at });
+      return run;
     };
 
-    const reportMission: AppContextValue['reportMission'] = (missionId, outcome, note) => {
-      setState((previous) => {
-        if (!previous.activePlan) return previous;
-        const mission = previous.activePlan.missions.find((item) => item.id === missionId);
-        if (!mission || mission.outcome !== 'pending') return previous;
+    const restartMissionRun: AppContextValue['restartMissionRun'] = (missionId) => {
+      const mission = state.activePlan?.missions.find(
+        (item) => item.id === missionId && item.outcome === 'pending',
+      );
+      if (!mission) return undefined;
 
-        const multiplier = outcome === 'completed' ? 1 : outcome === 'partial' ? 0.45 : 0;
-        const xpDelta = Math.round(mission.xp * multiplier);
-        const energyDelta = outcome === 'completed' ? 6 : outcome === 'partial' ? -2 : -10;
-        const xp = previous.character.xp + xpDelta;
-        const missions = previous.activePlan.missions.map((item) =>
-          item.id === missionId ? { ...item, outcome } : item,
-        );
-        const allReported = missions.every((item) => item.outcome !== 'pending');
-        const newDebuffs =
-          outcome === 'skipped'
-            ? Array.from(new Set([...previous.character.debuffs, 'Туман сомнений']))
-            : previous.character.debuffs.filter((debuff) => debuff !== 'Туман сомнений');
-
-        return withTimestamp({
-          ...previous,
-          activeGoal: previous.activeGoal
-            ? { ...previous.activeGoal, status: allReported ? 'completed' : 'active' }
-            : undefined,
-          activePlan: { ...previous.activePlan, missions },
-          checkIns: [
-            {
-              id: `checkin-${Date.now().toString(36)}`,
-              missionId,
-              outcome,
-              note: note?.trim() || undefined,
-              xpDelta,
-              energyDelta,
-              createdAt: new Date().toISOString(),
-            },
-            ...previous.checkIns,
-          ],
-          character: {
-            ...previous.character,
-            xp,
-            level: Math.floor(xp / 100) + 1,
-            energy: Math.max(0, Math.min(100, previous.character.energy + energyDelta)),
-            streak: outcome === 'completed' ? previous.character.streak + 1 : 0,
-            worldLight: Math.max(
-              0,
-              Math.min(
-                100,
-                previous.character.worldLight +
-                  (outcome === 'completed' ? 7 : outcome === 'partial' ? 2 : -5),
-              ),
-            ),
-            buffs:
-              outcome === 'completed'
-                ? Array.from(new Set([...previous.character.buffs, 'Импульс']))
-                : previous.character.buffs.filter((buff) => buff !== 'Импульс'),
-            debuffs: newDebuffs,
-          },
-          recovery:
-            outcome === 'skipped'
-              ? {
-                  sourceMissionId: missionId,
-                  title: 'Развеять туман',
-                  description: 'Сделай двухминутную версию следующего шага. Это не отменит правду, но вернёт движение.',
-                  xp: 8,
-                }
-              : undefined,
-        });
-      });
+      let at = now();
+      let run = createMissionRun(mission, at);
+      if (run.id === state.missionRuns[missionId]?.id) {
+        at = new Date(Date.parse(at) + 1).toISOString();
+        run = createMissionRun(mission, at);
+      }
+      dispatch({ type: 'restart-mission-run', run, now: at });
+      return run;
     };
 
-    const completeRecovery: AppContextValue['completeRecovery'] = () => {
-      setState((previous) => {
-        if (!previous.recovery) return previous;
-        const xp = previous.character.xp + previous.recovery.xp;
-        return withTimestamp({
-          ...previous,
-          recovery: undefined,
-          character: {
-            ...previous.character,
-            xp,
-            level: Math.floor(xp / 100) + 1,
-            energy: Math.min(100, previous.character.energy + 8),
-            debuffs: previous.character.debuffs.filter((debuff) => debuff !== 'Туман сомнений'),
-            buffs: Array.from(new Set([...previous.character.buffs, 'Возвращение'])),
-          },
-        });
+    const saveMissionRun: AppContextValue['saveMissionRun'] = (run) => {
+      dispatch({ type: 'save-mission-run', run, now: now() });
+    };
+
+    const mutateMissionRun: AppContextValue['mutateMissionRun'] = (
+      missionId,
+      runId,
+      mutation,
+    ) => {
+      dispatch({ type: 'mutate-mission-run', missionId, runId, mutation, now: now() });
+    };
+
+    const finishMissionRun: AppContextValue['finishMissionRun'] = (
+      run,
+      finishReason = 'completed',
+    ) => {
+      dispatch({ type: 'finish-mission-run', run, finishReason, now: now() });
+    };
+
+    const reportMission: AppContextValue['reportMission'] = (
+      missionId,
+      outcome,
+      note,
+      runId,
+    ) => {
+      const at = now();
+      dispatch({
+        type: 'report-mission',
+        missionId,
+        outcome,
+        note,
+        runId,
+        checkInId: checkInId(at),
+        now: at,
       });
     };
 
     const setNotificationsEnabled: AppContextValue['setNotificationsEnabled'] = (enabled) => {
-      setState((previous) =>
-        withTimestamp({
-          ...previous,
-          settings: { ...previous.settings, notificationsEnabled: enabled },
-        }),
-      );
+      dispatch({ type: 'set-notifications-enabled', enabled, now: now() });
     };
 
     const startNewGoal: AppContextValue['startNewGoal'] = () => {
-      setState((previous) =>
-        withTimestamp({
-          ...previous,
-          activeGoal: undefined,
-          activePlan: undefined,
-          checkIns: [],
-          recovery: undefined,
-        }),
-      );
+      dispatch({ type: 'start-new-goal', now: now() });
     };
 
     const resetProgress: AppContextValue['resetProgress'] = async () => {
+      setPersistenceEnabled(false);
+      pendingPersistenceRef.current = undefined;
+      await persistenceWriteRef.current;
       await disableDailyReminder();
-      await storage.removeItem(STORAGE_KEY);
-      setState({ ...INITIAL_STATE, lastUpdatedAt: new Date().toISOString() });
+      await storage.removeItem(APP_STATE_STORAGE_KEY);
+      setHydrationIssue(undefined);
+      setPersistenceStatus('saving');
+      setPersistenceEnabled(true);
+      dispatch({ type: 'reset', state: createInitialAppState(now()) });
     };
 
     return {
       state,
       isHydrated,
+      hydrationIssue,
+      persistenceStatus,
+      retryPersistence,
       currentMission: getCurrentMission(state),
       completedCount:
         state.activePlan?.missions.filter((mission) => mission.outcome === 'completed').length ?? 0,
       finishOnboarding,
       createGoal,
+      beginMissionRun,
+      restartMissionRun,
+      saveMissionRun,
+      mutateMissionRun,
+      finishMissionRun,
       reportMission,
-      completeRecovery,
       startNewGoal,
       setNotificationsEnabled,
       resetProgress,
     };
-  }, [isHydrated, state]);
+  }, [hydrationIssue, isHydrated, persistenceStatus, retryPersistence, state]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

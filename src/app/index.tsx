@@ -27,12 +27,13 @@ export default function HomeScreen() {
     state,
     currentMission,
     completedCount,
+    mutateMissionRun,
     reportMission,
-    completeRecovery,
     startNewGoal,
   } = useApp();
   const [runnerVisible, setRunnerVisible] = useState(false);
   const [checkInVisible, setCheckInVisible] = useState(false);
+  const [checkInRunId, setCheckInRunId] = useState<string>();
 
   if (!state.activeGoal || !state.activePlan) return <GoalBuilder />;
 
@@ -43,6 +44,7 @@ export default function HomeScreen() {
   const firstName = state.profile?.name.split(' ')[0] ?? 'Путник';
   const missionDate = formatCalendarDate(currentMission?.scheduledDate);
   const missionTiming = calendarDateRelation(currentMission?.scheduledDate);
+  const currentRun = currentMission ? state.missionRuns[currentMission.id] : undefined;
   const today = new Intl.DateTimeFormat('ru-RU', {
     weekday: 'long',
     day: 'numeric',
@@ -101,20 +103,6 @@ export default function HomeScreen() {
           <ProgressBar value={xpInLevel / 100} color={Palette.violetSoft} />
         </LinearGradient>
 
-        {state.recovery ? (
-          <Card style={styles.recoveryCard}>
-            <View style={styles.sectionTop}>
-              <Pill tone="warning">путь возвращения</Pill>
-              <ThemedText type="smallBold" style={styles.warning}>
-                +{state.recovery.xp} XP
-              </ThemedText>
-            </View>
-            <ThemedText type="subtitle">{state.recovery.title}</ThemedText>
-            <ThemedText style={styles.muted}>{state.recovery.description}</ThemedText>
-            <AppButton label="Я сделал микро-шаг" variant="secondary" onPress={completeRecovery} />
-          </Card>
-        ) : null}
-
         {currentMission ? (
           <Card accent style={styles.missionCard}>
             <View style={styles.sectionTop}>
@@ -155,7 +143,13 @@ export default function HomeScreen() {
             </View>
             <AppButton
               label={
-                currentMission.execution?.kind === 'timer'
+                currentRun?.status === 'running'
+                  ? 'Продолжить сессию Actum'
+                  : currentRun?.status === 'awaiting_checkin'
+                    ? 'Открыть журнал и check-in'
+                    : currentMission.execution?.kind === 'in_app'
+                      ? 'Открыть сессию Actum'
+                  : currentMission.execution?.kind === 'timer'
                   ? 'Открыть таймер'
                   : currentMission.execution?.kind === 'routine'
                     ? 'Открыть комплекс'
@@ -215,19 +209,30 @@ export default function HomeScreen() {
         mission={currentMission}
         visible={runnerVisible}
         onClose={() => setRunnerVisible(false)}
-        onCheckIn={() => {
+        onCheckIn={(runId) => {
           setRunnerVisible(false);
+          setCheckInRunId(runId);
           setCheckInVisible(true);
         }}
       />
 
       <CheckInModal
         mission={currentMission}
+        run={currentMission ? state.missionRuns[currentMission.id] : undefined}
         visible={checkInVisible}
-        onClose={() => setCheckInVisible(false)}
-        onSubmit={(outcome, note) => {
-          if (currentMission) reportMission(currentMission.id, outcome, note);
+        onSaveComment={(runId, value) => {
+          if (currentMission) {
+            mutateMissionRun(currentMission.id, runId, { kind: 'set-final-comment', value });
+          }
+        }}
+        onClose={() => {
           setCheckInVisible(false);
+          setCheckInRunId(undefined);
+        }}
+        onSubmit={(outcome, note) => {
+          if (currentMission) reportMission(currentMission.id, outcome, note, checkInRunId);
+          setCheckInVisible(false);
+          setCheckInRunId(undefined);
         }}
       />
     </>
@@ -235,6 +240,13 @@ export default function HomeScreen() {
 }
 
 function missionDurationLabel(mission: Mission) {
+  if (mission.execution?.kind === 'in_app') {
+    const controls = mission.execution.blocks.reduce(
+      (total, block) => total + (block.kind === 'timer' || block.kind === 'counter' ? block.sets : 1),
+      0,
+    );
+    return `${mission.execution.blocks.length} блоков · ${controls} записей · ≈ ${mission.estimatedMinutes} мин`;
+  }
   if (mission.execution?.kind === 'routine') {
     const sets = mission.execution.actions.reduce((total, action) => total + action.sets, 0);
     return `${mission.execution.actions.length} действий · ${sets} подходов · ≈ ${mission.estimatedMinutes} мин`;
@@ -281,7 +293,6 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#FFFFFF18',
   },
-  recoveryCard: { borderColor: '#5B4228', backgroundColor: '#201B18' },
   sectionTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   missionCard: { paddingTop: Spacing.four },
   questMark: {

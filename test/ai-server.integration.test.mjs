@@ -27,13 +27,18 @@ const {
 } = serverModule;
 let gatewayHandler = initialHandleRequest;
 
-test('research prompt changes invalidate research and planning stage keys', () => {
+test('research and plan-v5 identity changes invalidate only their paid stage keys', () => {
   const webInput = goalInput('Invalidate the complete pipeline');
   const quickInput = goalInput('Keep quick planning stable', 'quick');
   const changedIdentity = {
     ...AI_PIPELINE_CACHE_IDENTITY,
     researchPromptVersion: `${AI_PIPELINE_CACHE_IDENTITY.researchPromptVersion}-next`,
     researchModel: `${AI_PIPELINE_CACHE_IDENTITY.researchModel}-next`,
+  };
+  const changedPlanIdentity = {
+    ...AI_PIPELINE_CACHE_IDENTITY,
+    contractVersion: `${AI_PIPELINE_CACHE_IDENTITY.contractVersion}-next`,
+    validatorVersion: `${AI_PIPELINE_CACHE_IDENTITY.validatorVersion}-next`,
   };
 
   const originalResearchKey = createResearchCacheKey(webInput);
@@ -48,6 +53,12 @@ test('research prompt changes invalidate research and planning stage keys', () =
     providerStageKey(originalPlanKey, 'planning'),
   );
   assert.equal(createPlanCacheKey(quickInput), createPlanCacheKey(quickInput, changedIdentity));
+  assert.equal(
+    createResearchCacheKey(webInput),
+    createResearchCacheKey(webInput, changedPlanIdentity),
+  );
+  assert.notEqual(createPlanCacheKey(webInput), createPlanCacheKey(webInput, changedPlanIdentity));
+  assert.notEqual(createPlanCacheKey(quickInput), createPlanCacheKey(quickInput, changedPlanIdentity));
 });
 
 test('web research metadata counts distinct search queries, not repeated tool calls', () => {
@@ -117,14 +128,16 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
       assert.equal(schema.properties.days.minItems, 14);
       assert.equal(schema.properties.days.maxItems, 14);
       assert.equal(dayProperties.estimatedMinutes.maximum, 20);
-      assert.equal(
-        dayProperties.execution.anyOf[1].properties.durationSeconds.maximum,
-        1200,
-      );
-      for (const routineVariant of dayProperties.execution.anyOf[2].properties.actions.items.anyOf) {
-        assert.equal(routineVariant.properties.workSecondsPerSet.maximum, 1200);
-        assert.equal(routineVariant.properties.restSeconds.maximum, 1200);
-      }
+      const blockVariants = dayProperties.execution.properties.blocks.items.anyOf;
+      const block = (blockKind) =>
+        blockVariants.find((variant) => variant.properties.kind.enum[0] === blockKind);
+      assert.equal(dayProperties.execution.properties.kind.enum[0], 'in_app');
+      assert.equal(block('timer').properties.durationSecondsPerSet.maximum, 1200);
+      assert.equal(block('timer').properties.restSeconds.maximum, 1200);
+      assert.equal(block('counter').properties.workSecondsPerSet.maximum, 1200);
+      assert.equal(block('counter').properties.restSeconds.maximum, 1200);
+      assert.equal(block('checklist').properties.estimatedSeconds.maximum, 1200);
+      assert.equal(block('text_log').properties.estimatedSeconds.maximum, 1200);
       assert.equal(body.max_output_tokens, 30_000);
     }
     const input = JSON.parse(body.input);
@@ -144,8 +157,8 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
     if (input.goal === 'Cache invalid completed output') {
       return jsonResponse(invalidPlanPayload());
     }
-    if (input.goal === 'Reject vague completed output') {
-      return jsonResponse(vaguePlanPayload());
+    if (input.goal === 'Reject off-app completed output') {
+      return jsonResponse(offAppPlanPayload());
     }
     if (input.goal === 'Reject mismatched calendar output') {
       return jsonResponse(scheduleMismatchPlanPayload());
@@ -176,8 +189,10 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   assert.equal(health.body.transport, 'background-polling');
   assert.equal(health.body.configured, true);
   assert.equal(health.body.baselineParserVersion, 'baseline-v1');
-  assert.equal(health.body.validatorVersion, 'plan-validator-v4.1');
-  assert.equal(health.body.researchPromptVersion, 'actum-research-2026-08-01-v1.2');
+  assert.equal(health.body.contractVersion, 'plan-v5');
+  assert.equal(health.body.validatorVersion, 'plan-validator-v5');
+  assert.equal(health.body.promptVersion, 'actum-plan-2026-08-01-closed-loop-v5');
+  assert.equal(health.body.researchPromptVersion, 'actum-research-2026-08-01-closed-loop-v2');
 
   const firstInput = goalInput('Resume paid background work');
   const first = await postPlan(firstInput, 'actum_test_failure_001');
@@ -196,6 +211,8 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   ).handleRequest;
   const second = await postPlan(firstInput, 'actum_test_retry_002');
   assert.equal(second.status, 200);
+  assert.equal(second.body.meta.contractVersion, 'plan-v5');
+  assert.equal(second.body.meta.promptVersion, 'actum-plan-2026-08-01-closed-loop-v5');
   assert.equal(second.body.meta.researchResponseId, 'resp_research_test');
   assert.equal(second.body.meta.sources[0].url, 'https://example.com/research');
   assert.deepEqual(
@@ -281,17 +298,18 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
     1,
   );
 
-  const vagueInput = goalInput('Reject vague completed output', 'quick');
-  const vagueFirst = await postPlan(vagueInput, 'actum_test_vague_016');
-  assert.equal(vagueFirst.status, 502);
-  assert.equal(vagueFirst.body.code, 'upstream_invalid_plan_contract');
-  assert.match(vagueFirst.body.error, /days\.0\.steps/);
-  const vagueSecond = await postPlan(vagueInput, 'actum_test_vague_017');
-  assert.equal(vagueSecond.status, 502);
-  assert.equal(vagueSecond.body.code, 'upstream_invalid_plan_contract');
+  const offAppInput = goalInput('Reject off-app completed output', 'quick');
+  const offAppFirst = await postPlan(offAppInput, 'actum_test_off_app_016');
+  assert.equal(offAppFirst.status, 502);
+  assert.equal(offAppFirst.body.code, 'upstream_invalid_plan_contract');
+  assert.match(offAppFirst.body.error, /days\.0\.execution\.blocks\.0\.instruction/);
+  assert.match(offAppFirst.body.error, /внешняя зависимость/);
+  const offAppSecond = await postPlan(offAppInput, 'actum_test_off_app_017');
+  assert.equal(offAppSecond.status, 502);
+  assert.equal(offAppSecond.body.code, 'upstream_invalid_plan_contract');
   assert.equal(
     apiCalls.filter(
-      (call) => call.kind === 'planning' && call.input.goal === 'Reject vague completed output',
+      (call) => call.kind === 'planning' && call.input.goal === 'Reject off-app completed output',
     ).length,
     1,
   );
@@ -417,8 +435,8 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   assert.match(joinedLogs, /resume_pending response=resp_plan_resume_test/);
   assert.match(joinedLogs, /retry_guarded=true/);
   assert.match(joinedLogs, /actum_test_invalid_009 stage=planning stage_result_cache_hit/);
-  assert.match(joinedLogs, /actum_test_vague_017 stage=planning stage_result_cache_hit/);
-  assert.match(joinedLogs, /contract_path=days\.0\.steps/);
+  assert.match(joinedLogs, /actum_test_off_app_017 stage=planning stage_result_cache_hit/);
+  assert.match(joinedLogs, /contract_path=days\.0\.execution\.blocks\.0\.instruction/);
   assert.match(joinedLogs, /actum_test_cache_003 cache_hit/);
   assert.doesNotMatch(joinedLogs, /actum_test_cache_003 inflight_join/);
   assert.match(joinedLogs, /inflight_join/);
@@ -583,16 +601,12 @@ function terminalPlanFailurePayload() {
   };
 }
 
-function vaguePlanPayload() {
+function offAppPlanPayload() {
   const plan = validPlan();
-  plan.days[0].steps = ['Подготовься.'];
-  plan.days[0].execution = {
-    kind: 'manual',
-    durationSeconds: null,
-    successCriterion: 'Подготовка якобы завершена.',
-  };
+  plan.days[0].execution.blocks[0].instruction =
+    'Send the result as an email message after every set.';
   return {
-    id: 'resp_vague_plan_test',
+    id: 'resp_off_app_plan_test',
     status: 'completed',
     output: [
       {
@@ -654,36 +668,31 @@ function validPlan() {
         type: 'practice',
         estimatedMinutes: 10,
         xp: 20,
-        steps: [
-          'Place a mat on a flat surface and keep the test counter visible.',
-          'Keep the prescribed tempo for every repetition.',
-        ],
         execution: {
-          kind: 'routine',
-          actions: [
+          kind: 'in_app',
+          blocks: [
             {
+              kind: 'counter',
               title: 'Controlled test repetitions',
               instruction: 'Complete each repetition with the same range of motion.',
               sets: 3,
-              quantity: 8,
-              workSecondsPerSet: 32,
+              targetPerSet: 8,
               unit: 'reps',
               unitLabel: null,
+              workSecondsPerSet: 32,
+              restSeconds: 30,
+              tempo: 'Steady controlled tempo',
               loadBasis: {
                 percentage: 100,
                 baseValue: 8,
                 baseUnit: 'reps',
                 result: 8,
               },
-              restSeconds: 30,
-              tempo: '2 seconds out, 2 seconds back',
               successCriterion: 'All eight repetitions keep the prescribed tempo.',
             },
           ],
           successCriterion: 'All three sets are completed with eight controlled repetitions.',
         },
-        progressionRule:
-          'If all sets meet the criterion, add 1 repetition next time; otherwise repeat 3 sets of 8.',
         warning: null,
       };
     }),

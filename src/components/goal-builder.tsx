@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Linking,
   Platform,
   Pressable,
   StyleSheet,
@@ -149,7 +148,7 @@ export function GoalBuilder() {
               <ThemedText style={[styles.noticeIcon, !risk.safe && styles.warning]}>⌁</ThemedText>
               <ThemedText type="small" style={styles.noticeText}>
                 {risk.safe
-                  ? 'Actum показывает допущения и предупреждения, но не решает за тебя, какую цель выбирать.'
+                  ? 'Выполнение будет замкнуто внутри Actum: встроенные таймеры, счётчики, чек-листы, ответы и журнал — без внешних записей и сервисов.'
                   : risk.message}
               </ThemedText>
             </Card>
@@ -339,7 +338,7 @@ export function GoalBuilder() {
                   {risk.safe ? 'план готов' : 'предупреждение показано'}
                 </Pill>
                 <ThemedText type="small" style={styles.muted}>
-                  plan-v4
+                  plan-v5 · всё внутри Actum
                 </ThemedText>
               </View>
               <ThemedText type="subtitle">{preview.goal.title}</ThemedText>
@@ -376,9 +375,9 @@ export function GoalBuilder() {
 
             <View style={styles.section}>
               <ThemedText type="eyebrow" style={styles.muted}>
-                Первые календарные дни
+                Календарь · все дни
               </ThemedText>
-              {preview.plan.missions.slice(0, 3).map((mission, index) => (
+              {preview.plan.missions.map((mission, index) => (
                 <View key={mission.id} style={styles.missionPreview}>
                   <View style={styles.sequence}>
                     <ThemedText type="smallBold" style={styles.sequenceText}>
@@ -393,18 +392,16 @@ export function GoalBuilder() {
                     <ThemedText type="small" style={styles.muted}>
                       {missionDurationLabel(mission)} · {mission.xp} XP
                     </ThemedText>
-                    {mission.execution?.kind === 'routine' ? (
-                      <ThemedText type="small" style={styles.prescriptionPreview} numberOfLines={3}>
-                        {mission.execution.actions
-                          .slice(0, 2)
-                          .map(
-                            (action) =>
-                              `${action.title}: ${action.sets}×${action.quantity} ${routineUnitLabel(action.unit, action.unitLabel)}`,
-                          )
-                          .join(' → ')}
-                        {mission.execution.actions.length > 2
-                          ? ` → ещё ${mission.execution.actions.length - 2}`
-                          : ''}
+                    {mission.execution?.kind === 'in_app' ? (
+                      <ThemedText type="small" style={styles.prescriptionPreview}>
+                        {mission.execution.blocks
+                          .map((block) => inAppBlockPreview(block))
+                          .join('\n')}
+                      </ThemedText>
+                    ) : null}
+                    {mission.completionCriterion ? (
+                      <ThemedText type="small" style={styles.missionCriterion}>
+                        Критерий дня: {mission.completionCriterion}
                       </ThemedText>
                     ) : null}
                   </View>
@@ -420,7 +417,7 @@ export function GoalBuilder() {
                     ? 'Web research · Responses API'
                     : preview.plan.research.method === 'openai-responses-v1'
                       ? 'GPT · Responses API'
-                      : 'local fallback'}
+                      : 'legacy local'}
                 </Pill>
               </View>
               <ThemedText type="small" style={styles.muted}>
@@ -428,18 +425,22 @@ export function GoalBuilder() {
                   ? `Сделано ${preview.plan.research.request?.webSearchCount ?? 0} web-поисков; найдено ${preview.plan.research.sources?.length ?? 0} цитируемых источников.`
                   : preview.plan.research.method === 'openai-responses-v1'
                     ? 'План создан GPT по твоей формулировке и ограничениям без web-поиска.'
-                  : 'Это контролируемый локальный шаблон на случай, если AI-сервер недоступен.'}
+                  : 'Это сохранённый локальный план старой версии.'}
               </ThemedText>
+              {preview.plan.research.sources?.length ? (
+                <ThemedText type="small" style={styles.muted}>
+                  Источники уже использованы при генерации; открывать сайты для выполнения не нужно.
+                </ThemedText>
+              ) : null}
               {preview.plan.research.sources?.slice(0, 3).map((source) => (
-                <Pressable
-                  accessibilityRole="link"
-                  key={source.url}
-                  onPress={() => Linking.openURL(source.url).catch(() => undefined)}
-                  style={({ pressed }) => [styles.sourceLink, pressed && styles.pressed]}>
-                  <ThemedText type="small" numberOfLines={2} style={styles.sourceText}>
-                    ↗ {source.title}
+                <View key={source.url} style={styles.sourceRecord}>
+                  <ThemedText type="smallBold" style={styles.sourceText}>
+                    {source.title}
                   </ThemedText>
-                </Pressable>
+                  <ThemedText type="small" style={styles.sourceDomain}>
+                    {sourceDomain(source.url)}
+                  </ThemedText>
+                </View>
               ))}
               {preview.plan.research.request ? (
                 <ThemedText type="small" selectable style={styles.requestId}>
@@ -537,6 +538,13 @@ function Meta({ value, label }: { value: string; label: string }) {
 }
 
 function missionDurationLabel(mission: Mission) {
+  if (mission.execution?.kind === 'in_app') {
+    const timedSets = mission.execution.blocks.reduce(
+      (total, block) => total + (block.kind === 'timer' || block.kind === 'counter' ? block.sets : 1),
+      0,
+    );
+    return `${mission.execution.blocks.length} блоков · ${timedSets} отметок · ≈ ${mission.estimatedMinutes} мин`;
+  }
   if (mission.execution?.kind === 'routine') {
     const sets = mission.execution.actions.reduce((total, action) => total + action.sets, 0);
     return `${mission.execution.actions.length} действий · ${sets} подходов · ≈ ${mission.estimatedMinutes} мин`;
@@ -547,6 +555,34 @@ function missionDurationLabel(mission: Mission) {
     return `${timer} таймер · ≈ ${mission.estimatedMinutes} мин всего`;
   }
   return `${mission.estimatedMinutes} мин`;
+}
+
+function inAppBlockPreview(
+  block: Extract<NonNullable<Mission['execution']>, { kind: 'in_app' }>['blocks'][number],
+) {
+  if (block.kind === 'timer') {
+    return `• ${block.title}: ${block.instruction} · ${block.sets}×${formatCompactDuration(block.durationSecondsPerSet)}, отдых ${formatCompactDuration(block.restSeconds)}${loadBasisPreview(block.loadBasis, 'сек')} · критерий: ${block.successCriterion}`;
+  }
+  if (block.kind === 'counter') {
+    const unit = routineUnitLabel(block.unit, block.unitLabel);
+    return `• ${block.title}: ${block.instruction} · ${block.sets}×${block.targetPerSet} ${unit}, время подхода ${formatCompactDuration(block.workSecondsPerSet)}, отдых ${formatCompactDuration(block.restSeconds)}${block.tempo ? ` · темп: ${block.tempo}` : ''}${loadBasisPreview(block.loadBasis, unit)} · критерий: ${block.successCriterion}`;
+  }
+  if (block.kind === 'checklist') {
+    return `• ${block.title}: ${block.items.join('; ')} · ориентир ${formatCompactDuration(block.estimatedSeconds)} · критерий: ${block.successCriterion}`;
+  }
+  return `• ${block.title}: ${block.prompt} · ${block.minCharacters}–${block.maxCharacters} знаков · ориентир ${formatCompactDuration(block.estimatedSeconds)} · критерий: ${block.successCriterion}`;
+}
+
+function loadBasisPreview(
+  basis: { percentage: number; baseValue: number; baseUnit: string; result: number } | undefined,
+  targetUnit: string,
+) {
+  if (!basis) return '';
+  return ` · расчёт: ${basis.percentage}% × ${basis.baseValue} ${basis.baseUnit} = ${basis.result} ${targetUnit}`;
+}
+
+function formatCompactDuration(seconds: number) {
+  return seconds >= 60 && seconds % 60 === 0 ? `${seconds / 60} мин` : `${seconds} сек`;
 }
 
 function routineUnitLabel(unit: RoutineUnit, custom?: string) {
@@ -562,6 +598,14 @@ function routineUnitLabel(unit: RoutineUnit, custom?: string) {
     attempts: 'попыток',
   };
   return labels[unit];
+}
+
+function sourceDomain(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return 'источник сохранён в плане';
+  }
 }
 
 function baselineMetricLabel(baseline: NonNullable<GeneratedGoal['plan']['baseline']>) {
@@ -716,11 +760,14 @@ const styles = StyleSheet.create({
   missionDate: { color: Palette.violetSoft },
   methodCard: { borderRadius: Radius.medium },
   methodHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  sourceLink: {
+  sourceRecord: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Palette.line,
     paddingTop: Spacing.two,
+    gap: 3,
   },
   sourceText: { color: Palette.violetSoft },
+  sourceDomain: { color: Palette.textDim },
+  missionCriterion: { color: Palette.text, lineHeight: 20 },
   requestId: { color: Palette.textDim, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
 });

@@ -3,28 +3,66 @@ import { Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
+import { InAppMissionRunner } from '@/components/in-app-mission-runner';
 import { AppButton, Pill, ProgressBar } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import type { Mission, RoutineAction, RoutineLoadBasis } from '@/domain/types';
 import { formatCalendarDate } from '@/lib/calendar-date';
+import { useApp } from '@/state/app-context';
 
 type RunnerPhase = 'instructions' | 'running' | 'finished';
 type FinishReason = 'completed' | 'elapsed' | 'stopped';
 type RoutineStage = 'work' | 'rest';
 
-export function MissionRunner({
+type MissionRunnerProps = {
+  mission?: Mission;
+  visible: boolean;
+  readOnly?: boolean;
+  onClose(): void;
+  onCheckIn(runId?: string): void;
+};
+
+export function MissionRunner(props: MissionRunnerProps) {
+  const {
+    state,
+    persistenceStatus,
+    retryPersistence,
+    beginMissionRun,
+    saveMissionRun,
+    mutateMissionRun,
+    finishMissionRun,
+  } = useApp();
+  const { mission, readOnly = false } = props;
+
+  if (mission?.execution?.kind === 'in_app') {
+    return (
+      <InAppMissionRunner
+        mission={mission}
+        run={state.missionRuns[mission.id]}
+        visible={props.visible}
+        readOnly={readOnly}
+        persistenceStatus={persistenceStatus}
+        onClose={props.onClose}
+        onBegin={() => beginMissionRun(mission.id)}
+        onSave={saveMissionRun}
+        onMutate={(runId, mutation) => mutateMissionRun(mission.id, runId, mutation)}
+        onFinish={finishMissionRun}
+        onCheckIn={props.onCheckIn}
+        onRetryPersistence={retryPersistence}
+      />
+    );
+  }
+
+  return <LegacyMissionRunner {...props} readOnly={readOnly} />;
+}
+
+function LegacyMissionRunner({
   mission,
   visible,
   readOnly = false,
   onClose,
   onCheckIn,
-}: {
-  mission?: Mission;
-  visible: boolean;
-  readOnly?: boolean;
-  onClose(): void;
-  onCheckIn(): void;
-}) {
+}: MissionRunnerProps) {
   const [phase, setPhase] = useState<RunnerPhase>('instructions');
   const [startedAt, setStartedAt] = useState<number>();
   const [endAt, setEndAt] = useState<number>();

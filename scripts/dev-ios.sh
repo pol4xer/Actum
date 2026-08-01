@@ -58,6 +58,7 @@ fail() {
 [[ -s "${nvm_root}/nvm.sh" ]] || fail "nvm was not found at ${nvm_root}/nvm.sh."
 [[ -f "${project_dir}/.env.local" ]] || fail 'create .env.local from .env.example first.'
 command -v osascript >/dev/null 2>&1 || fail 'osascript is unavailable.'
+command -v open >/dev/null 2>&1 || fail 'the macOS open command is unavailable.'
 command -v xcrun >/dev/null 2>&1 || fail 'Xcode command-line tools are unavailable.'
 xcrun --find simctl >/dev/null 2>&1 || fail 'iOS Simulator tools are unavailable. Open Xcode once and finish its setup.'
 
@@ -108,7 +109,8 @@ if ((rebuild)); then
   app_task='corepack pnpm ios'
   app_description='native rebuild + iOS Simulator'
 else
-  app_task='corepack pnpm exec expo start --dev-client --ios'
+  # Metro must stay alive even when a cold Simulator times out while opening the deep link.
+  app_task='corepack pnpm exec expo start --dev-client'
   app_description='Expo dev server + iOS Simulator'
 fi
 
@@ -138,5 +140,44 @@ on run argv
   end tell
 end run
 APPLESCRIPT
+
+if ((!rebuild)); then
+  metro_ready=0
+  simulator_ready=0
+  open -a Simulator
+
+  for attempt in {1..45}; do
+    if lsof -tiTCP:"${metro_port}" -sTCP:LISTEN >/dev/null 2>&1; then
+      metro_ready=1
+      break
+    fi
+    sleep 1
+  done
+
+  for attempt in {1..60}; do
+    if xcrun simctl list devices booted | grep -q '(Booted)'; then
+      simulator_ready=1
+      break
+    fi
+    sleep 1
+  done
+
+  if ((metro_ready && simulator_ready)); then
+    dev_client_url='exp+actum://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081'
+    opened=0
+    for attempt in 1 2 3; do
+      if xcrun simctl openurl booted "${dev_client_url}" >/dev/null 2>&1; then
+        opened=1
+        break
+      fi
+      sleep 2
+    done
+    if ((!opened)); then
+      printf 'Actum launch warning: Metro is running, but the development app did not open. Use --rebuild once.\n' >&2
+    fi
+  else
+    printf 'Actum launch warning: Metro is running, but Simulator was not ready in time.\n' >&2
+  fi
+fi
 
 printf 'Actum started: AI server + %s.\n' "${app_description}"
