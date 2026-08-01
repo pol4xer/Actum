@@ -8,6 +8,13 @@ export function addLocalCalendarDays(date: Date, days: number) {
   return result;
 }
 
+export function addCalendarDaysToKey(value: string, days: number) {
+  const parts = parseDateKey(value);
+  if (!parts || !Number.isInteger(days)) return undefined;
+  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days));
+  return date.toISOString().slice(0, 10);
+}
+
 export function toLocalDateKey(date: Date) {
   const year = String(date.getFullYear()).padStart(4, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');

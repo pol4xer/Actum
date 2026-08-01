@@ -3,6 +3,7 @@ import {
   isMissionRunSuccessful,
   replaceMissionRunCheckpoint,
 } from '../domain/mission-run';
+import { addCalendarDaysToKey } from '../lib/calendar-date';
 import type {
   AppState,
   GeneratedGoal,
@@ -63,6 +64,7 @@ export type AppStateAction =
       now: string;
     }
   | { type: 'set-notifications-enabled'; enabled: boolean; now: string }
+  | { type: 'restart-active-plan'; planId: string; startDate: string; now: string }
   | { type: 'start-new-goal'; now: string }
   | { type: 'reset'; state: AppState };
 
@@ -542,6 +544,49 @@ export function appStateReducer(state: AppState, action: AppStateAction): AppSta
       {
         ...state,
         settings: { ...state.settings, notificationsEnabled: action.enabled },
+      },
+      action.now,
+    );
+  }
+
+  if (action.type === 'restart-active-plan') {
+    if (
+      !state.activeGoal ||
+      !state.activePlan ||
+      state.activePlan.id !== action.planId
+    ) {
+      return state;
+    }
+    const scheduledDates = state.activePlan.missions.map((mission) => {
+      const dayNumber = mission.dayNumber ?? mission.sequence;
+      if (!Number.isInteger(dayNumber) || dayNumber < 1) return undefined;
+      return addCalendarDaysToKey(action.startDate, dayNumber - 1);
+    });
+    const targetDate = addCalendarDaysToKey(
+      action.startDate,
+      Math.max(0, state.activePlan.horizonDays - 1),
+    );
+    if (scheduledDates.some((date) => date === undefined) || !targetDate) return state;
+
+    return withTimestamp(
+      {
+        ...state,
+        activeGoal: {
+          ...state.activeGoal,
+          status: 'active',
+          targetDate: `${targetDate}T00:00:00.000Z`,
+        },
+        activePlan: {
+          ...state.activePlan,
+          missions: state.activePlan.missions.map((mission, index) => ({
+            ...mission,
+            outcome: 'pending',
+            scheduledDate: scheduledDates[index],
+          })),
+        },
+        checkIns: [],
+        missionRuns: {},
+        recovery: undefined,
       },
       action.now,
     );

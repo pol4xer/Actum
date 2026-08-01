@@ -33,8 +33,11 @@ function compileModule(sourcePath, outputName, transform = (source) => source) {
 
 await import('node:fs/promises').then(({ mkdir }) => mkdir(compiledDirectory));
 compileModule('src/domain/mission-run.ts', 'mission-run.mjs');
+compileModule('src/lib/calendar-date.ts', 'calendar-date.mjs');
 compileModule('src/state/app-state.ts', 'app-state.mjs', (source) =>
-  source.replace("from '../domain/mission-run';", "from './mission-run.mjs';"),
+  source
+    .replace("from '../domain/mission-run';", "from './mission-run.mjs';")
+    .replace("from '../lib/calendar-date';", "from './calendar-date.mjs';"),
 );
 
 const {
@@ -43,6 +46,9 @@ const {
   isMissionRunSuccessful,
   missionRunSummary,
 } = await import(pathToFileURL(join(compiledDirectory, 'mission-run.mjs')).href);
+const { addCalendarDaysToKey } = await import(
+  pathToFileURL(join(compiledDirectory, 'calendar-date.mjs')).href
+);
 const {
   APP_STATE_STORAGE_KEY,
   appStateReducer,
@@ -424,4 +430,121 @@ test('reporting requires the current finished run and restarting replaces its ch
 
   state = appStateReducer(state, { type: 'start-new-goal', now: T2 });
   assert.deepEqual(state.missionRuns, {});
+});
+
+test('restarting the active plan preserves paid plan data and resets only its local journey', () => {
+  let state = stateWithGoal();
+  const originalGoal = structuredClone(state.activeGoal);
+  const originalPlanMetadata = {
+    id: state.activePlan.id,
+    version: state.activePlan.version,
+    createdAt: state.activePlan.createdAt,
+    research: structuredClone(state.activePlan.research),
+  };
+  const run = createMissionRun(state.activePlan.missions[0], T0);
+  state = appStateReducer(state, { type: 'begin-mission-run', run, now: T0 });
+  state = appStateReducer(state, {
+    type: 'finish-mission-run',
+    run: completedCheckpoint(run),
+    finishReason: 'completed',
+    now: T1,
+  });
+  state = appStateReducer(state, {
+    type: 'report-mission',
+    missionId: 'mission-1',
+    runId: run.id,
+    outcome: 'completed',
+    note: 'Saved result that should be cleared.',
+    checkInId: 'checkin-before-plan-restart',
+    now: T2,
+  });
+  const characterAfterCompletion = structuredClone(state.character);
+  assert.equal(state.activeGoal.status, 'completed');
+  const secondMission = {
+    ...structuredClone(state.activePlan.missions[0]),
+    id: 'mission-2',
+    dayNumber: undefined,
+    sequence: 2,
+    outcome: 'partial',
+    scheduledDate: '2026-08-02',
+  };
+  state = {
+    ...state,
+    activePlan: {
+      ...state.activePlan,
+      horizonDays: 2,
+      missions: [...state.activePlan.missions, secondMission],
+    },
+  };
+
+  const restarted = appStateReducer(state, {
+    type: 'restart-active-plan',
+    planId: 'plan-1',
+    startDate: '2026-08-10',
+    now: '2026-08-10T08:00:00.000Z',
+  });
+
+  assert.equal(restarted.activeGoal.id, originalGoal.id);
+  assert.equal(restarted.activeGoal.rawPrompt, originalGoal.rawPrompt);
+  assert.equal(restarted.activeGoal.status, 'active');
+  assert.equal(restarted.activeGoal.targetDate, '2026-08-11T00:00:00.000Z');
+  assert.equal(restarted.activePlan.id, originalPlanMetadata.id);
+  assert.equal(restarted.activePlan.version, originalPlanMetadata.version);
+  assert.equal(restarted.activePlan.createdAt, originalPlanMetadata.createdAt);
+  assert.deepEqual(restarted.activePlan.research, originalPlanMetadata.research);
+  assert.equal(restarted.activePlan.missions[0].outcome, 'pending');
+  assert.equal(restarted.activePlan.missions[0].scheduledDate, '2026-08-10');
+  assert.equal(restarted.activePlan.missions[1].outcome, 'pending');
+  assert.equal(restarted.activePlan.missions[1].scheduledDate, '2026-08-11');
+  assert.deepEqual(restarted.missionRuns, {});
+  assert.deepEqual(restarted.checkIns, []);
+  assert.deepEqual(restarted.character, characterAfterCompletion);
+  const persistedRestart = JSON.parse(JSON.stringify(restarted));
+  assert.deepEqual(restoreAppState(JSON.stringify(restarted)), {
+    status: 'ready',
+    source: 'stored',
+    state: persistedRestart,
+    migrated: false,
+  });
+});
+
+test('restarting a plan is a no-op without a selected plan or with an invalid date', () => {
+  const empty = createInitialAppState(T0);
+  assert.equal(
+    appStateReducer(empty, {
+      type: 'restart-active-plan',
+      planId: 'plan-1',
+      startDate: '2026-08-10',
+      now: T1,
+    }),
+    empty,
+  );
+
+  const selected = stateWithGoal();
+  assert.equal(
+    appStateReducer(selected, {
+      type: 'restart-active-plan',
+      planId: 'plan-1',
+      startDate: 'not-a-date',
+      now: T1,
+    }),
+    selected,
+  );
+  assert.equal(
+    appStateReducer(selected, {
+      type: 'restart-active-plan',
+      planId: 'another-plan',
+      startDate: '2026-08-10',
+      now: T1,
+    }),
+    selected,
+  );
+});
+
+test('calendar-date restart arithmetic handles leap days and rejects invalid keys', () => {
+  assert.equal(addCalendarDaysToKey('2028-02-28', 1), '2028-02-29');
+  assert.equal(addCalendarDaysToKey('2028-02-28', 2), '2028-03-01');
+  assert.equal(addCalendarDaysToKey('2026-12-31', 1), '2027-01-01');
+  assert.equal(addCalendarDaysToKey('2026-02-30', 1), undefined);
+  assert.equal(addCalendarDaysToKey('not-a-date', 1), undefined);
 });

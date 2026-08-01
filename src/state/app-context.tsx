@@ -23,6 +23,7 @@ import type {
   StrictnessMode,
 } from '@/domain/types';
 import { disableDailyReminder } from '@/lib/notifications';
+import { toLocalDateKey } from '@/lib/calendar-date';
 import storage from '@/lib/storage';
 
 import {
@@ -65,6 +66,7 @@ export type AppContextValue = {
     note?: string,
     runId?: string,
   ): void;
+  restartActivePlan(planId: string): void;
   startNewGoal(): void;
   setNotificationsEnabled(enabled: boolean): void;
   resetProgress(): Promise<void>;
@@ -262,6 +264,16 @@ export function AppProvider({ children }: PropsWithChildren) {
       dispatch({ type: 'set-notifications-enabled', enabled, now: now() });
     };
 
+    const restartActivePlan: AppContextValue['restartActivePlan'] = (planId) => {
+      const restartedAt = new Date();
+      dispatch({
+        type: 'restart-active-plan',
+        planId,
+        startDate: toLocalDateKey(restartedAt),
+        now: restartedAt.toISOString(),
+      });
+    };
+
     const startNewGoal: AppContextValue['startNewGoal'] = () => {
       dispatch({ type: 'start-new-goal', now: now() });
     };
@@ -295,6 +307,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       mutateMissionRun,
       finishMissionRun,
       reportMission,
+      restartActivePlan,
       startNewGoal,
       setNotificationsEnabled,
       resetProgress,

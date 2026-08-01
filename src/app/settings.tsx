@@ -12,6 +12,7 @@ export default function SettingsScreen() {
   const {
     state,
     currentMission,
+    restartActivePlan,
     startNewGoal,
     setNotificationsEnabled,
     resetProgress,
@@ -72,6 +73,45 @@ export default function SettingsScreen() {
       [
         { text: 'Отмена', style: 'cancel' },
         { text: 'Сменить цель', style: 'destructive', onPress: startNewGoal },
+      ],
+    );
+  };
+
+  const confirmRestartPlan = () => {
+    const plan = state.activePlan;
+    if (!state.activeGoal || !plan) return;
+    const firstMissionTitle = plan.missions[0]?.title;
+    Alert.alert(
+      'Начать текущий план заново?',
+      'Сам план, research и ответы GPT останутся. Выполненные дни, сессии, check-in и комментарии будут очищены. Профиль, уровень и XP сохранятся. OpenAI не вызывается.',
+      [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: 'Начать с Дня 1',
+          style: 'destructive',
+          onPress: async () => {
+            restartActivePlan(plan.id);
+            let reminderUpdated = true;
+            if (state.settings.notificationsEnabled) {
+              try {
+                reminderUpdated = await enableDailyReminder(
+                  state.settings.reminderHour,
+                  state.settings.reminderMinute,
+                  firstMissionTitle,
+                );
+                if (!reminderUpdated) setNotificationsEnabled(false);
+              } catch {
+                reminderUpdated = false;
+              }
+            }
+            Alert.alert(
+              'Текущий план перезапущен',
+              reminderUpdated
+                ? 'День 1 назначен на сегодня. Новый запрос к GPT не выполнялся.'
+                : 'День 1 назначен на сегодня без запроса к GPT. Ежедневное напоминание обновить не удалось.',
+            );
+          },
+        },
       ],
     );
   };
@@ -167,6 +207,13 @@ export default function SettingsScreen() {
           variant="secondary"
           onPress={() => Linking.openURL('https://docs.expo.dev/versions/v57.0.0/')}
         />
+        {state.activeGoal && state.activePlan ? (
+          <AppButton
+            label="Начать текущий план заново · без GPT"
+            variant="secondary"
+            onPress={confirmRestartPlan}
+          />
+        ) : null}
         {state.activeGoal ? (
           <AppButton label="Начать другую цель" variant="secondary" onPress={confirmNewGoal} />
         ) : null}
