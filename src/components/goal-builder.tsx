@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -14,7 +14,11 @@ import { AppButton, Card, Pill, Screen, ScreenHeader } from '@/components/ui/pri
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import { checkGoalRisk } from '@/domain/goal-engine';
 import { GeneratedGoal, GoalInput, Mission, RoutineUnit } from '@/domain/types';
-import { AIPlannerError, generateGoalWithAI } from '@/lib/ai-planner';
+import {
+  AIPlannerError,
+  generateGoalWithAI,
+  recoverLatestSavedGoal,
+} from '@/lib/ai-planner';
 import type { AIPlannerErrorCode } from '@/lib/ai-planner';
 import { formatCalendarDate } from '@/lib/calendar-date';
 import { useApp } from '@/state/app-context';
@@ -41,6 +45,7 @@ export function GoalBuilder() {
   const [preview, setPreview] = useState<GeneratedGoal>();
   const [generationError, setGenerationError] = useState('');
   const [generationErrorCode, setGenerationErrorCode] = useState<AIPlannerErrorCode>();
+  const [savedPreview, setSavedPreview] = useState<GeneratedGoal>();
   const risk = useMemo(() => checkGoalRisk(prompt), [prompt]);
   const input = useMemo(
     () => ({
@@ -56,14 +61,42 @@ export function GoalBuilder() {
   );
   const detailsComplete = baseline.trim().length >= 2 && targetTimeline.trim().length >= 2;
 
+  useEffect(() => {
+    let active = true;
+    recoverLatestSavedGoal()
+      .then((saved) => {
+        if (!active || !saved) return;
+        setSavedPreview(saved);
+        setPreview(saved);
+        setPrompt(saved.goal.rawPrompt);
+        setBaseline(saved.plan.baseline?.userStatement ?? 'Сохранённая исходная точка');
+        setTargetTimeline(saved.plan.targetTimeline ?? 'Сохранённый срок');
+        setDailyMinutes(saved.plan.dailyMinutes);
+        setHorizonDays(saved.plan.horizonDays);
+        setCurrentLevel(saved.plan.baseline?.value != null ? 'some-experience' : 'starting');
+        setResearchMode(
+          saved.plan.research.method === 'openai-web-research-v1' ? 'web' : 'quick',
+        );
+        setStage('review');
+      })
+      .catch((error) => {
+        console.log(
+          `[actum-ai] saved plan discovery unavailable: ${error instanceof Error ? error.message : 'unknown error'}`,
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const continueFromIntent = () => setStage('details');
-  const generate = async () => {
+  const generate = async (reuseOnly = false) => {
     if (!detailsComplete) return;
     setGenerationError('');
     setGenerationErrorCode(undefined);
     setStage('generating');
     try {
-      setPreview(await generateGoalWithAI(input));
+      setPreview(await generateGoalWithAI(input, { reuseOnly }));
       setStage('review');
     } catch (error) {
       setGenerationErrorCode(error instanceof AIPlannerError ? error.code : 'UPSTREAM_ERROR');
@@ -103,8 +136,10 @@ export function GoalBuilder() {
                 : stage === 'generating'
                   ? 'Отправляем цель в OpenAI и ждём структурированный план.'
                   : stage === 'error'
-                    ? generationErrorCode === 'INVALID_RESPONSE'
-                      ? 'Сохранённый ответ не прошёл контракт. Простой повтор вернёт тот же ответ и не создаст новый платный запрос.'
+                    ? generationErrorCode === 'SAVED_RESPONSE_UNAVAILABLE'
+                      ? 'Срок бесплатной повторной проверки истёк. Actum не запустил новый платный запрос.'
+                      : generationErrorCode === 'INVALID_RESPONSE'
+                      ? 'Ответ GPT уже сохранён. Повторная проверка ниже использует его же — без нового web-поиска и без нового платного запроса.'
                       : 'Можно повторить тот же запрос: уже завершённые платные этапы будут переиспользованы.'
                     : preview?.plan.research.method === 'openai-web-research-v1'
                       ? 'OpenAI изучил источники и превратил выводы в главы и исполняемые миссии.'
@@ -144,6 +179,24 @@ export function GoalBuilder() {
                 )}
               </View>
             </View>
+            {savedPreview ? (
+              <Card accent>
+                <Pill tone="success">без нового GPT-запроса</Pill>
+                <ThemedText type="subtitle">Сохранённый исследованный план найден</ThemedText>
+                <ThemedText style={styles.muted}>
+                  {savedPreview.goal.title} · {savedPreview.plan.horizonDays} дней. Его можно
+                  открыть после перезапуска приложения без повторного web-поиска.
+                </ThemedText>
+                <AppButton
+                  label="Открыть сохранённый план"
+                  onPress={() => {
+                    setPreview(savedPreview);
+                    setPrompt(savedPreview.goal.rawPrompt);
+                    setStage('review');
+                  }}
+                />
+              </Card>
+            ) : null}
             <Card style={[styles.notice, !risk.safe && styles.noticeWarning]}>
               <ThemedText style={[styles.noticeIcon, !risk.safe && styles.warning]}>⌁</ThemedText>
               <ThemedText type="small" style={styles.noticeText}>
@@ -281,7 +334,7 @@ export function GoalBuilder() {
               <AppButton
                 label={researchMode === 'web' ? 'Исследовать и собрать' : 'Собрать с GPT'}
                 disabled={!detailsComplete}
-                onPress={generate}
+                onPress={() => generate()}
                 style={styles.flex}
               />
             </View>
@@ -307,6 +360,8 @@ export function GoalBuilder() {
             <Pill tone="warning">
               {generationErrorCode === 'INVALID_RESPONSE'
                 ? 'Ответ не прочитан'
+                : generationErrorCode === 'SAVED_RESPONSE_UNAVAILABLE'
+                  ? 'Ответ уже не сохранён'
                 : generationErrorCode === 'TIMEOUT' || generationErrorCode === 'UPSTREAM_TIMEOUT'
                   ? 'Долгая генерация'
                   : generationErrorCode === 'CONNECTION_INTERRUPTED'
@@ -317,14 +372,23 @@ export function GoalBuilder() {
             </Pill>
             <ThemedText type="subtitle">
               {generationErrorCode === 'INVALID_RESPONSE'
-                ? 'План получен, но формат не совпал'
+                ? 'План сохранён и ждёт повторной проверки'
+                : generationErrorCode === 'SAVED_RESPONSE_UNAVAILABLE'
+                  ? 'Новый запрос не был отправлен'
                 : generationErrorCode === 'TIMEOUT' || generationErrorCode === 'UPSTREAM_TIMEOUT'
                   ? 'План ещё не завершён'
                   : 'Не удалось получить план'}
             </ThemedText>
             <ThemedText style={styles.muted}>{generationError}</ThemedText>
-            {generationErrorCode !== 'INVALID_RESPONSE' ? (
-              <AppButton label="Повторить запрос к GPT" onPress={generate} />
+            {generationErrorCode !== 'SAVED_RESPONSE_UNAVAILABLE' ? (
+              <AppButton
+                label={
+                  generationErrorCode === 'INVALID_RESPONSE'
+                    ? 'Проверить сохранённый план · без GPT'
+                    : 'Повторить запрос к GPT'
+                }
+                onPress={() => generate(generationErrorCode === 'INVALID_RESPONSE')}
+              />
             ) : null}
             <AppButton label="Изменить параметры" variant="ghost" onPress={() => setStage('details')} />
           </Card>

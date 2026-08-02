@@ -164,21 +164,24 @@ const DELEGATED_WORK_PATTERNS = [
 const OFF_APP_PATTERNS = [
   /\b(?:google\s+(?:docs?|sheets?|calendar|keep)|apple\s+notes|notion|evernote|onenote)\b/iu,
   /\b(?:notebooks?|notes?|files?|documents?|sheets?|spreadsheets?|trackers?)\b/iu,
-  /(?:блокнот|тетрад|заметк|файл|документ|таблиц|трекер)\w*/iu,
+  /(?:блокнот|тетрад|заметк|файл|документ|трекер)\w*/iu,
+  /(?:заполн|открой|открыть|запиш|записыв|фиксир|отмет|сохран|отправ|загруз|использ|обнов)\w*.{0,40}таблиц\w*/iu,
   /\b(?:add|write|record|log|mark|save|schedule|put|open|use|update)\b.{0,40}\b(?:a\s+|the\s+|your\s+)?calendars?\b/iu,
   /(?:добав|запиш|записыв|фиксир|отмет|сохран|распис|помест|открой|использ|обнов)\w*.{0,40}(?:календарь|календаря|календарю|календаре|календарём|календари|календарей|календарям|календарями|календарях)(?![\p{L}\p{M}])/iu,
   /(?:на|в|открой|заполни|используй)\s+(?:бумажн[\p{L}\p{M}]*\s+)?лист(?:е|у|ом|а)?(?:\s|[.,!?:;—-]|$)/iu,
   /\b(?:other|another|external|third[- ]party)\s+apps?\b/iu,
   /(?:друг|сторонн|внешн)[\p{L}\p{M}]*\s+приложен\w*/iu,
-  /\b(?:fill|complete|open|submit|save|send|upload|use)\b.{0,40}\b(?:forms?|questionnaires?)\b/iu,
-  /(?:заполн|открой|открыть|отправ|загруз|сохран|использ)\w*.{0,40}(?:форм|анкет)\w*/iu,
+  /\b(?:fill|open|submit|save|send|upload)\b.{0,40}\b(?:forms?|questionnaires?)\b/iu,
+  /(?:заполн|открой|открыть|отправ|загруз)\w*.{0,40}(?:форм|анкет)\w*/iu,
   /(?:форм(?:а|у|е|ой|ы)|анкет\w*)\s+(?:отч[её]та|ответа|регистрации)/iu,
   /\b(?:upload|email)\b/iu,
   /(?:загруз|выгруз)\w*/iu,
   /\b(?:send)\b.{0,48}\b(?:emails?|messages?|files?|documents?|attachments?)\b/iu,
   /(?:отправ)\w*.{0,48}(?:письм|сообщен|файл|документ|вложен|email|e-mail|имейл|электронн[\p{L}\p{M}]*\s+почт)\w*/iu,
-  /\b(?:call|write(?:\s+to)?|contact|visit|find|message|send|meet|ask|talk\s+to)\b.{0,64}\b(?:coaches?|trainers?|instructors?|specialists?|friends?|people|persons?|doctors?|experts?)\b/iu,
-  /(?:позвон|напиш|пиш|свяж|контакт|обрат|посет|найд|отыщ|отправ|встрет|спрос)\w*.{0,64}(?:тренер|коуч|инструктор|специалист|друг|человек|персон|врач|доктор|эксперт)\w*/iu,
+  /\b(?:call|write\s+to|contact|visit|find|message|send|meet|ask|talk\s+to)\b.{0,64}\b(?:coaches?|trainers?|instructors?|specialists?|friends?|people|persons?|doctors?|experts?)\b/iu,
+  /(?:позвон|свяж|контакт|обрат|посет|найд|отыщ|отправ|встрет|спрос)\w*.{0,64}(?:тренер|коуч|инструктор|специалист|друг|человек|персон|врач|доктор|эксперт)\w*/iu,
+  /(?:напиш|пиш)\w*.{0,8}(?:тренер|коуч|инструктор|специалист|друг|человек|персон|врач|доктор|эксперт)\w*/iu,
+  /(?:напиш|пиш)\w*.{0,48}(?:сообщен|письм)\w*.{0,32}(?:тренер|коуч|инструктор|специалист|друг|человек|персон|врач|доктор|эксперт)\w*/iu,
   /\b(?:phones?|smartphones?|smartwatches?|wristwatches?|stopwatches?|alarms?|clickers?|external\s+timers?|separate\s+timers?|external\s+counters?|separate\s+counters?)\b/iu,
   /(?:телефон|смартфон|секундомер|будильник|кликер|наручн[\p{L}\p{M}]*\s+час|внешн[\p{L}\p{M}]*\s+(?:таймер|сч[её]тчик)|отдельн[\p{L}\p{M}]*\s+(?:таймер|сч[её]тчик))\w*/iu,
   /\b(?:use|check|open|start|set|keep|hold|look at)\b.{0,24}\b(?:a\s+|the\s+|your\s+)?(?:watch|counter)\b/iu,
@@ -199,8 +202,14 @@ const EXTERNAL_TEXT_LOG_NOTE_PATTERNS = [
   /\b(?:save|write|record|log)\b.{0,64}\bnotes?\b.{0,64}\b(?:elsewhere|externally|outside|another\s+app)\b/iu,
   /(?:сохран|запиш|фиксир)\w*.{0,64}заметк[\p{L}\p{M}]*.{0,64}(?:вне\s+Actum|в\s+другом\s+месте|в\s+другом\s+приложении|отдельно)/iu,
 ];
+const SAFETY_PROHIBITION_PATTERN =
+  /(?:\b(?:do not|don't|never|avoid|must not|should not|without)\b|(?:не\s+(?:добав|использ|отправ|заполня|открыва|запуска|выполня|дела|обращ|посещ|ищ)\w*|нельзя|запрещ\w*|избег\w*|без\s+(?:внешн|друг|сторонн)\w*))/iu;
+const SAFETY_CONDITIONAL_RISK_PATTERN =
+  /(?:(?:\b(?:if|when|in case)\b|если|в\s+случае).{0,180}(?:pain|symptom|dizz|nause|seiz|loss|worsen|боль|симптом|дискомфорт|головокруж|тошнот|судорог|потер|ухудш)|при\s+(?:(?:появлен|возникновен|ухудшен)\w*.{0,48})?(?:бол|симптом|дискомфорт|головокруж|тошнот|судорог|потер)\w*)/iu;
 const EMBEDDED_TIME_QUANTITY_PATTERN =
   /(?:^|[^\p{L}\p{N}])(?:\d+(?:[.,]\d+)?\s*(?:[-–—]\s*)?(?:milliseconds?|msecs?|ms|seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?|months?|years?|мс|миллисекунд\p{L}*|сек(?:унд\p{L}*)?|мин(?:ут\p{L}*)?|час\p{L}*|дн(?:я|ей)?|день|недел\p{L}*|месяц\p{L}*|год\p{L}*|лет)|\d{1,3}:\d{2})(?=$|[^\p{L}\p{N}])/iu;
+const EMBEDDED_SUBDAY_TIME_QUANTITY_PATTERN =
+  /(?:^|[^\p{L}\p{N}])(?:\d+(?:[.,]\d+)?\s*(?:[-–—]\s*)?(?:milliseconds?|msecs?|ms|seconds?|secs?|minutes?|mins?|hours?|hrs?|мс|миллисекунд\p{L}*|сек(?:унд\p{L}*)?|мин(?:ут\p{L}*)?|час\p{L}*)|\d{1,3}:\d{2})(?=$|[^\p{L}\p{N}])/iu;
 
 export function validatePlanActionability(
   plan,
@@ -236,7 +245,7 @@ export function validatePlanActionability(
   assertStringArray(plan.safetyNotes, 'safetyNotes', 0, 4, 3, 300);
   assertStringArray(plan.assumptions, 'assumptions', 1, 6, 3, 300);
   plan.safetyNotes.forEach((note, index) =>
-    assertGeneratedText(note, `safetyNotes.${index}`),
+    assertSafetyText(note, `safetyNotes.${index}`),
   );
   plan.assumptions.forEach((assumption, index) =>
     assertGeneratedText(assumption, `assumptions.${index}`),
@@ -353,7 +362,7 @@ function validateDay(day, dailyMinutes, trustedBaseline, path) {
   assertInteger(day.xp, `${path}.xp`, 5, 60);
   if (day.warning !== null) {
     assertString(day.warning, `${path}.warning`, 3, 300);
-    assertGeneratedText(day.warning, `${path}.warning`);
+    assertSafetyText(day.warning, `${path}.warning`);
   }
   assertInteger(day.estimatedMinutes, `${path}.estimatedMinutes`, 1, 120);
   if (day.estimatedMinutes > dailyMinutes) {
@@ -505,7 +514,14 @@ function validateTextLogBlock(block, path) {
 function validateCommonBlockText(block, path, hasInstruction, isInAppTextLog = false) {
   assertString(block.title, `${path}.title`, 2, 100);
   assertGeneratedText(block.title, `${path}.title`, isInAppTextLog);
-  assertNoEmbeddedTimeQuantity(block.title, `${path}.title`);
+  // A title may identify the calendar position (for example, "Итог 30 дней").
+  // Sub-day work still belongs in a structural timer/counter field.
+  if (EMBEDDED_SUBDAY_TIME_QUANTITY_PATTERN.test(block.title)) {
+    fail(
+      `${path}.title`,
+      'временная нагрузка должна быть структурным полем встроенного timer/counter, а не свободным текстом',
+    );
+  }
   assertString(block.successCriterion, `${path}.successCriterion`, 5, 260);
   assertGeneratedText(block.successCriterion, `${path}.successCriterion`, isInAppTextLog);
   assertNoEmbeddedTimeQuantity(block.successCriterion, `${path}.successCriterion`);
@@ -627,6 +643,29 @@ function assertGeneratedText(value, path, isInAppTextLog = false) {
   }
   if (OFF_APP_PATTERNS.some((pattern) => pattern.test(dependencyText))) {
     fail(path, 'обнаружена внешняя зависимость: действие должно выполняться внутри Actum');
+  }
+}
+
+function assertSafetyText(value, path) {
+  if (typeof value !== 'string') return;
+  // Safety copy is informational rather than an executable block. It may name
+  // something that is prohibited, or describe escalation after a risk event.
+  // A normal prerequisite/follow-up still goes through the strict dependency
+  // scanner and remains forbidden.
+  const clauses = value
+    .split(
+      /(?:[;!?]+|\.(?:\s+|$)|,\s+(?=(?:а\s+)?(?:перед|до|после\s+кажд|во\s+время\s+кажд)(?:\s|$))|\s+(?:и|а)\s+(?=(?:перед|до|после\s+кажд|во\s+время\s+кажд)(?:\s|$)))/iu,
+    )
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+  for (const [index, clause] of clauses.entries()) {
+    if (
+      SAFETY_PROHIBITION_PATTERN.test(clause) ||
+      SAFETY_CONDITIONAL_RISK_PATTERN.test(clause)
+    ) {
+      continue;
+    }
+    assertGeneratedText(clause, `${path}.clause${index + 1}`);
   }
 }
 

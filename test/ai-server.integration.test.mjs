@@ -193,6 +193,8 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   assert.equal(health.body.validatorVersion, 'plan-validator-v5');
   assert.equal(health.body.promptVersion, 'actum-plan-2026-08-01-closed-loop-v5');
   assert.equal(health.body.researchPromptVersion, 'actum-research-2026-08-01-closed-loop-v2');
+  const noSavedPlan = await getSavedPlan();
+  assert.equal(noSavedPlan.status, 404);
 
   const firstInput = goalInput('Resume paid background work');
   const first = await postPlan(firstInput, 'actum_test_failure_001');
@@ -229,6 +231,19 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
     apiCalls.filter((call) => call.kind === 'planning_poll').length,
     4,
   );
+
+  const callsBeforeSavedRecovery = apiCalls.length;
+  const savedRecovery = await getSavedPlan();
+  assert.equal(savedRecovery.status, 200);
+  assert.equal(savedRecovery.body.plan.title, 'Test route');
+  assert.equal(savedRecovery.body.input.prompt, 'Resume paid background work');
+  assert.equal(savedRecovery.body.input.researchMode, 'web');
+  assert.equal(savedRecovery.body.input.dailyMinutes, 20);
+  assert.equal(savedRecovery.body.input.baseline, 'Current test baseline: 8 repetitions');
+  assert.equal(savedRecovery.body.input.horizonDays, 14);
+  assert.equal(savedRecovery.body.meta.providerResponseId, 'resp_plan_resume_test');
+  assert.equal(savedRecovery.body.meta.researchResponseId, 'resp_research_test');
+  assert.equal(apiCalls.length, callsBeforeSavedRecovery);
 
   const third = await postPlan(firstInput, 'actum_test_cache_003');
   assert.equal(third.status, 200);
@@ -291,6 +306,31 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   const invalidSecond = await postPlan(invalidInput, 'actum_test_invalid_009');
   assert.equal(invalidSecond.status, 502);
   assert.equal(invalidSecond.body.code, 'upstream_invalid_plan_json');
+  assert.equal(
+    apiCalls.filter(
+      (call) => call.kind === 'planning' && call.input.goal === 'Cache invalid completed output',
+    ).length,
+    1,
+  );
+
+  const callsBeforeReuseOnlyMiss = apiCalls.length;
+  const reuseOnlyMiss = await postPlan(
+    goalInput('Never create paid work during saved-response revalidation', 'quick'),
+    'actum_test_reuse_only_miss_022',
+    { reuseOnly: true },
+  );
+  assert.equal(reuseOnlyMiss.status, 409);
+  assert.equal(reuseOnlyMiss.body.code, 'saved_response_unavailable');
+  assert.match(reuseOnlyMiss.body.error, /больше недоступен/);
+  assert.equal(apiCalls.length, callsBeforeReuseOnlyMiss);
+
+  const invalidReuseOnly = await postPlan(
+    invalidInput,
+    'actum_test_invalid_reuse_only_023',
+    { reuseOnly: true },
+  );
+  assert.equal(invalidReuseOnly.status, 502);
+  assert.equal(invalidReuseOnly.body.code, 'upstream_invalid_plan_json');
   assert.equal(
     apiCalls.filter(
       (call) => call.kind === 'planning' && call.input.goal === 'Cache invalid completed output',
@@ -706,17 +746,25 @@ function jsonResponse(payload, status = 200, headers = {}) {
   });
 }
 
-function postPlan(payload, requestId) {
+function postPlan(payload, requestId, { reuseOnly = false } = {}) {
   return invokeHandler({
     method: 'POST',
     url: '/plan',
-    headers: { 'content-type': 'application/json', 'x-actum-request-id': requestId },
+    headers: {
+      'content-type': 'application/json',
+      'x-actum-request-id': requestId,
+      ...(reuseOnly ? { 'x-actum-reuse-only': 'true' } : {}),
+    },
     body: JSON.stringify(payload),
   });
 }
 
 function getHealth() {
   return invokeHandler({ method: 'GET', url: '/health', headers: {}, body: '' });
+}
+
+function getSavedPlan() {
+  return invokeHandler({ method: 'GET', url: '/saved-plan/latest', headers: {}, body: '' });
 }
 
 async function invokeHandler({ method, url, headers, body }) {

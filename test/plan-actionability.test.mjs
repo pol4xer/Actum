@@ -325,6 +325,120 @@ test('all user-visible narrative fields reject off-app dependencies', () => {
   }
 });
 
+test('safety copy allows prohibitions and risk-triggered escalation but not routine prerequisites', () => {
+  const plan = actionablePlan();
+  plan.safetyNotes = [
+    'В текущем блоке нельзя самостоятельно добавлять CO₂- или O₂-таблицы.',
+    'Не используй внешний секундомер и не отправляй результат тренеру.',
+  ];
+  plan.days[0].warning =
+    'Если боль не проходит после остановки, прекрати миссию и обратись к врачу.';
+
+  assert.doesNotThrow(() => validatePlan(plan));
+
+  plan.days[0].warning = 'При головокружении прекрати миссию и обратись к врачу.';
+  assert.doesNotThrow(() => validatePlan(plan));
+
+  plan.safetyNotes = ['Перед следующим днём обязательно посети специалиста.'];
+  assert.throws(
+    () => validatePlan(plan),
+    /внешняя зависимость: действие должно выполняться внутри Actum/,
+  );
+
+  plan.safetyNotes = [
+    'Не используй внешний таймер; перед следующим днём обязательно посети специалиста.',
+  ];
+  assert.throws(
+    () => validatePlan(plan),
+    /внешняя зависимость: действие должно выполняться внутри Actum/,
+  );
+
+  for (const mixedNote of [
+    'Не используй внешний таймер и перед следующим днём обязательно посети специалиста.',
+    'Если появилась боль, прекрати миссию, а перед следующим днём обязательно посети специалиста.',
+  ]) {
+    plan.safetyNotes = [mixedNote];
+    assert.throws(
+      () => validatePlan(plan),
+      /внешняя зависимость: действие должно выполняться внутри Actum/,
+      mixedNote,
+    );
+  }
+});
+
+test('physical form wording is not mistaken for an external form', () => {
+  const plan = actionablePlan();
+  plan.days[0].execution.blocks = [
+    textLogBlock({
+      prompt: 'Запиши напряжение и что позволило сохранить точную форму.',
+    }),
+  ];
+
+  assert.doesNotThrow(() => validatePlan(plan));
+
+  plan.days[0].execution.blocks = [
+    textLogBlock({ prompt: 'Используй точную форму движения на протяжении подхода.' }),
+  ];
+  assert.doesNotThrow(() => validatePlan(plan));
+
+  plan.days[0].execution.blocks = [
+    textLogBlock({ prompt: 'Complete every repetition with proper form.' }),
+  ];
+  assert.doesNotThrow(() => validatePlan(plan));
+});
+
+test('text_log can mention support without turning it into external contact', () => {
+  for (const prompt of [
+    'Напиши, как поддержка друга помогла сохранить технику.',
+    'Write how support from a friend affected the session.',
+  ]) {
+    const plan = actionablePlan();
+    plan.days[0].execution.blocks = [textLogBlock({ prompt })];
+    assert.doesNotThrow(() => validatePlan(plan), prompt);
+  }
+
+  for (const prompt of [
+    'Напиши другу результат после сессии.',
+    'Write to a friend after the session.',
+  ]) {
+    const plan = actionablePlan();
+    plan.days[0].execution.blocks = [textLogBlock({ prompt })];
+    assert.throws(
+      () => validatePlan(plan),
+      /внешняя зависимость: действие должно выполняться внутри Actum/,
+      prompt,
+    );
+  }
+});
+
+test('calendar-labelled block titles do not become hidden timed work', () => {
+  const plan = actionablePlan();
+  plan.days[0].execution.blocks[0].title = 'Итоговая запись 30 дней';
+
+  assert.doesNotThrow(() => validatePlan(plan));
+
+  plan.days[0].execution.blocks[0].title = 'Удержание 40 секунд';
+  assert.throws(
+    () => validatePlan(plan),
+    /временная нагрузка должна быть структурным полем встроенного timer\/counter/,
+  );
+});
+
+test('external forms and tables remain forbidden inside executable blocks', () => {
+  for (const instruction of [
+    'Заполни внешнюю таблицу с результатами после подхода.',
+    'Сохрани форму отчёта после завершения подхода.',
+  ]) {
+    const plan = actionablePlan();
+    plan.days[0].execution.blocks[0].instruction = instruction;
+    assert.throws(
+      () => validatePlan(plan),
+      /внешняя зависимость: действие должно выполняться внутри Actum/,
+      instruction,
+    );
+  }
+});
+
 test('timed work cannot hide in block free text without an in-app clock', () => {
   const cases = [
     ['timer instruction', (plan) => { plan.days[0].execution.blocks[0].instruction = 'Задерживай дыхание 40 секунд в неподвижном положении.'; }],

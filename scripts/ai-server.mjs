@@ -46,7 +46,10 @@ const PLAN_CACHE_TTL_MS = 30 * 60_000;
 const RESEARCH_CACHE_TTL_MS = 2 * 60 * 60_000;
 const BACKGROUND_JOB_TTL_MS = 2 * 60 * 60_000;
 const AMBIGUOUS_CREATE_TTL_MS = 2 * 60 * 60_000;
-const STAGE_RESULT_TTL_MS = 2 * 60 * 60_000;
+// Completed provider responses are the paid artifact. Keep them substantially
+// longer than the derived research/plan caches so a local validator fix can
+// re-read the same response instead of forcing another paid generation.
+const STAGE_RESULT_TTL_MS = 7 * 24 * 60 * 60_000;
 const MAX_CONCURRENT_PLANS = 2;
 const RESEARCH_TIMEOUT_MS = 12 * 60_000;
 const PLANNING_TIMEOUT_MS = 12 * 60_000;
@@ -96,6 +99,33 @@ export async function handleRequest(request, response) {
     return;
   }
 
+  if (request.method === 'GET' && pathname === '/saved-plan/latest') {
+    if (!statePersistenceHealthy) {
+      sendJson(response, 503, {
+        error: 'Локальное состояние сохранённых AI-ответов недоступно.',
+        code: 'durable_state_unavailable',
+      });
+      return;
+    }
+    try {
+      const saved = readLatestSavedPlan();
+      if (!saved) {
+        sendJson(response, 404, { error: 'Сохранённый plan-v5 не найден.' });
+        return;
+      }
+      sendJson(response, 200, saved);
+    } catch (error) {
+      console.error(
+        `[actum-ai] saved_plan_recovery_failed message=${JSON.stringify(error instanceof Error ? error.message : 'unknown')}`,
+      );
+      sendJson(response, 422, {
+        error: 'Последний сохранённый ответ не прошёл локальную проверку.',
+        code: 'saved_plan_invalid',
+      });
+    }
+    return;
+  }
+
   if (request.method !== 'POST' || pathname !== '/plan') {
     sendJson(response, 404, { error: 'Not found' });
     return;
@@ -132,6 +162,7 @@ export async function handleRequest(request, response) {
   try {
     const input = await readJson(request);
     validateInput(input);
+    const reuseOnly = request.headers?.['x-actum-reuse-only'] === 'true';
     cacheKey = createPlanCacheKey(input);
     researchCacheKey = createResearchCacheKey(input);
     const cached = readCachedPlan(cacheKey);
@@ -163,6 +194,7 @@ export async function handleRequest(request, response) {
         startedAt,
         cacheKey,
         researchCacheKey,
+        reuseOnly,
       )
         .then((result) => {
           cachePlan(cacheKey, result);
@@ -236,7 +268,7 @@ if (isDirectRun()) {
   });
 }
 
-async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKey) {
+async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKey, reuseOnly) {
   const researchMode = input.researchMode === 'quick' ? 'quick' : 'web';
   const trustedBaseline = parseTrustedBaseline(input.baseline);
   let research = {
@@ -259,6 +291,7 @@ async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKe
         trustedBaseline,
         requestId,
         providerStageKey(researchCacheKey, 'research'),
+        reuseOnly,
       );
       cacheResearch(researchCacheKey, research);
       console.log(
@@ -274,6 +307,7 @@ async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKe
     research,
     requestId,
     providerStageKey(cacheKey, 'planning'),
+    reuseOnly,
   );
   const outputText = extractOutputText(planResponse);
   if (!outputText) {
@@ -344,12 +378,13 @@ async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKe
   };
 }
 
-async function requestResearch(input, trustedBaseline, requestId, stageKey) {
+async function requestResearch(input, trustedBaseline, requestId, stageKey, reuseOnly) {
   const payload = await executeProviderStage({
     stageKey,
     stage: 'research',
     timeoutMs: RESEARCH_TIMEOUT_MS,
     requestId,
+    reuseOnly,
     body: {
       model: RESEARCH_MODEL,
       reasoning: { effort: 'medium' },
@@ -408,12 +443,20 @@ async function requestResearch(input, trustedBaseline, requestId, stageKey) {
   };
 }
 
-async function requestStructuredPlan(input, trustedBaseline, research, requestId, stageKey) {
+async function requestStructuredPlan(
+  input,
+  trustedBaseline,
+  research,
+  requestId,
+  stageKey,
+  reuseOnly,
+) {
   return executeProviderStage({
     stageKey,
     stage: 'planning',
     timeoutMs: PLANNING_TIMEOUT_MS,
     requestId,
+    reuseOnly,
     body: {
       model: MODEL,
       reasoning: { effort: research.brief ? 'medium' : 'low' },
@@ -445,7 +488,7 @@ async function requestStructuredPlan(input, trustedBaseline, research, requestId
   });
 }
 
-async function executeProviderStage({ stageKey, stage, timeoutMs, requestId, body }) {
+async function executeProviderStage({ stageKey, stage, timeoutMs, requestId, reuseOnly, body }) {
   const completed = readExpiringEntry(stageResults, stageKey);
   if (completed) {
     console.log(
@@ -460,6 +503,18 @@ async function executeProviderStage({ stageKey, stage, timeoutMs, requestId, bod
       `[actum-ai] ${requestId} stage=${stage} resume_pending response=${resumable.responseId} original_request=${resumable.requestId}`,
     );
   } else {
+    if (reuseOnly) {
+      throw new OpenAIRequestError(
+        'Сохранённый ответ для бесплатной повторной проверки больше недоступен.',
+        {
+          status: 409,
+          code: 'saved_response_unavailable',
+          stage,
+          operation: 'guard',
+          durationMs: 0,
+        },
+      );
+    }
     const guarded = readExpiringEntry(ambiguousCreates, stageKey);
     if (guarded) {
       throw new OpenAIRequestError(
@@ -496,7 +551,7 @@ async function executeProviderStage({ stageKey, stage, timeoutMs, requestId, bod
       },
       onProgress: progressLogger,
     });
-    recordStageResult(stageKey, payload, requestId);
+    recordStageResult(stageKey, payload, requestId, createStageInputSnapshot(body.input));
     return payload;
   } catch (error) {
     if (error instanceof OpenAIRequestError) {
@@ -583,7 +638,10 @@ function readJson(request) {
 
 function setCors(response) {
   response.setHeader('Access-Control-Allow-Origin', '*');
-  response.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Actum-Request-Id');
+  response.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, X-Actum-Request-Id, X-Actum-Reuse-Only',
+  );
   response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
 }
 
@@ -596,6 +654,130 @@ function sendJson(response, status, body) {
 function sumNumbers(...values) {
   const numbers = values.filter((value) => typeof value === 'number' && Number.isFinite(value));
   return numbers.length ? numbers.reduce((sum, value) => sum + value, 0) : undefined;
+}
+
+function readLatestSavedPlan() {
+  const planning = latestCompletedStage('planning');
+  if (!planning) return undefined;
+  const outputText = extractOutputText(planning.payload);
+  if (!outputText) return undefined;
+  const plan = JSON.parse(outputText);
+  const research = latestCompletedStage(
+    'research',
+    Number(planning.payload?.created_at || planning.payload?.completed_at || Number.POSITIVE_INFINITY),
+  );
+  const input = inferSavedPlanInput(plan, Boolean(research), planning.inputSnapshot);
+  const trustedBaseline = parseTrustedBaseline(input.baseline);
+  validatePlanActionability(
+    plan,
+    input.dailyMinutes,
+    input.horizonDays,
+    input.baseline,
+    input.targetTimeline,
+    trustedBaseline,
+  );
+
+  const planMeta = responseMeta(planning.payload);
+  const researchMeta = research ? responseMeta(research.payload) : {};
+  return {
+    input,
+    plan,
+    meta: {
+      requestId: planning.requestId || 'actum_saved_plan',
+      providerResponseId: planMeta.providerResponseId,
+      researchResponseId: researchMeta.providerResponseId,
+      model: MODEL,
+      promptVersion: PROMPT_VERSION,
+      contractVersion: PLAN_CONTRACT_VERSION,
+      durationMs: 0,
+      webSearchCount: researchMeta.webSearchCount || 0,
+      inputTokens: sumNumbers(researchMeta.inputTokens, planMeta.inputTokens),
+      outputTokens: sumNumbers(researchMeta.outputTokens, planMeta.outputTokens),
+      sources: research ? extractWebSources(research.payload).slice(0, 8) : [],
+    },
+  };
+}
+
+function latestCompletedStage(stage, completedBefore = Number.POSITIVE_INFINITY) {
+  const prefix = `${stage}\u0000`;
+  return [...stageResults]
+    .filter(
+      ([key, entry]) =>
+        key.startsWith(prefix) &&
+        entry?.payload?.status === 'completed' &&
+        Number(entry.payload?.completed_at || entry.payload?.created_at || 0) <= completedBefore,
+    )
+    .map(([, entry]) => entry)
+    .sort(
+      (left, right) =>
+        Number(right.payload?.completed_at || right.payload?.created_at || 0) -
+        Number(left.payload?.completed_at || left.payload?.created_at || 0),
+    )[0];
+}
+
+function inferSavedPlanInput(plan, hasResearch, inputSnapshot) {
+  if (inputSnapshot && typeof inputSnapshot === 'object') {
+    const recovered = {
+      prompt: inputSnapshot.prompt,
+      currentLevel: inputSnapshot.currentLevel,
+      baseline: inputSnapshot.baseline,
+      targetTimeline: inputSnapshot.targetTimeline,
+      dailyMinutes: inputSnapshot.dailyMinutes,
+      horizonDays: inputSnapshot.horizonDays,
+      researchMode: inputSnapshot.researchMode,
+    };
+    validateInput(recovered);
+    return recovered;
+  }
+  if (!plan || typeof plan !== 'object' || !Array.isArray(plan.days)) {
+    throw new Error('saved plan has no calendar');
+  }
+  const horizonDays = plan.days.length;
+  if (![7, 14, 30].includes(horizonDays)) throw new Error('unsupported saved horizon');
+  const maximumDayMinutes = Math.max(
+    1,
+    ...plan.days.map((day) => Number(day?.estimatedMinutes) || 0),
+  );
+  const dailyMinutes = [10, 20, 30, 45, 60].find((value) => value >= maximumDayMinutes);
+  if (!dailyMinutes) throw new Error('saved plan exceeds supported daily limit');
+  const baseline = plan.baseline?.userStatement;
+  const targetTimeline = plan.targetTimeline;
+  if (typeof baseline !== 'string' || typeof targetTimeline !== 'string') {
+    throw new Error('saved plan has no baseline or target timeline');
+  }
+  const narrative = `${plan.title || ''} ${plan.targetMetric || ''} ${plan.summary || ''}`;
+  const prompt =
+    /задержк[\p{L}\p{M}]*\s+дыхан/iu.test(narrative) && /10\s*мин/iu.test(narrative)
+      ? 'Научиться задерживать дыхание на 10 минут'
+      : String(plan.title || plan.targetMetric || 'Восстановленная цель Actum');
+  const trustedBaseline = parseTrustedBaseline(baseline);
+  return {
+    prompt,
+    currentLevel: trustedBaseline ? 'some-experience' : 'starting',
+    baseline,
+    targetTimeline,
+    dailyMinutes,
+    horizonDays,
+    researchMode: hasResearch ? 'web' : 'quick',
+  };
+}
+
+function createStageInputSnapshot(serializedInput) {
+  try {
+    const input = JSON.parse(serializedInput);
+    if (!input || typeof input !== 'object') return undefined;
+    return {
+      prompt: input.goal,
+      currentLevel: input.startingPoint,
+      baseline: input.userBaseline,
+      targetTimeline: input.targetTimeline,
+      dailyMinutes: input.minutesPerMission,
+      horizonDays: input.horizonDays,
+      researchMode: input.researchBrief ? 'web' : 'quick',
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 export function createPlanCacheKey(input, identity = AI_PIPELINE_CACHE_IDENTITY) {
@@ -706,11 +888,12 @@ function recordBackgroundJob(stageKey, responseId, requestId) {
   persistState();
 }
 
-function recordStageResult(stageKey, payload, requestId) {
+function recordStageResult(stageKey, payload, requestId, inputSnapshot) {
   stageResults.delete(stageKey);
   stageResults.set(stageKey, {
     payload,
     requestId,
+    inputSnapshot,
     expiresAt: Date.now() + STAGE_RESULT_TTL_MS,
   });
   backgroundJobs.delete(stageKey);
@@ -792,7 +975,9 @@ function createProgressLogger(requestId) {
 
 function providerHttpStatus(error) {
   if (!(error instanceof OpenAIRequestError)) return 400;
-  if (error.code === 'ambiguous_create') return 409;
+  if (error.code === 'ambiguous_create' || error.code === 'saved_response_unavailable') {
+    return 409;
+  }
   if (error.code === 'refusal') return 422;
   if (error.code === 'upstream_timeout') return 504;
   return 502;
@@ -835,7 +1020,7 @@ function restorePersistentState() {
     restoreMap(researchCache, state.researchCache);
     restoreMap(backgroundJobs, state.backgroundJobs);
     restoreMap(ambiguousCreates, state.ambiguousCreates);
-    restoreMap(stageResults, state.stageResults);
+    restoreMap(stageResults, state.stageResults, { recoverCompletedStages: true });
   } catch (error) {
     if (error?.code === 'ENOENT') return;
     statePersistenceHealthy = false;
@@ -845,7 +1030,7 @@ function restorePersistentState() {
   }
 }
 
-function restoreMap(cache, entries) {
+function restoreMap(cache, entries, { recoverCompletedStages = false } = {}) {
   if (!Array.isArray(entries)) return;
   const now = Date.now();
   for (const pair of entries) {
@@ -853,8 +1038,21 @@ function restoreMap(cache, entries) {
     const [key, entry] = pair;
     if (typeof key !== 'string' || key.length > 200) continue;
     if (!entry || typeof entry !== 'object') continue;
-    if (!Number.isFinite(entry.expiresAt) || entry.expiresAt <= now) continue;
-    cache.set(key, entry);
+    let restoredEntry = entry;
+    if (!Number.isFinite(entry.expiresAt) || entry.expiresAt <= now) {
+      const completedAtMs = Number(entry.payload?.completed_at) * 1000;
+      const recoveredExpiresAt = completedAtMs + STAGE_RESULT_TTL_MS;
+      if (
+        !recoverCompletedStages ||
+        entry.payload?.status !== 'completed' ||
+        !Number.isFinite(completedAtMs) ||
+        recoveredExpiresAt <= now
+      ) {
+        continue;
+      }
+      restoredEntry = { ...entry, expiresAt: recoveredExpiresAt };
+    }
+    cache.set(key, restoredEntry);
   }
 }
 

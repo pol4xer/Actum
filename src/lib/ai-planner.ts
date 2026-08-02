@@ -240,6 +240,32 @@ const serverMetaSchema = z.object({
     .max(8),
 }).strict();
 
+const recoveredInputSchema = z
+  .object({
+    prompt: z.string().min(5).max(1000),
+    currentLevel: z.enum(['starting', 'some-experience', 'returning']),
+    baseline: z.string().min(2).max(500),
+    targetTimeline: z.string().min(2).max(80),
+    dailyMinutes: z.union([
+      z.literal(10),
+      z.literal(20),
+      z.literal(30),
+      z.literal(45),
+      z.literal(60),
+    ]),
+    horizonDays: z.union([z.literal(7), z.literal(14), z.literal(30)]),
+    researchMode: z.enum(['quick', 'web']).optional(),
+  })
+  .strict();
+
+const recoveredPlanEnvelopeSchema = z
+  .object({
+    input: recoveredInputSchema,
+    plan: z.unknown(),
+    meta: serverMetaSchema,
+  })
+  .strict();
+
 function createServerResponseSchema(input: GoalInput) {
   return z
     .object({
@@ -261,6 +287,7 @@ export type AIPlannerErrorCode =
   | 'UPSTREAM_ERROR'
   | 'REFUSAL'
   | 'INVALID_REQUEST'
+  | 'SAVED_RESPONSE_UNAVAILABLE'
   | 'INVALID_RESPONSE';
 
 export class AIPlannerError extends Error {
@@ -279,7 +306,10 @@ function createIdFactory() {
   return (prefix: string) => `${prefix}-${stamp}-${++sequence}`;
 }
 
-export async function generateGoalWithAI(input: GoalInput): Promise<GeneratedGoal> {
+export async function generateGoalWithAI(
+  input: GoalInput,
+  options: { reuseOnly?: boolean } = {},
+): Promise<GeneratedGoal> {
   const controller = new AbortController();
   const requestId = createClientRequestId();
   const timeoutMs =
@@ -297,6 +327,7 @@ export async function generateGoalWithAI(input: GoalInput): Promise<GeneratedGoa
       headers: {
         'Content-Type': 'application/json',
         'X-Actum-Request-Id': requestId,
+        ...(options.reuseOnly ? { 'X-Actum-Reuse-Only': 'true' } : {}),
       },
       body: JSON.stringify(input),
       signal: controller.signal,
@@ -354,12 +385,37 @@ export async function generateGoalWithAI(input: GoalInput): Promise<GeneratedGoa
   }
 }
 
+export async function recoverLatestSavedGoal(): Promise<GeneratedGoal | undefined> {
+  const baseUrl = (process.env.EXPO_PUBLIC_ACTUM_AI_URL || DEFAULT_AI_URL).replace(/\/$/, '');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
+  try {
+    const response = await fetch(`${baseUrl}/saved-plan/latest`, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    if (response.status === 404) return undefined;
+    if (!response.ok) throw new Error('Локальный AI-сервер не вернул сохранённый план.');
+
+    const raw: unknown = await response.json();
+    const envelope = recoveredPlanEnvelopeSchema.safeParse(raw);
+    if (!envelope.success) throw new Error('Сохранённый план имеет несовместимый формат.');
+    const { input, plan, meta } = envelope.data;
+    const parsed = createServerResponseSchema(input).safeParse({ plan, meta });
+    if (!parsed.success) throw new Error('Сохранённый plan-v5 не прошёл клиентскую проверку.');
+    return toGeneratedGoal(input, parsed.data.plan, parsed.data.meta);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function mapServerErrorCode(raw: unknown, status: number): AIPlannerErrorCode {
   const code =
     raw && typeof raw === 'object' && 'code' in raw && typeof raw.code === 'string'
       ? raw.code
       : undefined;
   if (code === 'refusal' || status === 422) return 'REFUSAL';
+  if (code === 'saved_response_unavailable') return 'SAVED_RESPONSE_UNAVAILABLE';
   if (code === 'upstream_timeout' || status === 504) return 'UPSTREAM_TIMEOUT';
   if (
     code === 'upstream_invalid_plan_contract' ||
