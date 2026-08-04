@@ -7,10 +7,10 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import AppTabs from '@/components/app-tabs';
 import { ThemedText } from '@/components/themed-text';
 import { AppButton, Pill } from '@/components/ui/primitives';
-import { OnboardingScreen } from '@/screens/onboarding-screen';
+import { OnboardingScreen } from '@/features/onboarding';
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import { configureNotificationHandler } from '@/lib/notifications';
-import { AppProvider, useApp } from '@/state/app-context';
+import { AppProvider, useApp } from '@/state';
 
 SplashScreen.preventAutoHideAsync();
 configureNotificationHandler();

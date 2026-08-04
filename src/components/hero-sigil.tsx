@@ -2,14 +2,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { Archetype } from '@/domain/types';
+import type { Archetype } from '@/domain/types';
 import { Palette, Radius } from '@/constants/theme';
-
-const HEROES: Record<Archetype, { icon: string; label: string; colors: [string, string] }> = {
-  pathfinder: { icon: '⌁', label: 'Следопыт', colors: ['#6FE0D4', '#3E7E8B'] },
-  scholar: { icon: '✦', label: 'Хранитель знаний', colors: ['#B8A9FF', '#6555B9'] },
-  guardian: { icon: '◇', label: 'Страж', colors: ['#FFD37B', '#9C6A29'] },
-};
+import { ARCHETYPE_PRESENTATION } from '@/shared/presentation/archetypes';
 
 export function HeroSigil({
   archetype = 'pathfinder',
@@ -22,7 +17,7 @@ export function HeroSigil({
   level?: number;
   dimmed?: boolean;
 }) {
-  const hero = HEROES[archetype];
+  const hero = ARCHETYPE_PRESENTATION[archetype];
 
   return (
     <View style={[styles.wrap, { width: size, height: size, opacity: dimmed ? 0.55 : 1 }]}>
@@ -34,7 +29,7 @@ export function HeroSigil({
         ]}
       />
       <LinearGradient
-        colors={dimmed ? ['#3A3D49', '#1A1D26'] : hero.colors}
+        colors={dimmed ? ['#3A3D49', '#1A1D26'] : [...hero.colors]}
         style={[
           styles.core,
           { width: size * 0.62, height: size * 0.62, borderRadius: size / 2 },
@@ -50,10 +45,6 @@ export function HeroSigil({
       ) : null}
     </View>
   );
-}
-
-export function archetypeLabel(archetype: Archetype) {
-  return HEROES[archetype].label;
 }
 
 const styles = StyleSheet.create({

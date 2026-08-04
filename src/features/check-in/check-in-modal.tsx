@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { RunSummary } from '@/components/in-app-mission-runner';
+import { RunSummary } from '@/features/mission-session';
 import { AppButton, Pill } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import { isMissionRunSuccessful } from '@/domain/mission-run';

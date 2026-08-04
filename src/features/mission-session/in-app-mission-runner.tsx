@@ -14,18 +14,26 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { AppButton, Pill, ProgressBar } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
-import { isMissionRunSuccessful } from '@/domain/mission-run';
+import {
+  isMissionRunSuccessful,
+  missionRunSummary,
+} from '@/domain/mission-run';
+import {
+  checkpointMissionRunWork,
+  completeCounterMissionRunSet,
+  completeSimpleMissionRunBlock,
+  completeTimerMissionRunSet,
+  continueMissionRunAfterReview,
+  startMissionRunWork,
+} from '@/domain/mission-run-machine';
 import type {
   CounterExecutionBlock,
-  CounterRunBlockResult,
   Mission,
   MissionExecutionBlock,
   MissionRun,
   MissionRunBlockResult,
   MissionRunFinishReason,
   MissionRunMutation,
-  TimerExecutionBlock,
-  TimerRunBlockResult,
 } from '@/domain/types';
 import { formatCalendarDate } from '@/lib/calendar-date';
 
@@ -84,11 +92,13 @@ export function InAppMissionRunner({
 
     const timeout = setTimeout(() => {
       if (run.cursor.stage === 'rest') {
-        startCurrentBlockOrSet(run, execution?.blocks, onSave);
+        const checkpoint = startMissionRunWork(run, execution?.blocks, new Date());
+        if (checkpoint) onSave(checkpoint);
         return;
       }
       if (activeBlock?.kind === 'timer' && activeResult?.kind === 'timer') {
-        completeTimerSet(run, activeBlock, activeResult, true, onSave);
+        const checkpoint = completeTimerMissionRunSet(run, activeBlock, true, new Date());
+        if (checkpoint) onSave(checkpoint);
         return;
       }
     }, Math.max(0, Date.parse(run.stageEndsAt) - Date.now()));
@@ -97,7 +107,9 @@ export function InAppMissionRunner({
 
   if (!execution) return null;
 
-  const summary = summarizeRun(run);
+  const summary = run
+    ? missionRunSummary(run)
+    : { completedBlocks: 0, totalBlocks: 0, targetMetSets: 0, totalSets: 0 };
   const progress = execution.blocks.length
     ? summary.completedBlocks / execution.blocks.length
     : 0;
@@ -239,7 +251,10 @@ export function InAppMissionRunner({
                 {run.cursor.stage === 'ready' ? (
                   <ReadyBlock
                     block={activeBlock}
-                    onStart={() => startCurrentBlockOrSet(run, execution.blocks, onSave)}
+                    onStart={() => {
+                      const checkpoint = startMissionRunWork(run, execution.blocks, new Date());
+                      if (checkpoint) onSave(checkpoint);
+                    }}
                   />
                 ) : null}
 
@@ -265,7 +280,10 @@ export function InAppMissionRunner({
                     <AppButton
                       label="Пропустить отдых"
                       variant="secondary"
-                      onPress={() => startCurrentBlockOrSet(run, execution.blocks, onSave)}
+                      onPress={() => {
+                        const checkpoint = startMissionRunWork(run, execution.blocks, new Date());
+                        if (checkpoint) onSave(checkpoint);
+                      }}
                     />
                   </View>
                 ) : null}
@@ -287,7 +305,9 @@ export function InAppMissionRunner({
                   <AppButton
                     label="Остановить сессию и сохранить"
                     variant="secondary"
-                    onPress={() => onFinish(checkpointCurrentWork(run, activeBlock), 'stopped')}
+                    onPress={() =>
+                      onFinish(checkpointMissionRunWork(run, activeBlock, new Date()), 'stopped')
+                    }
                   />
                 </View>
               </>
@@ -358,7 +378,10 @@ function ActiveBlock({
         <AppButton
           label="Не выдержал — записать фактическое время"
           variant="secondary"
-          onPress={() => completeTimerSet(run, block, result, false, onSave)}
+          onPress={() => {
+            const checkpoint = completeTimerMissionRunSet(run, block, false, new Date());
+            if (checkpoint) onSave(checkpoint);
+          }}
         />
       </View>
     );
@@ -399,7 +422,10 @@ function ActiveBlock({
         />
         <AppButton
           label="Записать подход"
-          onPress={() => completeCounterSet(run, block, result, onSave)}
+          onPress={() => {
+            const checkpoint = completeCounterMissionRunSet(run, block, new Date());
+            if (checkpoint) onSave(checkpoint);
+          }}
         />
       </View>
     );
@@ -440,7 +466,10 @@ function ActiveBlock({
         <AppButton
           disabled={!allChecked}
           label="Чек-лист выполнен — записать"
-          onPress={() => completeSimpleBlock(run, result, onSave)}
+          onPress={() => {
+            const checkpoint = completeSimpleMissionRunBlock(run, result.blockIndex, new Date());
+            if (checkpoint) onSave(checkpoint);
+          }}
         />
       </View>
     );
@@ -478,7 +507,10 @@ function ActiveBlock({
         <AppButton
           disabled={!enough}
           label="Сохранить ответ в Actum"
-          onPress={() => completeSimpleBlock(run, result, onSave)}
+          onPress={() => {
+            const checkpoint = completeSimpleMissionRunBlock(run, result.blockIndex, new Date());
+            if (checkpoint) onSave(checkpoint);
+          }}
         />
       </View>
     );
@@ -586,7 +618,14 @@ function BlockReview({
         disabled={!criterionAnswered}
         label={run.cursor.blockIndex + 1 < blocks.length ? 'Сохранить и перейти дальше' : 'Завершить сессию'}
         icon="→"
-        onPress={() => continueAfterReview(run, blocks, onSave, onFinish)}
+        onPress={() => {
+          const transition = continueMissionRunAfterReview(run, blocks, new Date());
+          if (transition.kind === 'finish') {
+            onFinish(transition.run, transition.reason);
+          } else {
+            onSave(transition.run);
+          }
+        }}
       />
     </View>
   );
@@ -641,7 +680,7 @@ function ExecutionPlan({ blocks }: { blocks: MissionExecutionBlock[] }) {
 }
 
 export function RunSummary({ mission, run }: { mission: Mission; run: MissionRun }) {
-  const summary = summarizeRun(run);
+  const summary = missionRunSummary(run);
   const successful = isMissionRunSuccessful(run);
   const elapsed = Math.max(
     0,
@@ -802,208 +841,6 @@ function Warning({ text }: { text: string }) {
       <ThemedText type="small">{text}</ThemedText>
     </View>
   );
-}
-
-function startCurrentBlockOrSet(
-  run: MissionRun,
-  blocks: MissionExecutionBlock[] | undefined,
-  onSave: (run: MissionRun) => void,
-) {
-  const block = blocks?.[run.cursor.blockIndex];
-  const result = run.blockResults[run.cursor.blockIndex];
-  if (!block || !result) return;
-  const checkpoint = cloneRun(run);
-  const now = new Date();
-  const nowIso = now.toISOString();
-  const target = checkpoint.blockResults[run.cursor.blockIndex];
-  target.startedAt ||= nowIso;
-  checkpoint.cursor.stage = 'work';
-  checkpoint.stageStartedAt = nowIso;
-  checkpoint.stageEndsAt = undefined;
-
-  if (block.kind === 'timer' && target.kind === 'timer') {
-    const set = target.sets[run.cursor.setIndex];
-    set.startedAt = nowIso;
-    checkpoint.stageEndsAt = new Date(now.getTime() + block.durationSecondsPerSet * 1000).toISOString();
-  } else if (block.kind === 'counter' && target.kind === 'counter') {
-    target.sets[run.cursor.setIndex].startedAt ||= nowIso;
-    checkpoint.stageEndsAt = new Date(now.getTime() + block.workSecondsPerSet * 1000).toISOString();
-  }
-  onSave(checkpoint);
-}
-
-function checkpointCurrentWork(
-  run: MissionRun,
-  block: MissionExecutionBlock | undefined,
-): MissionRun {
-  const checkpoint = cloneRun(run);
-  if (run.cursor.stage !== 'work' || !block) return checkpoint;
-
-  const target = checkpoint.blockResults[run.cursor.blockIndex];
-  const completedAt = new Date();
-  if (block.kind === 'timer' && target?.kind === 'timer') {
-    const set = target.sets[run.cursor.setIndex];
-    const startedAt = set.startedAt ? Date.parse(set.startedAt) : completedAt.getTime();
-    set.actualDurationSeconds = Math.max(
-      set.actualDurationSeconds,
-      Math.max(0, Math.round((completedAt.getTime() - startedAt) / 1000)),
-    );
-    set.targetMet = set.actualDurationSeconds >= block.durationSecondsPerSet;
-    set.completedAt = completedAt.toISOString();
-  }
-  if (block.kind === 'counter' && target?.kind === 'counter') {
-    const set = target.sets[run.cursor.setIndex];
-    const startedAt = set.startedAt ? Date.parse(set.startedAt) : completedAt.getTime();
-    set.actualDurationSeconds = Math.max(
-      set.actualDurationSeconds,
-      Math.max(0, Math.round((completedAt.getTime() - startedAt) / 1000)),
-    );
-    set.targetMet = set.actualQuantity >= block.targetPerSet;
-    set.completedAt = completedAt.toISOString();
-  }
-  checkpoint.stageStartedAt = undefined;
-  checkpoint.stageEndsAt = undefined;
-  return checkpoint;
-}
-
-function completeTimerSet(
-  run: MissionRun,
-  block: TimerExecutionBlock,
-  result: TimerRunBlockResult,
-  reachedZero: boolean,
-  onSave: (run: MissionRun) => void,
-) {
-  const checkpoint = cloneRun(run);
-  const target = checkpoint.blockResults[run.cursor.blockIndex];
-  if (target.kind !== 'timer') return;
-  const completedAt = new Date();
-  const set = target.sets[run.cursor.setIndex];
-  const startedAt = set.startedAt ? Date.parse(set.startedAt) : completedAt.getTime();
-  set.actualDurationSeconds = reachedZero
-    ? block.durationSecondsPerSet
-    : Math.max(0, Math.round((completedAt.getTime() - startedAt) / 1000));
-  set.targetMet = set.actualDurationSeconds >= block.durationSecondsPerSet;
-  set.completedAt = completedAt.toISOString();
-  advanceAfterSet(checkpoint, block, target, onSave);
-}
-
-function completeCounterSet(
-  run: MissionRun,
-  block: CounterExecutionBlock,
-  result: CounterRunBlockResult,
-  onSave: (run: MissionRun) => void,
-) {
-  const checkpoint = cloneRun(run);
-  const target = checkpoint.blockResults[run.cursor.blockIndex];
-  if (target.kind !== 'counter') return;
-  const completedAt = new Date();
-  const set = target.sets[run.cursor.setIndex];
-  const startedAt = set.startedAt ? Date.parse(set.startedAt) : completedAt.getTime();
-  set.actualDurationSeconds = Math.max(0, Math.round((completedAt.getTime() - startedAt) / 1000));
-  set.targetMet = set.actualQuantity >= block.targetPerSet;
-  set.completedAt = completedAt.toISOString();
-  advanceAfterSet(checkpoint, block, target, onSave);
-}
-
-function advanceAfterSet(
-  checkpoint: MissionRun,
-  block: TimerExecutionBlock | CounterExecutionBlock,
-  result: TimerRunBlockResult | CounterRunBlockResult,
-  onSave: (run: MissionRun) => void,
-) {
-  const nextSetIndex = checkpoint.cursor.setIndex + 1;
-  checkpoint.stageStartedAt = undefined;
-  checkpoint.stageEndsAt = undefined;
-  if (nextSetIndex >= block.sets) {
-    result.completed = true;
-    result.completedAt = new Date().toISOString();
-    checkpoint.cursor.stage = 'review';
-    onSave(checkpoint);
-    return;
-  }
-  checkpoint.cursor.setIndex = nextSetIndex;
-  if (block.restSeconds > 0) {
-    const now = Date.now();
-    checkpoint.cursor.stage = 'rest';
-    checkpoint.stageStartedAt = new Date(now).toISOString();
-    checkpoint.stageEndsAt = new Date(now + block.restSeconds * 1000).toISOString();
-    onSave(checkpoint);
-    return;
-  }
-  checkpoint.cursor.stage = 'ready';
-  onSave(checkpoint);
-}
-
-function completeSimpleBlock(
-  run: MissionRun,
-  result: MissionRunBlockResult,
-  onSave: (run: MissionRun) => void,
-) {
-  const checkpoint = cloneRun(run);
-  const target = checkpoint.blockResults[result.blockIndex];
-  target.completed = true;
-  target.completedAt = new Date().toISOString();
-  checkpoint.cursor.stage = 'review';
-  checkpoint.stageEndsAt = undefined;
-  onSave(checkpoint);
-}
-
-function continueAfterReview(
-  run: MissionRun,
-  blocks: MissionExecutionBlock[],
-  onSave: (run: MissionRun) => void,
-  onFinish: (run: MissionRun, reason: MissionRunFinishReason) => void,
-) {
-  const checkpoint = cloneRun(run);
-  const nextBlockIndex = run.cursor.blockIndex + 1;
-  if (nextBlockIndex >= blocks.length) {
-    checkpoint.cursor.stage = 'complete';
-    checkpoint.stageStartedAt = undefined;
-    checkpoint.stageEndsAt = undefined;
-    onFinish(checkpoint, 'completed');
-    return;
-  }
-
-  checkpoint.cursor = { blockIndex: nextBlockIndex, setIndex: 0, stage: 'ready' };
-  checkpoint.stageStartedAt = undefined;
-  checkpoint.stageEndsAt = undefined;
-  onSave(checkpoint);
-}
-
-function cloneRun(run: MissionRun): MissionRun {
-  return {
-    ...run,
-    cursor: { ...run.cursor },
-    blockResults: run.blockResults.map((result) => {
-      if (result.kind === 'timer') {
-        return { ...result, sets: result.sets.map((set) => ({ ...set })) };
-      }
-      if (result.kind === 'counter') {
-        return { ...result, sets: result.sets.map((set) => ({ ...set })) };
-      }
-      if (result.kind === 'checklist') {
-        return { ...result, checkedIndexes: [...result.checkedIndexes] };
-      }
-      return { ...result };
-    }),
-  };
-}
-
-function summarizeRun(run?: MissionRun) {
-  if (!run) return { completedBlocks: 0, totalBlocks: 0, targetMetSets: 0, totalSets: 0 };
-  let targetMetSets = 0;
-  let totalSets = 0;
-  for (const block of run.blockResults) {
-    if (block.kind !== 'timer' && block.kind !== 'counter') continue;
-    totalSets += block.sets.length;
-    targetMetSets += block.sets.filter((set) => set.targetMet).length;
-  }
-  return {
-    completedBlocks: run.blockResults.filter((block) => block.completed).length,
-    totalBlocks: run.blockResults.length,
-    targetMetSets,
-    totalSets,
-  };
 }
 
 function blockPrescription(block: MissionExecutionBlock) {

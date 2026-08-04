@@ -33,11 +33,32 @@ function compileModule(sourcePath, outputName, transform = (source) => source) {
 
 await import('node:fs/promises').then(({ mkdir }) => mkdir(compiledDirectory));
 compileModule('src/domain/mission-run.ts', 'mission-run.mjs');
+compileModule('src/domain/mission-run-machine.ts', 'mission-run-machine.mjs');
+compileModule('src/domain/reward-policy.ts', 'reward-policy.mjs');
 compileModule('src/lib/calendar-date.ts', 'calendar-date.mjs');
+compileModule('src/state/app-state-defaults.ts', 'app-state-defaults.mjs', (source) =>
+  source.replace("from '../domain/reward-policy';", "from './reward-policy.mjs';"),
+);
+compileModule('src/state/app-state-codec.ts', 'app-state-codec.mjs', (source) =>
+  source
+    .replace("from '../domain/mission-run';", "from './mission-run.mjs';")
+    .replace("from './app-state-defaults';", "from './app-state-defaults.mjs';"),
+);
 compileModule('src/state/app-state.ts', 'app-state.mjs', (source) =>
   source
     .replace("from '../domain/mission-run';", "from './mission-run.mjs';")
-    .replace("from '../lib/calendar-date';", "from './calendar-date.mjs';"),
+    .replace("from '../domain/reward-policy';", "from './reward-policy.mjs';")
+    .replace("from '../lib/calendar-date';", "from './calendar-date.mjs';")
+    .replace("from './app-state-defaults';", "from './app-state-defaults.mjs';")
+    .replace("from './app-state-codec';", "from './app-state-codec.mjs';"),
+);
+compileModule('src/state/app-state-repository.ts', 'app-state-repository.mjs', (source) =>
+  source.replace("from './app-state-codec';", "from './app-state-codec.mjs';"),
+);
+compileModule('src/state/app-commands.ts', 'app-commands.mjs', (source) =>
+  source
+    .replace("from '@/domain/mission-run';", "from './mission-run.mjs';")
+    .replace("from '@/lib/calendar-date';", "from './calendar-date.mjs';"),
 );
 
 const {
@@ -46,15 +67,34 @@ const {
   isMissionRunSuccessful,
   missionRunSummary,
 } = await import(pathToFileURL(join(compiledDirectory, 'mission-run.mjs')).href);
+const {
+  checkpointMissionRunWork,
+  completeCounterMissionRunSet,
+  completeSimpleMissionRunBlock,
+  completeTimerMissionRunSet,
+  continueMissionRunAfterReview,
+  startMissionRunWork,
+} = await import(pathToFileURL(join(compiledDirectory, 'mission-run-machine.mjs')).href);
 const { addCalendarDaysToKey } = await import(
   pathToFileURL(join(compiledDirectory, 'calendar-date.mjs')).href
 );
+const {
+  REWARD_POLICY,
+  missionReward,
+  selectTwinProjection,
+} = await import(pathToFileURL(join(compiledDirectory, 'reward-policy.mjs')).href);
 const {
   APP_STATE_STORAGE_KEY,
   appStateReducer,
   createInitialAppState,
   restoreAppState,
 } = await import(pathToFileURL(join(compiledDirectory, 'app-state.mjs')).href);
+const { createAppStateRepository } = await import(
+  pathToFileURL(join(compiledDirectory, 'app-state-repository.mjs')).href
+);
+const { createAppCommands } = await import(
+  pathToFileURL(join(compiledDirectory, 'app-commands.mjs')).href
+);
 
 process.on('exit', () => rmSync(compiledDirectory, { recursive: true, force: true }));
 
@@ -139,6 +179,118 @@ function stateWithGoal() {
     now: T0,
   });
 }
+
+test('reward policy keeps outcome rewards and initial character meters in one contract', () => {
+  assert.deepEqual(missionReward(20, 'completed'), {
+    xpDelta: 20,
+    energyDelta: 6,
+    worldLightDelta: 7,
+  });
+  assert.deepEqual(missionReward(20, 'partial'), {
+    xpDelta: 9,
+    energyDelta: -2,
+    worldLightDelta: 2,
+  });
+  assert.deepEqual(missionReward(20, 'skipped'), {
+    xpDelta: 0,
+    energyDelta: -10,
+    worldLightDelta: -5,
+  });
+
+  const initial = createInitialAppState(T0);
+  assert.equal(initial.character.energy, REWARD_POLICY.initialEnergy);
+  assert.equal(initial.character.worldLight, REWARD_POLICY.initialWorldLight);
+});
+
+test('twin projection applies the same full and partial reward rules without changing its baseline', () => {
+  const missions = [
+    { xp: 20, outcome: 'completed' },
+    { xp: 21, outcome: 'partial' },
+    { xp: 30, outcome: 'skipped' },
+    { xp: 40, outcome: 'pending' },
+  ];
+  const projection = selectTwinProjection(missions, [
+    { xpDelta: 20 },
+    { xpDelta: 9 },
+    { xpDelta: 0 },
+  ]);
+
+  assert.deepEqual(projection, {
+    completed: 1,
+    partial: 1,
+    reported: 3,
+    skipped: 1,
+    projectedXp: 71,
+    actualXp: 29,
+    adherence: (1 + 0.45) / 3,
+    adherenceBand: 'recoverable',
+    potentialLevel: 1,
+    potentialEnergy: 94,
+    potentialLight: 39,
+  });
+
+  const unreported = selectTwinProjection(
+    missions.map((mission) => ({ ...mission, outcome: 'pending' })),
+    [],
+  );
+  assert.equal(unreported.projectedXp, 20);
+  assert.equal(unreported.potentialEnergy, REWARD_POLICY.initialEnergy);
+  assert.equal(unreported.potentialLight, REWARD_POLICY.initialWorldLight);
+  assert.equal(unreported.adherenceBand, 'unreported');
+});
+
+test('app-state repository owns storage encoding while preserving the stable schema contract', async () => {
+  const values = new Map();
+  const storage = {
+    async getItem(key) {
+      return values.get(key) ?? null;
+    },
+    async setItem(key, value) {
+      values.set(key, value);
+    },
+    async removeItem(key) {
+      values.delete(key);
+    },
+  };
+  const repository = createAppStateRepository(storage);
+  assert.equal((await repository.load()).source, 'empty');
+
+  const state = createInitialAppState(T0);
+  await repository.save(state);
+  assert.equal(typeof values.get(APP_STATE_STORAGE_KEY), 'string');
+  assert.deepEqual(await repository.load(), {
+    status: 'ready',
+    source: 'stored',
+    state,
+    migrated: false,
+  });
+
+  await repository.clear();
+  assert.equal(values.has(APP_STATE_STORAGE_KEY), false);
+});
+
+test('application commands coordinate domain actions with an injected clock and no React dependency', () => {
+  const state = stateWithGoal();
+  const actions = [];
+  const commands = createAppCommands({
+    state,
+    dispatch: (action) => actions.push(action),
+    now: () => new Date(T1),
+  });
+
+  const run = commands.beginMissionRun('mission-1');
+  assert.ok(run);
+  assert.equal(run.startedAt, T1);
+  assert.deepEqual(actions[0], { type: 'begin-mission-run', run, now: T1 });
+
+  commands.restartActivePlan('plan-1');
+  assert.deepEqual(actions[1], {
+    type: 'restart-active-plan',
+    planId: 'plan-1',
+    startDate: '2026-08-01',
+    now: T1,
+  });
+});
 
 function completedCheckpoint(run, targetMet = true) {
   const checkpoint = structuredClone(run);
@@ -228,6 +380,119 @@ test('run initialization captures immutable targets and resumable cursor timesta
     actualDurationSeconds: 0,
     targetMet: false,
   });
+});
+
+test('mission-run machine advances timer sets through work, rest, review, and finish deterministically', () => {
+  const timerBlock = {
+    kind: 'timer',
+    title: 'Hold',
+    instruction: 'Hold for the prescribed time.',
+    sets: 2,
+    durationSecondsPerSet: 30,
+    restSeconds: 10,
+    successCriterion: 'Both sets are recorded.',
+  };
+  const mission = {
+    ...generatedGoal().plan.missions[0],
+    id: 'timer-mission',
+    execution: {
+      kind: 'in_app',
+      successCriterion: 'Both sets are recorded.',
+      blocks: [timerBlock],
+    },
+  };
+  const initial = createMissionRun(mission, T0);
+  const started = startMissionRunWork(initial, [timerBlock], T0);
+  assert.ok(started);
+  assert.equal(started.cursor.stage, 'work');
+  assert.equal(started.stageEndsAt, '2026-08-01T09:00:30.000Z');
+  assert.equal(initial.cursor.stage, 'ready');
+
+  const afterFirst = completeTimerMissionRunSet(
+    started,
+    timerBlock,
+    true,
+    '2026-08-01T09:00:30.000Z',
+  );
+  assert.ok(afterFirst);
+  assert.deepEqual(afterFirst.cursor, { blockIndex: 0, setIndex: 1, stage: 'rest' });
+  assert.equal(afterFirst.stageEndsAt, '2026-08-01T09:00:40.000Z');
+  assert.equal(afterFirst.blockResults[0].sets[0].targetMet, true);
+
+  const secondStarted = startMissionRunWork(
+    afterFirst,
+    [timerBlock],
+    '2026-08-01T09:00:40.000Z',
+  );
+  assert.ok(secondStarted);
+  const afterSecond = completeTimerMissionRunSet(
+    secondStarted,
+    timerBlock,
+    false,
+    '2026-08-01T09:00:50.000Z',
+  );
+  assert.ok(afterSecond);
+  assert.equal(afterSecond.cursor.stage, 'review');
+  assert.equal(afterSecond.blockResults[0].completed, true);
+  assert.equal(afterSecond.blockResults[0].sets[1].actualDurationSeconds, 10);
+  assert.equal(afterSecond.blockResults[0].sets[1].targetMet, false);
+
+  const transition = continueMissionRunAfterReview(
+    afterSecond,
+    [timerBlock],
+    '2026-08-01T09:00:51.000Z',
+  );
+  assert.equal(transition.kind, 'finish');
+  assert.equal(transition.reason, 'completed');
+  assert.equal(transition.run.cursor.stage, 'complete');
+});
+
+test('mission-run machine handles counter and simple blocks without React or persistence', () => {
+  const mission = generatedGoal().plan.missions[0];
+  const blocks = mission.execution.blocks;
+  const initial = createMissionRun(mission, T0);
+  const counterStarted = startMissionRunWork(initial, blocks, T0);
+  assert.ok(counterStarted);
+  counterStarted.blockResults[0].sets[0].actualQuantity = 10;
+  const counterDone = completeCounterMissionRunSet(
+    counterStarted,
+    blocks[0],
+    '2026-08-01T09:10:00.000Z',
+  );
+  assert.ok(counterDone);
+  assert.equal(counterDone.cursor.stage, 'review');
+  assert.equal(counterDone.blockResults[0].sets[0].actualDurationSeconds, 600);
+  assert.equal(counterDone.blockResults[0].sets[0].targetMet, true);
+
+  const next = continueMissionRunAfterReview(
+    counterDone,
+    blocks,
+    '2026-08-01T09:10:01.000Z',
+  );
+  assert.equal(next.kind, 'save');
+  assert.deepEqual(next.run.cursor, { blockIndex: 1, setIndex: 0, stage: 'ready' });
+  const textStarted = startMissionRunWork(
+    next.run,
+    blocks,
+    '2026-08-01T09:10:02.000Z',
+  );
+  assert.ok(textStarted);
+  const textDone = completeSimpleMissionRunBlock(
+    textStarted,
+    1,
+    '2026-08-01T09:12:00.000Z',
+  );
+  assert.ok(textDone);
+  assert.equal(textDone.blockResults[1].completedAt, '2026-08-01T09:12:00.000Z');
+
+  const stopped = checkpointMissionRunWork(
+    counterStarted,
+    blocks[0],
+    '2026-08-01T09:00:25.000Z',
+  );
+  assert.equal(stopped.blockResults[0].sets[0].actualDurationSeconds, 25);
+  assert.equal(stopped.stageEndsAt, undefined);
+  assert.equal(counterStarted.stageEndsAt, '2026-08-01T09:10:00.000Z');
 });
 
 test('finish atomically persists the final checkpoint and successful report links its run', () => {

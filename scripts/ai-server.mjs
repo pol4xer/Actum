@@ -1,9 +1,17 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 
+import {
+  createPlanCacheKey as createPlanCacheKeyForIdentity,
+  createResearchCacheKey as createResearchCacheKeyForIdentity,
+  providerStageKey,
+} from './ai/cache/keys.mjs';
+import {
+  createRuntimeConfig,
+  MAX_CONCURRENT_PLANS,
+  PLANNING_TIMEOUT_MS,
+  RESEARCH_TIMEOUT_MS,
+} from './ai/config/runtime.mjs';
 import { createPlanSchema, PLAN_CONTRACT_VERSION } from './ai/contracts/plan-v1.mjs';
 import {
   BASELINE_PARSER_VERSION,
@@ -27,45 +35,36 @@ import {
   responseMeta,
   safeErrorDetails,
 } from './ai/providers/openai-responses.mjs';
+import {
+  readJson,
+  requestIdFromRequest,
+  sendJson,
+  setCors,
+  validateInput,
+} from './ai/http/helpers.mjs';
+import { createDurableState } from './ai/state/durable-state.mjs';
 
-const PORT = Number(process.env.ACTUM_AI_PORT || 8787);
-const HOST = process.env.ACTUM_AI_HOST || '127.0.0.1';
-const MODEL = process.env.OPENAI_MODEL || 'gpt-5.6';
-const RESEARCH_MODEL = process.env.OPENAI_RESEARCH_MODEL || MODEL;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-export const AI_PIPELINE_CACHE_IDENTITY = Object.freeze({
-  promptVersion: PROMPT_VERSION,
-  researchPromptVersion: RESEARCH_PROMPT_VERSION,
-  contractVersion: PLAN_CONTRACT_VERSION,
-  validatorVersion: PLAN_VALIDATOR_VERSION,
-  baselineParserVersion: BASELINE_PARSER_VERSION,
+const runtime = createRuntimeConfig({ serverModuleUrl: import.meta.url });
+const {
+  port: PORT,
+  host: HOST,
   model: MODEL,
   researchModel: RESEARCH_MODEL,
-});
-const PLAN_CACHE_TTL_MS = 30 * 60_000;
-const RESEARCH_CACHE_TTL_MS = 2 * 60 * 60_000;
-const BACKGROUND_JOB_TTL_MS = 2 * 60 * 60_000;
-const AMBIGUOUS_CREATE_TTL_MS = 2 * 60 * 60_000;
-// Completed provider responses are the paid artifact. Keep them substantially
-// longer than the derived research/plan caches so a local validator fix can
-// re-read the same response instead of forcing another paid generation.
-const STAGE_RESULT_TTL_MS = 7 * 24 * 60 * 60_000;
-const MAX_CONCURRENT_PLANS = 2;
-const RESEARCH_TIMEOUT_MS = 12 * 60_000;
-const PLANNING_TIMEOUT_MS = 12 * 60_000;
-const STATE_VERSION = 1;
-const STATE_FILE =
-  process.env.ACTUM_AI_STATE_FILE ||
-  resolve(dirname(fileURLToPath(import.meta.url)), '..', '.actum', 'ai-state.json');
-const planCache = new Map();
-const researchCache = new Map();
-const backgroundJobs = new Map();
-const ambiguousCreates = new Map();
-const stageResults = new Map();
+  openAIApiKey: OPENAI_API_KEY,
+} = runtime;
+export const AI_PIPELINE_CACHE_IDENTITY = runtime.cacheIdentity;
+const durableState = createDurableState({ stateFile: runtime.stateFile });
 const inFlightPlans = new Map();
-let statePersistenceHealthy = true;
 
-restorePersistentState();
+export { providerStageKey };
+
+export function createPlanCacheKey(input, identity = AI_PIPELINE_CACHE_IDENTITY) {
+  return createPlanCacheKeyForIdentity(input, identity);
+}
+
+export function createResearchCacheKey(input, identity = AI_PIPELINE_CACHE_IDENTITY) {
+  return createResearchCacheKeyForIdentity(input, identity);
+}
 
 export async function handleRequest(request, response) {
   setCors(response);
@@ -77,6 +76,7 @@ export async function handleRequest(request, response) {
 
   const pathname = new URL(request.url || '/', `http://${HOST}:${PORT}`).pathname;
   if (request.method === 'GET' && pathname === '/health') {
+    const stateStats = durableState.stats();
     sendJson(response, 200, {
       ok: true,
       configured: Boolean(OPENAI_API_KEY),
@@ -89,18 +89,18 @@ export async function handleRequest(request, response) {
       baselineParserVersion: BASELINE_PARSER_VERSION,
       transport: 'background-polling',
       inFlightRequests: inFlightPlans.size,
-      cachedPlans: planCache.size,
-      cachedResearch: researchCache.size,
-      resumableJobs: backgroundJobs.size,
-      guardedCreates: ambiguousCreates.size,
-      cachedStageResults: stageResults.size,
-      durableState: statePersistenceHealthy,
+      cachedPlans: stateStats.cachedPlans,
+      cachedResearch: stateStats.cachedResearch,
+      resumableJobs: stateStats.resumableJobs,
+      guardedCreates: stateStats.guardedCreates,
+      cachedStageResults: stateStats.cachedStageResults,
+      durableState: durableState.isHealthy(),
     });
     return;
   }
 
   if (request.method === 'GET' && pathname === '/saved-plan/latest') {
-    if (!statePersistenceHealthy) {
+    if (!durableState.isHealthy()) {
       sendJson(response, 503, {
         error: 'Локальное состояние сохранённых AI-ответов недоступно.',
         code: 'durable_state_unavailable',
@@ -132,7 +132,7 @@ export async function handleRequest(request, response) {
   }
 
   const requestId = requestIdFromRequest(request);
-  if (!statePersistenceHealthy) {
+  if (!durableState.isHealthy()) {
     sendJson(response, 503, {
       requestId,
       error:
@@ -165,7 +165,7 @@ export async function handleRequest(request, response) {
     const reuseOnly = request.headers?.['x-actum-reuse-only'] === 'true';
     cacheKey = createPlanCacheKey(input);
     researchCacheKey = createResearchCacheKey(input);
-    const cached = readCachedPlan(cacheKey);
+    const cached = durableState.readPlan(cacheKey);
     if (cached) {
       console.log(
         `[actum-ai] ${requestId} cache_hit original_request=${cached.meta.requestId || 'unknown'}`,
@@ -197,7 +197,7 @@ export async function handleRequest(request, response) {
         reuseOnly,
       )
         .then((result) => {
-          cachePlan(cacheKey, result);
+          durableState.savePlan(cacheKey, result);
           return result;
         })
         .finally(() => {
@@ -215,7 +215,7 @@ export async function handleRequest(request, response) {
     const message = error instanceof Error ? error.message : 'Неизвестная ошибка AI-сервера.';
     const providerCode = error instanceof OpenAIRequestError ? error.code : undefined;
     const researchPreserved = Boolean(
-      researchCacheKey && readCachedResearch(researchCacheKey),
+      researchCacheKey && durableState.readResearch(researchCacheKey),
     );
     const retryGuarded = Boolean(error?.retryGuarded || error?.code === 'ambiguous_create');
     const diagnostics = safeErrorDetails(error);
@@ -263,7 +263,7 @@ if (isDirectRun()) {
     const status = OPENAI_API_KEY ? 'OpenAI key loaded' : 'OPENAI_API_KEY is missing';
     console.log(`Actum AI server: http://${HOST}:${PORT} · ${MODEL} · ${status}`);
     console.log(
-      `[actum-ai] prompt=${PROMPT_VERSION} research_prompt=${RESEARCH_PROMPT_VERSION} contract=${PLAN_CONTRACT_VERSION} validator=${PLAN_VALIDATOR_VERSION} baseline_parser=${BASELINE_PARSER_VERSION} transport=background-polling durable_state=${statePersistenceHealthy ? 'ready' : 'error'}`,
+      `[actum-ai] prompt=${PROMPT_VERSION} research_prompt=${RESEARCH_PROMPT_VERSION} contract=${PLAN_CONTRACT_VERSION} validator=${PLAN_VALIDATOR_VERSION} baseline_parser=${BASELINE_PARSER_VERSION} transport=background-polling durable_state=${durableState.isHealthy() ? 'ready' : 'error'}`,
     );
   });
 }
@@ -278,7 +278,7 @@ async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKe
   };
 
   if (researchMode === 'web') {
-    const cachedResearch = readCachedResearch(researchCacheKey);
+    const cachedResearch = durableState.readResearch(researchCacheKey);
     if (cachedResearch) {
       research = cachedResearch;
       console.log(
@@ -293,7 +293,7 @@ async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKe
         providerStageKey(researchCacheKey, 'research'),
         reuseOnly,
       );
-      cacheResearch(researchCacheKey, research);
+      durableState.saveResearch(researchCacheKey, research);
       console.log(
         `[actum-ai] ${requestId} researched response=${research.meta.providerResponseId || 'unknown'} searches=${research.meta.webSearchCount} sources=${research.sources.length} preserved=true`,
       );
@@ -489,7 +489,7 @@ async function requestStructuredPlan(
 }
 
 async function executeProviderStage({ stageKey, stage, timeoutMs, requestId, reuseOnly, body }) {
-  const completed = readExpiringEntry(stageResults, stageKey);
+  const completed = durableState.readStageResult(stageKey);
   if (completed) {
     console.log(
       `[actum-ai] ${requestId} stage=${stage} stage_result_cache_hit original_request=${completed.requestId}`,
@@ -497,7 +497,7 @@ async function executeProviderStage({ stageKey, stage, timeoutMs, requestId, reu
     return completed.payload;
   }
 
-  const resumable = readExpiringEntry(backgroundJobs, stageKey);
+  const resumable = durableState.readBackgroundJob(stageKey);
   if (resumable) {
     console.log(
       `[actum-ai] ${requestId} stage=${stage} resume_pending response=${resumable.responseId} original_request=${resumable.requestId}`,
@@ -515,7 +515,7 @@ async function executeProviderStage({ stageKey, stage, timeoutMs, requestId, reu
         },
       );
     }
-    const guarded = readExpiringEntry(ambiguousCreates, stageKey);
+    const guarded = durableState.readCreateGuard(stageKey);
     if (guarded) {
       throw new OpenAIRequestError(
         'Предыдущий POST к OpenAI оборвался до получения response ID, поэтому его платный статус неизвестен.',
@@ -530,12 +530,7 @@ async function executeProviderStage({ stageKey, stage, timeoutMs, requestId, reu
     }
 
     // Arm the guard before the paid POST so a process kill cannot erase uncertainty.
-    writeExpiringEntry(
-      ambiguousCreates,
-      stageKey,
-      { requestId, code: 'create_started' },
-      AMBIGUOUS_CREATE_TTL_MS,
-    );
+    durableState.armCreateGuard(stageKey, requestId);
   }
   const progressLogger = createProgressLogger(requestId);
 
@@ -547,27 +542,27 @@ async function executeProviderStage({ stageKey, stage, timeoutMs, requestId, reu
       timeoutMs,
       resumeResponseId: resumable?.responseId,
       onResponseId: (event) => {
-        recordBackgroundJob(stageKey, event.responseId, requestId);
+        durableState.recordBackgroundJob(stageKey, event.responseId, requestId);
       },
       onProgress: progressLogger,
     });
-    recordStageResult(stageKey, payload, requestId, createStageInputSnapshot(body.input));
+    durableState.recordStageResult(
+      stageKey,
+      payload,
+      requestId,
+      createStageInputSnapshot(body.input),
+    );
     return payload;
   } catch (error) {
     if (error instanceof OpenAIRequestError) {
       if (error.providerResponseId) {
-        recordBackgroundJob(stageKey, error.providerResponseId, requestId);
+        durableState.recordBackgroundJob(stageKey, error.providerResponseId, requestId);
       }
       if (isAmbiguousCreateFailure(error)) {
-        writeExpiringEntry(
-          ambiguousCreates,
-          stageKey,
-          { requestId, code: error.code },
-          AMBIGUOUS_CREATE_TTL_MS,
-        );
+        durableState.armCreateGuard(stageKey, requestId, error.code);
         error.retryGuarded = true;
       } else if (error.operation === 'create' && !error.providerResponseId) {
-        deletePersistedEntry(ambiguousCreates, stageKey);
+        durableState.clearCreateGuard(stageKey);
       }
       // Keep a known response ID even for a terminal provider outcome. A retry can
       // retrieve the same response without creating and billing a second POST.
@@ -576,93 +571,18 @@ async function executeProviderStage({ stageKey, stage, timeoutMs, requestId, reu
   }
 }
 
-function validateInput(input) {
-  if (!input || typeof input !== 'object') throw new Error('Некорректный запрос.');
-  if (typeof input.prompt !== 'string' || input.prompt.trim().length < 5) {
-    throw new Error('Цель слишком короткая.');
-  }
-  if (![10, 20, 30, 45, 60].includes(input.dailyMinutes)) {
-    throw new Error('Некорректный лимит времени.');
-  }
-  if (![7, 14, 30].includes(input.horizonDays)) throw new Error('Некорректный горизонт.');
-  if (!['starting', 'some-experience', 'returning'].includes(input.currentLevel)) {
-    throw new Error('Некорректная точка старта.');
-  }
-  if (typeof input.baseline !== 'string' || input.baseline.trim().length < 2) {
-    throw new Error('Опиши текущую измеренную точку старта.');
-  }
-  if (input.baseline.trim().length > 500) {
-    throw new Error('Описание точки старта слишком длинное.');
-  }
-  if (typeof input.targetTimeline !== 'string' || input.targetTimeline.trim().length < 2) {
-    throw new Error('Укажи желаемый срок большой цели.');
-  }
-  if (input.targetTimeline.trim().length > 80) {
-    throw new Error('Описание срока слишком длинное.');
-  }
-  if (input.researchMode != null && !['quick', 'web'].includes(input.researchMode)) {
-    throw new Error('Некорректный режим исследования.');
-  }
-}
-
-function readJson(request) {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    let settled = false;
-    request.setEncoding('utf8');
-    request.on('data', (chunk) => {
-      if (settled) return;
-      body += chunk;
-      if (body.length > 20_000) {
-        settled = true;
-        reject(new Error('Запрос слишком большой.'));
-      }
-    });
-    request.on('end', () => {
-      if (settled) return;
-      try {
-        settled = true;
-        resolve(JSON.parse(body));
-      } catch {
-        settled = true;
-        reject(new Error('Некорректный JSON.'));
-      }
-    });
-    request.on('error', (error) => {
-      if (settled) return;
-      settled = true;
-      reject(error);
-    });
-  });
-}
-
-function setCors(response) {
-  response.setHeader('Access-Control-Allow-Origin', '*');
-  response.setHeader(
-    'Access-Control-Allow-Headers',
-    'Content-Type, X-Actum-Request-Id, X-Actum-Reuse-Only',
-  );
-  response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-}
-
-function sendJson(response, status, body) {
-  if (response.destroyed || response.writableEnded) return;
-  response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
-  response.end(JSON.stringify(body));
-}
-
 function sumNumbers(...values) {
   const numbers = values.filter((value) => typeof value === 'number' && Number.isFinite(value));
   return numbers.length ? numbers.reduce((sum, value) => sum + value, 0) : undefined;
 }
 
 function readLatestSavedPlan() {
-  const planning = latestCompletedStage('planning');
+  const planning = durableState.latestCompletedStage('planning');
   if (!planning) return undefined;
   const outputText = extractOutputText(planning.payload);
   if (!outputText) return undefined;
   const plan = JSON.parse(outputText);
-  const research = latestCompletedStage(
+  const research = durableState.latestCompletedStage(
     'research',
     Number(planning.payload?.created_at || planning.payload?.completed_at || Number.POSITIVE_INFINITY),
   );
@@ -696,23 +616,6 @@ function readLatestSavedPlan() {
       sources: research ? extractWebSources(research.payload).slice(0, 8) : [],
     },
   };
-}
-
-function latestCompletedStage(stage, completedBefore = Number.POSITIVE_INFINITY) {
-  const prefix = `${stage}\u0000`;
-  return [...stageResults]
-    .filter(
-      ([key, entry]) =>
-        key.startsWith(prefix) &&
-        entry?.payload?.status === 'completed' &&
-        Number(entry.payload?.completed_at || entry.payload?.created_at || 0) <= completedBefore,
-    )
-    .map(([, entry]) => entry)
-    .sort(
-      (left, right) =>
-        Number(right.payload?.completed_at || right.payload?.created_at || 0) -
-        Number(left.payload?.completed_at || left.payload?.created_at || 0),
-    )[0];
 }
 
 function inferSavedPlanInput(plan, hasResearch, inputSnapshot) {
@@ -780,131 +683,6 @@ function createStageInputSnapshot(serializedInput) {
   }
 }
 
-export function createPlanCacheKey(input, identity = AI_PIPELINE_CACHE_IDENTITY) {
-  const usesWebResearch = input.researchMode !== 'quick';
-  return createHash('sha256')
-    .update(
-      JSON.stringify({
-        promptVersion: identity.promptVersion,
-        researchPromptVersion: usesWebResearch ? identity.researchPromptVersion : 'not-used',
-        contractVersion: identity.contractVersion,
-        validatorVersion: identity.validatorVersion,
-        baselineParserVersion: identity.baselineParserVersion,
-        model: identity.model,
-        researchModel: usesWebResearch ? identity.researchModel : 'not-used',
-        prompt: input.prompt.trim(),
-        currentLevel: input.currentLevel,
-        baseline: input.baseline.trim(),
-        targetTimeline: input.targetTimeline.trim(),
-        dailyMinutes: input.dailyMinutes,
-        horizonDays: input.horizonDays,
-        researchMode: input.researchMode === 'quick' ? 'quick' : 'web',
-      }),
-    )
-    .digest('hex');
-}
-
-export function createResearchCacheKey(input, identity = AI_PIPELINE_CACHE_IDENTITY) {
-  return createHash('sha256')
-    .update(
-      JSON.stringify({
-        researchPromptVersion: identity.researchPromptVersion,
-        baselineParserVersion: identity.baselineParserVersion,
-        researchModel: identity.researchModel,
-        prompt: input.prompt.trim(),
-        currentLevel: input.currentLevel,
-        baseline: input.baseline.trim(),
-        targetTimeline: input.targetTimeline.trim(),
-        dailyMinutes: input.dailyMinutes,
-        horizonDays: input.horizonDays,
-        researchMode: input.researchMode === 'quick' ? 'quick' : 'web',
-      }),
-    )
-    .digest('hex');
-}
-
-export function providerStageKey(cacheKey, stage) {
-  return `${stage}\u0000${cacheKey}`;
-}
-
-function readCachedPlan(cacheKey) {
-  return readCache(planCache, cacheKey);
-}
-
-function readCachedResearch(cacheKey) {
-  return readCache(researchCache, cacheKey);
-}
-
-function readCache(cache, cacheKey) {
-  const entry = cache.get(cacheKey);
-  if (!entry) return undefined;
-  if (entry.expiresAt <= Date.now()) {
-    cache.delete(cacheKey);
-    persistState();
-    return undefined;
-  }
-  return entry.result;
-}
-
-function cachePlan(cacheKey, result) {
-  writeCache(planCache, cacheKey, result, PLAN_CACHE_TTL_MS);
-}
-
-function cacheResearch(cacheKey, result) {
-  writeCache(researchCache, cacheKey, result, RESEARCH_CACHE_TTL_MS);
-}
-
-function writeCache(cache, cacheKey, result, ttlMs) {
-  cache.delete(cacheKey);
-  cache.set(cacheKey, { result, expiresAt: Date.now() + ttlMs });
-  persistState();
-}
-
-function readExpiringEntry(cache, key) {
-  const entry = cache.get(key);
-  if (!entry) return undefined;
-  if (entry.expiresAt <= Date.now()) {
-    cache.delete(key);
-    persistState();
-    return undefined;
-  }
-  return entry;
-}
-
-function writeExpiringEntry(cache, key, value, ttlMs) {
-  cache.delete(key);
-  cache.set(key, { ...value, expiresAt: Date.now() + ttlMs });
-  persistState();
-}
-
-function recordBackgroundJob(stageKey, responseId, requestId) {
-  backgroundJobs.delete(stageKey);
-  backgroundJobs.set(stageKey, {
-    responseId,
-    requestId,
-    expiresAt: Date.now() + BACKGROUND_JOB_TTL_MS,
-  });
-  ambiguousCreates.delete(stageKey);
-  persistState();
-}
-
-function recordStageResult(stageKey, payload, requestId, inputSnapshot) {
-  stageResults.delete(stageKey);
-  stageResults.set(stageKey, {
-    payload,
-    requestId,
-    inputSnapshot,
-    expiresAt: Date.now() + STAGE_RESULT_TTL_MS,
-  });
-  backgroundJobs.delete(stageKey);
-  ambiguousCreates.delete(stageKey);
-  persistState();
-}
-
-function deletePersistedEntry(cache, key) {
-  if (cache.delete(key)) persistState();
-}
-
 function isAmbiguousCreateFailure(error) {
   return (
     error.operation === 'create' &&
@@ -934,15 +712,6 @@ function invalidProviderOutput(message, code, stage, payload, cause) {
     error.validationPath = /^([A-Za-z0-9.]+):/.exec(message)?.[1];
   }
   return error;
-}
-
-function requestIdFromRequest(request) {
-  const rawHeader = request.headers?.['x-actum-request-id'];
-  const candidate = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
-  if (typeof candidate === 'string' && /^actum_[A-Za-z0-9_-]{8,80}$/.test(candidate)) {
-    return candidate;
-  }
-  return `actum_${randomUUID().replaceAll('-', '').slice(0, 16)}`;
 }
 
 function createProgressLogger(requestId) {
@@ -1008,104 +777,6 @@ function nonNegativeLogNumber(value) {
   return typeof value === 'number' && Number.isFinite(value)
     ? Math.max(0, Math.round(value))
     : 0;
-}
-
-function restorePersistentState() {
-  try {
-    const state = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
-    if (state?.version !== STATE_VERSION) {
-      throw new Error('unsupported state version');
-    }
-    restoreMap(planCache, state.planCache);
-    restoreMap(researchCache, state.researchCache);
-    restoreMap(backgroundJobs, state.backgroundJobs);
-    restoreMap(ambiguousCreates, state.ambiguousCreates);
-    restoreMap(stageResults, state.stageResults, { recoverCompletedStages: true });
-  } catch (error) {
-    if (error?.code === 'ENOENT') return;
-    statePersistenceHealthy = false;
-    console.warn(
-      '[actum-ai] durable_state_load_failed state_ignored=true paid_requests_blocked=true',
-    );
-  }
-}
-
-function restoreMap(cache, entries, { recoverCompletedStages = false } = {}) {
-  if (!Array.isArray(entries)) return;
-  const now = Date.now();
-  for (const pair of entries) {
-    if (!Array.isArray(pair) || pair.length !== 2) continue;
-    const [key, entry] = pair;
-    if (typeof key !== 'string' || key.length > 200) continue;
-    if (!entry || typeof entry !== 'object') continue;
-    let restoredEntry = entry;
-    if (!Number.isFinite(entry.expiresAt) || entry.expiresAt <= now) {
-      const completedAtMs = Number(entry.payload?.completed_at) * 1000;
-      const recoveredExpiresAt = completedAtMs + STAGE_RESULT_TTL_MS;
-      if (
-        !recoverCompletedStages ||
-        entry.payload?.status !== 'completed' ||
-        !Number.isFinite(completedAtMs) ||
-        recoveredExpiresAt <= now
-      ) {
-        continue;
-      }
-      restoredEntry = { ...entry, expiresAt: recoveredExpiresAt };
-    }
-    cache.set(key, restoredEntry);
-  }
-}
-
-function persistState() {
-  const temporaryFile = `${STATE_FILE}.${process.pid}.${Date.now()}.tmp`;
-  try {
-    pruneExpiredEntries();
-    mkdirSync(dirname(STATE_FILE), { recursive: true, mode: 0o700 });
-    writeFileSync(
-      temporaryFile,
-      JSON.stringify(
-        {
-          version: STATE_VERSION,
-          savedAt: new Date().toISOString(),
-          planCache: [...planCache],
-          researchCache: [...researchCache],
-          backgroundJobs: [...backgroundJobs],
-          ambiguousCreates: [...ambiguousCreates],
-          stageResults: [...stageResults],
-        },
-        null,
-        2,
-      ),
-      { encoding: 'utf8', mode: 0o600 },
-    );
-    renameSync(temporaryFile, STATE_FILE);
-    statePersistenceHealthy = true;
-  } catch (cause) {
-    statePersistenceHealthy = false;
-    try {
-      unlinkSync(temporaryFile);
-    } catch {
-      // The temporary file may not have been created.
-    }
-    throw new Error('Не удалось надёжно сохранить состояние AI-запроса.', { cause });
-  }
-}
-
-function pruneExpiredEntries() {
-  const now = Date.now();
-  for (const cache of [
-    planCache,
-    researchCache,
-    backgroundJobs,
-    ambiguousCreates,
-    stageResults,
-  ]) {
-    for (const [key, entry] of cache) {
-      if (!entry || !Number.isFinite(entry.expiresAt) || entry.expiresAt <= now) {
-        cache.delete(key);
-      }
-    }
-  }
 }
 
 function isDirectRun() {

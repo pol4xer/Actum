@@ -11,12 +11,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { HeroSigil, archetypeLabel } from '@/components/hero-sigil';
+import { HeroSigil } from '@/components/hero-sigil';
 import { ThemedText } from '@/components/themed-text';
 import { AppButton, Card, Pill } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
-import { Archetype, StrictnessMode } from '@/domain/types';
-import { useApp } from '@/state/app-context';
+import type { Archetype, StrictnessMode } from '@/domain/types';
+import { archetypeLabel } from '@/shared/presentation/archetypes';
+import { useApp } from '@/state';
 
 const ARCHETYPES: Archetype[] = ['pathfinder', 'scholar', 'guardian'];
 const MODES: Array<{ value: StrictnessMode; label: string; detail: string }> = [

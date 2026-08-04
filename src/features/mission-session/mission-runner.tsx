@@ -3,12 +3,12 @@ import { Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { InAppMissionRunner } from '@/components/in-app-mission-runner';
+import { InAppMissionRunner } from './in-app-mission-runner';
 import { AppButton, Pill, ProgressBar } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import type { Mission, RoutineAction, RoutineLoadBasis } from '@/domain/types';
 import { formatCalendarDate } from '@/lib/calendar-date';
-import { useApp } from '@/state/app-context';
+import { useApp } from '@/state';
 
 type RunnerPhase = 'instructions' | 'running' | 'finished';
 type FinishReason = 'completed' | 'elapsed' | 'stopped';

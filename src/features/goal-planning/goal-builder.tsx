@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -12,18 +12,17 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { AppButton, Card, Pill, Screen, ScreenHeader } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
-import { checkGoalRisk } from '@/domain/goal-engine';
-import { GeneratedGoal, GoalInput, Mission, RoutineUnit } from '@/domain/types';
-import {
-  AIPlannerError,
-  generateGoalWithAI,
-  recoverLatestSavedGoal,
-} from '@/lib/ai-planner';
-import type { AIPlannerErrorCode } from '@/lib/ai-planner';
+import type { Mission, RoutineUnit } from '@/domain/types';
 import { formatCalendarDate } from '@/lib/calendar-date';
-import { useApp } from '@/state/app-context';
+import {
+  formatBaselineMetric,
+  formatMissionDuration,
+  formatSourceDomain,
+} from '@/shared/presentation/plan-formatters';
+import { useApp } from '@/state';
 
-type Stage = 'intent' | 'details' | 'generating' | 'review' | 'error';
+import type { GoalPlanner } from './goal-planner';
+import { useGoalBuilderController } from './use-goal-builder-controller';
 
 const MINUTES = [10, 20, 30, 45, 60];
 const HORIZONS = [
@@ -32,83 +31,38 @@ const HORIZONS = [
   { value: 30, label: '30 дней' },
 ];
 
-export function GoalBuilder() {
+export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
   const { createGoal } = useApp();
-  const [stage, setStage] = useState<Stage>('intent');
-  const [prompt, setPrompt] = useState('');
-  const [baseline, setBaseline] = useState('');
-  const [targetTimeline, setTargetTimeline] = useState('');
-  const [dailyMinutes, setDailyMinutes] = useState(20);
-  const [horizonDays, setHorizonDays] = useState(30);
-  const [currentLevel, setCurrentLevel] = useState<GoalInput['currentLevel']>('starting');
-  const [researchMode, setResearchMode] = useState<NonNullable<GoalInput['researchMode']>>('web');
-  const [preview, setPreview] = useState<GeneratedGoal>();
-  const [generationError, setGenerationError] = useState('');
-  const [generationErrorCode, setGenerationErrorCode] = useState<AIPlannerErrorCode>();
-  const [savedPreview, setSavedPreview] = useState<GeneratedGoal>();
-  const risk = useMemo(() => checkGoalRisk(prompt), [prompt]);
-  const input = useMemo(
-    () => ({
-      prompt,
-      baseline,
-      targetTimeline,
-      dailyMinutes,
-      horizonDays,
-      currentLevel,
-      researchMode,
-    }),
-    [baseline, currentLevel, dailyMinutes, horizonDays, prompt, researchMode, targetTimeline],
-  );
-  const detailsComplete = baseline.trim().length >= 2 && targetTimeline.trim().length >= 2;
-
-  useEffect(() => {
-    let active = true;
-    recoverLatestSavedGoal()
-      .then((saved) => {
-        if (!active || !saved) return;
-        setSavedPreview(saved);
-        setPreview(saved);
-        setPrompt(saved.goal.rawPrompt);
-        setBaseline(saved.plan.baseline?.userStatement ?? 'Сохранённая исходная точка');
-        setTargetTimeline(saved.plan.targetTimeline ?? 'Сохранённый срок');
-        setDailyMinutes(saved.plan.dailyMinutes);
-        setHorizonDays(saved.plan.horizonDays);
-        setCurrentLevel(saved.plan.baseline?.value != null ? 'some-experience' : 'starting');
-        setResearchMode(
-          saved.plan.research.method === 'openai-web-research-v1' ? 'web' : 'quick',
-        );
-        setStage('review');
-      })
-      .catch((error) => {
-        console.log(
-          `[actum-ai] saved plan discovery unavailable: ${error instanceof Error ? error.message : 'unknown error'}`,
-        );
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const continueFromIntent = () => setStage('details');
-  const generate = async (reuseOnly = false) => {
-    if (!detailsComplete) return;
-    setGenerationError('');
-    setGenerationErrorCode(undefined);
-    setStage('generating');
-    try {
-      setPreview(await generateGoalWithAI(input, { reuseOnly }));
-      setStage('review');
-    } catch (error) {
-      setGenerationErrorCode(error instanceof AIPlannerError ? error.code : 'UPSTREAM_ERROR');
-      setGenerationError(
-        error instanceof AIPlannerError ? error.message : 'Не удалось получить план от GPT.',
-      );
-      setStage('error');
-    }
-  };
-  const save = () => {
-    if (preview) createGoal(preview);
-  };
+  const {
+    stage,
+    prompt,
+    setPrompt,
+    baseline,
+    setBaseline,
+    targetTimeline,
+    setTargetTimeline,
+    dailyMinutes,
+    setDailyMinutes,
+    horizonDays,
+    setHorizonDays,
+    currentLevel,
+    setCurrentLevel,
+    researchMode,
+    setResearchMode,
+    preview,
+    savedPreview,
+    generationError,
+    generationErrorCode,
+    risk,
+    detailsComplete,
+    continueFromIntent,
+    backToIntent,
+    editDetails,
+    generateGoal,
+    retryGeneration,
+    openSavedPlan,
+    acceptPlan,
+  } = useGoalBuilderController({ onAcceptGoal: createGoal, planner });
 
   return (
     <KeyboardAvoidingView
@@ -189,11 +143,7 @@ export function GoalBuilder() {
                 </ThemedText>
                 <AppButton
                   label="Открыть сохранённый план"
-                  onPress={() => {
-                    setPreview(savedPreview);
-                    setPrompt(savedPreview.goal.rawPrompt);
-                    setStage('review');
-                  }}
+                  onPress={openSavedPlan}
                 />
               </Card>
             ) : null}
@@ -330,11 +280,11 @@ export function GoalBuilder() {
             ) : null}
 
             <View style={styles.buttonRow}>
-              <AppButton label="Назад" variant="ghost" onPress={() => setStage('intent')} />
+              <AppButton label="Назад" variant="ghost" onPress={backToIntent} />
               <AppButton
                 label={researchMode === 'web' ? 'Исследовать и собрать' : 'Собрать с GPT'}
                 disabled={!detailsComplete}
-                onPress={() => generate()}
+                onPress={generateGoal}
                 style={styles.flex}
               />
             </View>
@@ -387,10 +337,10 @@ export function GoalBuilder() {
                     ? 'Проверить сохранённый план · без GPT'
                     : 'Повторить запрос к GPT'
                 }
-                onPress={() => generate(generationErrorCode === 'INVALID_RESPONSE')}
+                onPress={retryGeneration}
               />
             ) : null}
-            <AppButton label="Изменить параметры" variant="ghost" onPress={() => setStage('details')} />
+            <AppButton label="Изменить параметры" variant="ghost" onPress={editDetails} />
           </Card>
         ) : null}
 
@@ -421,7 +371,7 @@ export function GoalBuilder() {
                 </ThemedText>
                 <ThemedText type="smallBold">{preview.plan.baseline.userStatement}</ThemedText>
                 <ThemedText type="small" style={styles.baselineMetric}>
-                  {baselineMetricLabel(preview.plan.baseline)}
+                  {formatBaselineMetric(preview.plan.baseline)}
                 </ThemedText>
                 <ThemedText type="small" style={styles.muted}>
                   {preview.plan.baseline.calculationRule}
@@ -454,7 +404,8 @@ export function GoalBuilder() {
                     </ThemedText>
                     <ThemedText type="smallBold">{mission.title}</ThemedText>
                     <ThemedText type="small" style={styles.muted}>
-                      {missionDurationLabel(mission)} · {mission.xp} XP
+                      {formatMissionDuration(mission, { inAppRecordLabel: 'отметок' })} ·{' '}
+                      {mission.xp} XP
                     </ThemedText>
                     {mission.execution?.kind === 'in_app' ? (
                       <ThemedText type="small" style={styles.prescriptionPreview}>
@@ -502,7 +453,7 @@ export function GoalBuilder() {
                     {source.title}
                   </ThemedText>
                   <ThemedText type="small" style={styles.sourceDomain}>
-                    {sourceDomain(source.url)}
+                    {formatSourceDomain(source.url)}
                   </ThemedText>
                 </View>
               ))}
@@ -514,8 +465,8 @@ export function GoalBuilder() {
             </Card>
 
             <View style={styles.buttonRow}>
-              <AppButton label="Изменить" variant="ghost" onPress={() => setStage('details')} />
-              <AppButton label="Принять план" icon="✦" onPress={save} style={styles.flex} />
+              <AppButton label="Изменить" variant="ghost" onPress={editDetails} />
+              <AppButton label="Принять план" icon="✦" onPress={acceptPlan} style={styles.flex} />
             </View>
           </>
         ) : null}
@@ -524,7 +475,7 @@ export function GoalBuilder() {
   );
 }
 
-function Question({ title, children }: { title: string; children: React.ReactNode }) {
+function Question({ title, children }: { title: string; children: ReactNode }) {
   return (
     <View style={styles.question}>
       <ThemedText type="smallBold">{title}</ThemedText>
@@ -533,7 +484,7 @@ function Question({ title, children }: { title: string; children: React.ReactNod
   );
 }
 
-function ChoiceRow({ children }: { children: React.ReactNode }) {
+function ChoiceRow({ children }: { children: ReactNode }) {
   return <View style={styles.choiceRow}>{children}</View>;
 }
 
@@ -601,26 +552,6 @@ function Meta({ value, label }: { value: string; label: string }) {
   );
 }
 
-function missionDurationLabel(mission: Mission) {
-  if (mission.execution?.kind === 'in_app') {
-    const timedSets = mission.execution.blocks.reduce(
-      (total, block) => total + (block.kind === 'timer' || block.kind === 'counter' ? block.sets : 1),
-      0,
-    );
-    return `${mission.execution.blocks.length} блоков · ${timedSets} отметок · ≈ ${mission.estimatedMinutes} мин`;
-  }
-  if (mission.execution?.kind === 'routine') {
-    const sets = mission.execution.actions.reduce((total, action) => total + action.sets, 0);
-    return `${mission.execution.actions.length} действий · ${sets} подходов · ≈ ${mission.estimatedMinutes} мин`;
-  }
-  if (mission.execution?.kind === 'timer') {
-    const seconds = mission.execution.durationSeconds;
-    const timer = seconds >= 60 && seconds % 60 === 0 ? `${seconds / 60} мин` : `${seconds} сек`;
-    return `${timer} таймер · ≈ ${mission.estimatedMinutes} мин всего`;
-  }
-  return `${mission.estimatedMinutes} мин`;
-}
-
 function inAppBlockPreview(
   block: Extract<NonNullable<Mission['execution']>, { kind: 'in_app' }>['blocks'][number],
 ) {
@@ -662,24 +593,6 @@ function routineUnitLabel(unit: RoutineUnit, custom?: string) {
     attempts: 'попыток',
   };
   return labels[unit];
-}
-
-function sourceDomain(url: string) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    return 'источник сохранён в плане';
-  }
-}
-
-function baselineMetricLabel(baseline: NonNullable<GeneratedGoal['plan']['baseline']>) {
-  if (baseline.value == null || baseline.unit == null) {
-    return `${baseline.normalizedMetric} · числовое значение не выделено`;
-  }
-  const value = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 4 }).format(
-    baseline.value,
-  );
-  return `${baseline.normalizedMetric} · ${value} ${baseline.unit}`;
 }
 
 function missionCalendarLabel(mission: Mission, index: number) {

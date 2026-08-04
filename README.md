@@ -43,7 +43,7 @@ xcodebuild -version
 Открой проект в VS Code:
 
 ```bash
-cd /Users/pol4xer/Actum
+cd ~/Actum
 code .
 ```
 
@@ -78,7 +78,7 @@ EXPO_PUBLIC_ACTUM_AI_URL=http://127.0.0.1:8787
 Обычный запуск теперь делается одной командой:
 
 ```bash
-cd /Users/pol4xer/Actum
+cd ~/Actum
 ./scripts/dev-ios.sh
 ```
 
@@ -218,7 +218,7 @@ pnpm test:ai
 pnpm check
 ```
 
-`pnpm test:ai` использует фальшивый OpenAI, не открывает сетевые сокеты и не тратит API-деньги. Он воспроизводит сбои POST и polling, проверяет восстановление guard/response ID/кэшей, бесплатную reuse-only проверку, resume по тому же response ID, research, `inflight_join`, кэш готового плана, строгий plan-v5, запрет внешних зависимостей и скрытых временных нагрузок, вычисления baseline, миграцию локального состояния, сохранение MissionRun, локальный перезапуск выбранного плана, критерии и совместимость старых plan-v1–plan-v4. `pnpm check` запускает TypeScript, 40 локальных тестов и production export web-версии.
+`pnpm test:ai` использует фальшивый OpenAI, не открывает сетевые сокеты и не тратит API-деньги. Он воспроизводит сбои POST и polling, проверяет восстановление guard/response ID/кэшей, бесплатную reuse-only проверку, resume по тому же response ID, research, `inflight_join`, кэш готового плана, строгий plan-v5, запрет внешних зависимостей и скрытых временных нагрузок, вычисления baseline, миграцию локального состояния, сохранение MissionRun, локальный перезапуск выбранного плана, критерии и совместимость старых plan-v1–plan-v4. Дополнительно проверяются DTO-mapper, parity клиентского и серверного plan-v5, изолированные server modules, reward policy, детерминированная машина runner и сами архитектурные границы. `pnpm check` запускает TypeScript, 59 локальных тестов и production export web-версии.
 
 ## Expo Application Services
 
@@ -242,19 +242,27 @@ npx eas-cli@latest build --platform ios --profile development
 ## Структура
 
 ```text
-scripts/ai-server.mjs      # локальный gateway и наблюдаемость запросов
-scripts/ai/contracts/      # стабильный JSON-контракт плана
+scripts/ai-server.mjs      # process/composition root локального gateway
+scripts/ai/config/         # runtime config и cache identity
+scripts/ai/cache/          # детерминированные ключи платных этапов
+scripts/ai/http/           # HTTP boundary, input и request IDs
+scripts/ai/state/          # durable billing ledger и кэши
+scripts/ai/contracts/      # provider schema, baseline parser и validator
 scripts/ai/prompts/        # независимо редактируемые research/plan prompts
 scripts/ai/providers/      # адаптер Responses API
 src/
-├── app/                   # Сегодня, Путь, Двойник, Профиль
-├── components/            # goal builder, закрытый mission runner, check-in и UI
-├── domain/                # игровые типы и локальная логика
-├── lib/ai-planner.ts      # вызов proxy и перевод GPT-плана в Actum
-├── lib/                   # storage и notifications adapters
+├── app/                   # тонкие Expo Router entrypoints
+├── features/              # автономные пользовательские сценарии и публичные index.ts
+│   ├── goal-planning/     # порт, DTO contract, HTTP adapter, mapper, controller и view
+│   ├── mission-session/   # runner и журнал одной сессии
+│   └── home|journey|twin|settings|onboarding|check-in
+├── domain/                # чистые rules, reward policy и mission-run state machine
+├── state/                 # reducer, codec, commands, repository и persistence queue
+├── shared/presentation/   # общие display-справочники и formatters
+├── lib/                   # platform storage, notifications и haptics adapters
+├── components/            # только общий design system и переиспользуемая графика
 ├── constants/theme.ts     # палитра, шрифты, интервалы и радиусы для смены visual style
-├── screens/               # онбординг
-└── state/                 # versioned local state, MissionRun ledger и миграции
+└── hooks/                 # общие platform/theme hooks
 ```
 
-Дальнейшие границы MVP описаны в [`docs/PRODUCT_SCOPE.md`](docs/PRODUCT_SCOPE.md).
+Правила зависимостей и карта владельцев описаны в [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), а дальнейшие границы MVP — в [`docs/PRODUCT_SCOPE.md`](docs/PRODUCT_SCOPE.md). `test/architecture.test.mjs` автоматически запрещает обратные зависимости, deep-import между feature и утолщение route-файлов.
