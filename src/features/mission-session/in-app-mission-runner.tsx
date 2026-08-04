@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
+import { InfoPopover } from '@/components/ui/info-popover';
 import { AppButton, Pill, ProgressBar } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import {
@@ -36,6 +37,11 @@ import type {
   MissionRunMutation,
 } from '@/domain/types';
 import { formatCalendarDate } from '@/lib/calendar-date';
+import {
+  executionBlockContextSections,
+  missionContextSections,
+  type ContextInfoSection,
+} from '@/shared/presentation/context-info';
 
 type Props = {
   mission: Mission;
@@ -161,35 +167,32 @@ export function InAppMissionRunner({
 
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <View style={styles.titleBlock}>
-              <ThemedText type="title">{mission.title}</ThemedText>
-              <ThemedText style={styles.muted}>{mission.description}</ThemedText>
+              <View style={styles.titleRow}>
+                <ThemedText type="title" style={styles.flex}>
+                  {mission.title}
+                </ThemedText>
+                <InfoPopover
+                  title="О миссии"
+                  accessibilityLabel="Показать пояснение к миссии"
+                  sections={missionContextSections(mission)}
+                />
+              </View>
             </View>
 
-            <View
-              style={[
-                styles.persistenceCard,
-                persistenceStatus === 'error' && styles.persistenceCardError,
-              ]}>
-              <Pill
-                tone={
-                  persistenceStatus === 'saved'
-                    ? 'success'
-                    : persistenceStatus === 'error'
-                      ? 'danger'
-                      : 'gold'
-                }>
-                {persistenceStatus === 'saved'
-                  ? 'журнал сохранён'
-                  : persistenceStatus === 'error'
-                    ? 'ошибка сохранения'
-                    : 'сохраняю журнал'}
-              </Pill>
-              <ThemedText type="small" style={styles.muted}>
-                {persistenceStatus === 'error'
-                  ? 'Текущие данные остаются в памяти. Повтори локальную запись перед закрытием Actum.'
-                  : 'Подходы, таймеры, ответы и комментарии записываются в локальный журнал Actum.'}
-              </ThemedText>
-              {persistenceStatus === 'error' ? (
+            {persistenceStatus === 'error' ? (
+              <View style={[styles.persistenceCard, styles.persistenceCardError]}>
+                <View style={styles.rowBetween}>
+                  <Pill tone="danger">ошибка сохранения</Pill>
+                  <InfoPopover
+                    title="Что сохранено?"
+                    sections={[
+                      {
+                        body: 'Текущие данные остаются в памяти. Повтори локальную запись перед закрытием Actum.',
+                        tone: 'warning',
+                      },
+                    ]}
+                  />
+                </View>
                 <AppButton
                   label="Повторить сохранение"
                   variant="secondary"
@@ -197,24 +200,12 @@ export function InAppMissionRunner({
                     await onRetryPersistence();
                   }}
                 />
-              ) : null}
-            </View>
+              </View>
+            ) : null}
 
             {!run ? (
               <>
-                <View style={styles.closedLoopCard}>
-                  <ThemedText type="eyebrow" style={styles.cyan}>
-                    закрытый контур
-                  </ThemedText>
-                  <ThemedText type="smallBold">
-                    Таймеры, фактические результаты, ответы и комментарии сохраняются в Actum.
-                  </ThemedText>
-                  <ThemedText type="small" style={styles.muted}>
-                    Внешний секундомер, блокнот, файл или другой сервис не нужны.
-                  </ThemedText>
-                </View>
                 <ExecutionPlan blocks={execution.blocks} />
-                {mission.warning ? <Warning text={mission.warning} /> : null}
                 <View style={styles.footerActions}>
                   {readOnly ? (
                     <AppButton label="Закрыть просмотр" variant="secondary" onPress={onClose} />
@@ -300,7 +291,6 @@ export function InAppMissionRunner({
                   />
                 ) : null}
 
-                {mission.warning ? <Warning text={mission.warning} /> : null}
                 <View style={styles.footerActions}>
                   <AppButton
                     label="Остановить сессию и сохранить"
@@ -332,14 +322,21 @@ function ReadyBlock({ block, onStart }: { block: MissionExecutionBlock; onStart(
   return (
     <View style={styles.activeCard}>
       <ThemedText type="eyebrow" style={styles.gold}>
-        следующий встроенный блок
+        следующий блок
       </ThemedText>
-      <ThemedText type="subtitle">{block.title}</ThemedText>
+      <View style={styles.titleRow}>
+        <ThemedText type="subtitle" style={styles.flex}>
+          {block.title}
+        </ThemedText>
+        <BlockInfoPopover block={block} />
+      </View>
       {'instruction' in block ? <ThemedText>{block.instruction}</ThemedText> : null}
-      <ThemedText type="small" style={styles.muted}>
+      <ThemedText type="smallBold" style={styles.cyan}>
         {blockPrescription(block)}
       </ThemedText>
-      <BlockMetadata block={block} />
+      <ThemedText type="small" style={styles.planCriterion}>
+        Засчитано, если: {block.successCriterion}
+      </ThemedText>
       <AppButton label={startLabel(block)} icon="→" onPress={onStart} />
     </View>
   );
@@ -368,13 +365,16 @@ function ActiveBlock({
         <ThemedText type="eyebrow" style={styles.gold}>
           подход {run.cursor.setIndex + 1} из {block.sets}
         </ThemedText>
-        <ThemedText type="subtitle">{block.title}</ThemedText>
+        <View style={styles.titleRow}>
+          <ThemedText type="subtitle" style={styles.flex}>
+            {block.title}
+          </ThemedText>
+          <BlockInfoPopover block={block} />
+        </View>
         <ThemedText>{block.instruction}</ThemedText>
-        <BlockMetadata block={block} />
         <ThemedText accessibilityLiveRegion="polite" style={styles.clock}>
           {formatClock(remainingSeconds)}
         </ThemedText>
-        <ThemedText style={styles.center}>до автоматической записи результата</ThemedText>
         <AppButton
           label="Не выдержал — записать фактическое время"
           variant="secondary"
@@ -396,9 +396,13 @@ function ActiveBlock({
         <ThemedText type="eyebrow" style={styles.gold}>
           подход {run.cursor.setIndex + 1} из {block.sets}
         </ThemedText>
-        <ThemedText type="subtitle">{block.title}</ThemedText>
+        <View style={styles.titleRow}>
+          <ThemedText type="subtitle" style={styles.flex}>
+            {block.title}
+          </ThemedText>
+          <BlockInfoPopover block={block} />
+        </View>
         <ThemedText>{block.instruction}</ThemedText>
-        <BlockMetadata block={block} />
         <ThemedText type="small" style={styles.muted}>
           Цель: {formatQuantity(block.targetPerSet)} {counterUnitLabel(block)} ·{' '}
           {run.stageEndsAt && remainingSeconds > 0
@@ -495,7 +499,7 @@ function ActiveBlock({
               value,
             });
           }}
-          placeholder="Ответ сохраняется только в журнале Actum…"
+          placeholder="Введите ответ…"
           placeholderTextColor={Palette.textDim}
           style={styles.textLog}
           value={result.value}
@@ -548,11 +552,11 @@ function BlockReview({
         {blockSuccessful ? 'критерий выполнен' : criterionAnswered ? 'есть недочёты' : 'нужна проверка'}
       </Pill>
       <ThemedText type="subtitle">{block.title}</ThemedText>
-      <ThemedText type="small" style={styles.muted}>
-        {missedTargets
-          ? `${missedTargets} подход(а) ниже цели. Это сохранится и ограничит итоговый check-in.`
-          : block.successCriterion}
-      </ThemedText>
+      {missedTargets ? (
+        <ThemedText type="small" style={styles.warningText}>
+          Ниже цели: {missedTargets}
+        </ThemedText>
+      ) : null}
       <View style={styles.criterionCheck}>
         <ThemedText type="smallBold">Критерий выполнен?</ThemedText>
         <ThemedText type="small" style={styles.muted}>
@@ -635,7 +639,7 @@ function ExecutionPlan({ blocks }: { blocks: MissionExecutionBlock[] }) {
   return (
     <View style={styles.plan}>
       <ThemedText type="eyebrow" style={styles.muted}>
-        что приложение проведёт и запишет
+        порядок действий
       </ThemedText>
       {blocks.map((block, index) => (
         <View key={`${index}-${block.title}`} style={styles.planBlock}>
@@ -645,27 +649,29 @@ function ExecutionPlan({ blocks }: { blocks: MissionExecutionBlock[] }) {
             </ThemedText>
           </View>
           <View style={styles.planCopy}>
-            <ThemedText type="smallBold">{block.title}</ThemedText>
-            <ThemedText type="small" style={styles.cyan}>
-              {blockKindLabel(block)} · {blockPrescription(block)}
-            </ThemedText>
+            <View style={styles.titleRow}>
+              <ThemedText type="smallBold" style={styles.flex}>
+                {block.title}
+              </ThemedText>
+              <BlockInfoPopover block={block} />
+            </View>
+            <ThemedText type="smallBold" style={styles.cyan}>{blockPrescription(block)}</ThemedText>
             {'instruction' in block ? (
-              <ThemedText type="small" style={styles.muted}>
+              <ThemedText type="small">
                 {block.instruction}
               </ThemedText>
             ) : null}
-            <BlockMetadata block={block} />
             {block.kind === 'checklist' ? (
               <View style={styles.planDetails}>
                 {block.items.map((item, itemIndex) => (
-                  <ThemedText key={`${itemIndex}-${item}`} type="small" style={styles.muted}>
+                  <ThemedText key={`${itemIndex}-${item}`} type="small">
                     {itemIndex + 1}. {item}
                   </ThemedText>
                 ))}
               </View>
             ) : null}
             {block.kind === 'text_log' ? (
-              <ThemedText type="small" style={styles.muted}>
+              <ThemedText type="small">
                 {block.prompt}
               </ThemedText>
             ) : null}
@@ -688,9 +694,16 @@ export function RunSummary({ mission, run }: { mission: Mission; run: MissionRun
   );
   return (
     <View style={styles.summaryCard}>
-      <Pill tone={successful ? 'success' : 'warning'}>
-        {successful ? 'все критерии выполнены' : 'сессия сохранена с недочётами'}
-      </Pill>
+      <View style={styles.rowBetween}>
+        <Pill tone={successful ? 'success' : 'warning'}>
+          {successful ? 'выполнено' : 'есть недочёты'}
+        </Pill>
+        <InfoPopover
+          title="Детали журнала"
+          accessibilityLabel="Показать подробности сохранённой сессии"
+          sections={runDetailSections(mission, run)}
+        />
+      </View>
       <ThemedText type="subtitle">Журнал: {mission.title}</ThemedText>
       <ThemedText type="small" style={styles.muted}>
         {summary.completedBlocks}/{summary.totalBlocks} блоков
@@ -699,54 +712,39 @@ export function RunSummary({ mission, run }: { mission: Mission; run: MissionRun
           : ''}{' '}
         · {formatDuration(elapsed)}
       </ThemedText>
-      <View style={styles.resultList}>
-        {run.blockResults.map((result) => {
-          const block =
-            mission.execution?.kind === 'in_app'
-              ? mission.execution.blocks[result.blockIndex]
-              : undefined;
-          return (
-            <View key={`${result.blockIndex}-${result.title}`} style={styles.resultItem}>
-              <ThemedText type="smallBold">
-                {blockResultSuccessful(result) ? '✓' : result.completed ? '≈' : '—'} {result.title}
-              </ThemedText>
-              <ThemedText type="small" style={styles.muted}>
-                {blockResultLabel(result)}
-              </ThemedText>
-              {block && 'instruction' in block ? (
-                <ThemedText type="small" style={styles.muted}>
-                  Инструкция: {block.instruction}
-                </ThemedText>
-              ) : null}
-              {block ? <BlockMetadata block={block} /> : null}
-              <ThemedText
-                type="small"
-                style={result.criterionMet === true ? styles.successText : styles.warningText}>
-                Критерий: {result.criterionMet === true ? 'да' : result.criterionMet === false ? 'нет' : 'не отмечен'}
-              </ThemedText>
-              {block?.kind === 'checklist' && result.kind === 'checklist' ? (
-                <View style={styles.savedDetails}>
-                  {block.items.map((item, index) => (
-                    <ThemedText key={`${index}-${item}`} type="small">
-                      {result.checkedIndexes.includes(index) ? '✓' : '○'} {item}
-                    </ThemedText>
-                  ))}
-                </View>
-              ) : null}
-              {block?.kind === 'text_log' && result.kind === 'text_log' && result.value.trim() ? (
-                <ThemedText type="small" style={styles.savedText}>
-                  «{result.value.trim()}»
-                </ThemedText>
-              ) : null}
-              {result.comment ? (
-                <ThemedText type="small">Комментарий: {result.comment}</ThemedText>
-              ) : null}
-            </View>
-          );
-        })}
-      </View>
     </View>
   );
+}
+
+function runDetailSections(mission: Mission, run: MissionRun): ContextInfoSection[] {
+  return run.blockResults.map((result) => {
+    const block =
+      mission.execution?.kind === 'in_app'
+        ? mission.execution.blocks[result.blockIndex]
+        : undefined;
+    const details = [
+      blockResultLabel(result),
+      `Критерий: ${result.criterionMet === true ? 'да' : result.criterionMet === false ? 'нет' : 'не отмечен'}`,
+    ];
+
+    if (block?.kind === 'checklist' && result.kind === 'checklist') {
+      details.push(
+        ...block.items.map(
+          (item, index) => `${result.checkedIndexes.includes(index) ? '✓' : '○'} ${item}`,
+        ),
+      );
+    }
+    if (block?.kind === 'text_log' && result.kind === 'text_log' && result.value.trim()) {
+      details.push(`Ответ: ${result.value.trim()}`);
+    }
+    if (result.comment?.trim()) details.push(`Комментарий: ${result.comment.trim()}`);
+
+    return {
+      heading: `${blockResultSuccessful(result) ? '✓' : result.completed ? '≈' : '—'} ${result.title}`,
+      body: details.filter(Boolean).join('\n'),
+      ...(result.criterionMet === false ? { tone: 'warning' as const } : {}),
+    };
+  });
 }
 
 function Counter({
@@ -832,23 +830,12 @@ function Counter({
   );
 }
 
-function Warning({ text }: { text: string }) {
-  return (
-    <View style={styles.warningCard}>
-      <ThemedText type="eyebrow" style={styles.warningText}>
-        важно знать
-      </ThemedText>
-      <ThemedText type="small">{text}</ThemedText>
-    </View>
-  );
-}
-
 function blockPrescription(block: MissionExecutionBlock) {
   if (block.kind === 'timer') {
     return `${block.sets} × ${formatDuration(block.durationSecondsPerSet)} · отдых ${formatDuration(block.restSeconds)}`;
   }
   if (block.kind === 'counter') {
-    return `${block.sets} × ${formatQuantity(block.targetPerSet)} ${counterUnitLabel(block)} · время подхода ${formatDuration(block.workSecondsPerSet)} · отдых ${formatDuration(block.restSeconds)}`;
+    return `${block.sets} × ${formatQuantity(block.targetPerSet)} ${counterUnitLabel(block)} · время подхода ${formatDuration(block.workSecondsPerSet)} · отдых ${formatDuration(block.restSeconds)}${block.tempo ? ` · темп ${block.tempo}` : ''}`;
   }
   if (block.kind === 'checklist') {
     return `${block.items.length} пунктов внутри приложения · ориентир ${formatDuration(block.estimatedSeconds)}`;
@@ -856,47 +843,14 @@ function blockPrescription(block: MissionExecutionBlock) {
   return `ответ ${block.minCharacters}–${block.maxCharacters} знаков внутри приложения · ориентир ${formatDuration(block.estimatedSeconds)}`;
 }
 
-function BlockMetadata({ block }: { block: MissionExecutionBlock }) {
-  const lines: string[] = [];
-  if (block.kind === 'counter' && block.tempo) lines.push(`Темп: ${block.tempo}`);
-  if ((block.kind === 'timer' || block.kind === 'counter') && block.loadBasis) {
-    const basis = block.loadBasis;
-    const targetUnit = block.kind === 'timer' ? 'сек' : counterUnitLabel(block);
-    lines.push(
-      `Расчёт нагрузки: ${formatQuantity(basis.percentage)}% × ${formatQuantity(basis.baseValue)} ${displayUnit(basis.baseUnit)} = ${formatQuantity(basis.result)} ${targetUnit}`,
-    );
-  }
-  if (!lines.length) return null;
+function BlockInfoPopover({ block }: { block: MissionExecutionBlock }) {
   return (
-    <View style={styles.planDetails}>
-      {lines.map((line) => (
-        <ThemedText key={line} type="small" style={styles.cyan}>
-          {line}
-        </ThemedText>
-      ))}
-    </View>
+    <InfoPopover
+      title={`Расчёт: ${block.title}`}
+      accessibilityLabel={`Показать расчёт нагрузки для блока ${block.title}`}
+      sections={executionBlockContextSections(block)}
+    />
   );
-}
-
-function displayUnit(unit: string) {
-  const labels: Record<string, string> = {
-    seconds: 'сек',
-    minutes: 'мин',
-    reps: 'повт.',
-    pages: 'стр.',
-    items: 'элем.',
-    words: 'слов',
-    meters: 'м',
-    attempts: 'попыток',
-  };
-  return labels[unit] ?? unit;
-}
-
-function blockKindLabel(block: MissionExecutionBlock) {
-  if (block.kind === 'timer') return 'таймер Actum';
-  if (block.kind === 'counter') return 'счётчик Actum';
-  if (block.kind === 'checklist') return 'чек-лист Actum';
-  return 'поле журнала Actum';
 }
 
 function startLabel(block: MissionExecutionBlock) {
@@ -1004,14 +958,8 @@ const styles = StyleSheet.create({
   cyan: { color: Palette.cyan },
   gold: { color: Palette.goldBright },
   center: { textAlign: 'center' },
-  closedLoopCard: {
-    gap: Spacing.one,
-    padding: Spacing.three,
-    borderRadius: Radius.medium,
-    borderWidth: 1,
-    borderColor: '#2D5961',
-    backgroundColor: '#16282C',
-  },
+  flex: { flex: 1 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   plan: { gap: Spacing.two },
   planBlock: {
     flexDirection: 'row',
@@ -1165,28 +1113,6 @@ const styles = StyleSheet.create({
     borderColor: '#2F624B',
     backgroundColor: '#15271F',
   },
-  resultList: { gap: Spacing.two },
-  resultItem: {
-    gap: 4,
-    paddingTop: Spacing.two,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#FFFFFF20',
-  },
-  savedDetails: { gap: 3, paddingTop: Spacing.one },
-  savedText: {
-    color: Palette.text,
-    fontStyle: 'italic',
-    paddingTop: Spacing.one,
-  },
-  warningCard: {
-    gap: Spacing.one,
-    borderRadius: Radius.medium,
-    padding: Spacing.twoHalf,
-    borderWidth: 1,
-    borderColor: '#614A2C',
-    backgroundColor: '#2A2117',
-  },
   warningText: { color: Palette.warning },
-  successText: { color: Palette.success },
   footerActions: { gap: Spacing.two, paddingTop: Spacing.two },
 });

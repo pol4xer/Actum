@@ -3,10 +3,12 @@ import { Alert, Linking, StyleSheet, Switch, View } from 'react-native';
 
 import { HeroSigil } from '@/components/hero-sigil';
 import { ThemedText } from '@/components/themed-text';
+import { InfoPopover } from '@/components/ui/info-popover';
 import { AppButton, Card, Pill, Screen, ScreenHeader } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import { disableDailyReminder, enableDailyReminder } from '@/lib/notifications';
 import { archetypeLabel } from '@/shared/presentation/archetypes';
+import type { ContextInfoSection } from '@/shared/presentation/context-info';
 import { useApp } from '@/state';
 
 export default function SettingsScreen() {
@@ -117,12 +119,36 @@ export default function SettingsScreen() {
     );
   };
 
+  const appInfo: ContextInfoSection[] = [
+    {
+      heading: 'Данные',
+      body: `Профиль, миссии, результаты и check-in хранятся на этом устройстве. При создании плана цель и выбранные ограничения отправляются в OpenAI через локальный AI-сервер; журнал выполнения не отправляется. Облачного аккаунта нет. Schema v${state.schemaVersion}.`,
+    },
+    {
+      heading: 'Техническая схема MVP',
+      body:
+        'Expo SDK 57 · React Native · AsyncStorage · modular prompts · локальный Node AI gateway · Responses API с web research. Supabase sync и iOS Widget пока не подключены.',
+    },
+    {
+      heading: 'Ограничения',
+      body:
+        'Actum показывает предупреждения, но не выбирает цель за пользователя. Это не медицинский продукт: приложение не диагностирует, не лечит и не гарантирует физический результат.',
+      tone: 'warning',
+    },
+  ];
+
   return (
     <Screen>
       <ScreenHeader
         eyebrow="Профиль и система"
         title="Настройки"
-        subtitle="Данные живут локально; GPT подключён через маленький dev-сервер."
+        action={
+          <InfoPopover
+            accessibilityLabel="О данных и устройстве Actum"
+            sections={appInfo}
+            title="О приложении"
+          />
+        }
       />
 
       <Card style={styles.profileCard}>
@@ -169,38 +195,6 @@ export default function SettingsScreen() {
 
       <View style={styles.section}>
         <ThemedText type="eyebrow" style={styles.sectionTitle}>
-          Архитектура MVP
-        </ThemedText>
-        <Card style={styles.statusCard}>
-          <StatusRow label="Клиент" value="Expo SDK 57 · React Native" status="ready" />
-          <StatusRow label="Данные" value="AsyncStorage · on-device" status="ready" />
-          <StatusRow label="Планировщик" value="GPT + modular prompts" status="ready" />
-          <StatusRow label="AI gateway" value="Local Node proxy" status="ready" />
-          <StatusRow label="Web research" value="Responses API · citations" status="ready" />
-          <StatusRow label="Supabase sync" value="Optional backend" status="later" />
-          <StatusRow label="iOS Widget" value="Native extension" status="later" />
-        </Card>
-      </View>
-
-      <View style={styles.section}>
-        <ThemedText type="eyebrow" style={styles.sectionTitle}>
-          Приватность и безопасность
-        </ThemedText>
-        <Card>
-          <ThemedText type="smallBold">Прогресс остаётся на устройстве</ThemedText>
-          <ThemedText type="small" style={styles.muted}>
-            Профиль, миссии и check-in сохраняются локально. При создании плана формулировка цели и выбранные ограничения отправляются в OpenAI через локальный AI-сервер; журнал выполнения не отправляется.
-          </ThemedText>
-          <View style={styles.divider} />
-          <ThemedText type="smallBold">Не медицинский продукт</ThemedText>
-          <ThemedText type="small" style={styles.muted}>
-            Actum не решает за пользователя, какую цель ему выбирать: риск показывается как заметное предупреждение, а не локальная блокировка. Приложение не диагностирует, не лечит и не гарантирует физический результат; ограничения самого API сохраняются.
-          </ThemedText>
-        </Card>
-      </View>
-
-      <View style={styles.section}>
-        <ThemedText type="eyebrow" style={styles.sectionTitle}>
           Проект
         </ThemedText>
         <AppButton
@@ -221,9 +215,6 @@ export default function SettingsScreen() {
         <AppButton label="Удалить локальные данные" variant="danger" onPress={confirmReset} />
       </View>
 
-      <ThemedText type="small" style={[styles.muted, styles.footerText]}>
-        Actum MVP · schema v{state.schemaVersion} · без облачного аккаунта
-      </ThemedText>
     </Screen>
   );
 }
@@ -255,31 +246,6 @@ function SettingRow({
   );
 }
 
-function StatusRow({
-  label,
-  value,
-  status,
-}: {
-  label: string;
-  value: string;
-  status: 'ready' | 'later';
-}) {
-  return (
-    <View style={styles.statusRow}>
-      <View style={[styles.statusDot, status === 'ready' ? styles.ready : styles.later]} />
-      <View style={styles.profileCopy}>
-        <ThemedText type="smallBold">{label}</ThemedText>
-        <ThemedText type="small" style={styles.muted}>
-          {value}
-        </ThemedText>
-      </View>
-      <Pill tone={status === 'ready' ? 'success' : 'neutral'}>
-        {status === 'ready' ? 'готово' : 'позже'}
-      </Pill>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   muted: { color: Palette.textMuted },
   profileCard: { flexDirection: 'row', alignItems: 'center' },
@@ -307,19 +273,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   iconText: { color: Palette.violetSoft, fontSize: 20 },
-  statusCard: { gap: 0, paddingVertical: Spacing.two },
-  statusRow: {
-    minHeight: 62,
-    paddingVertical: Spacing.two,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Palette.line,
-  },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
-  ready: { backgroundColor: Palette.success },
-  later: { backgroundColor: Palette.textDim },
-  divider: { height: StyleSheet.hairlineWidth, backgroundColor: Palette.line },
-  footerText: { textAlign: 'center', marginTop: Spacing.three },
 });

@@ -8,6 +8,7 @@ import { GoalBuilder } from '@/features/goal-planning';
 import { HeroSigil } from '@/components/hero-sigil';
 import { MissionRunner } from '@/features/mission-session';
 import { ThemedText } from '@/components/themed-text';
+import { InfoPopover } from '@/components/ui/info-popover';
 import {
   AppButton,
   Card,
@@ -20,6 +21,7 @@ import {
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import { calendarDateRelation, formatCalendarDate } from '@/lib/calendar-date';
 import { archetypeLabel } from '@/shared/presentation/archetypes';
+import { missionContextSections } from '@/shared/presentation/context-info';
 import { formatMissionDuration } from '@/shared/presentation/plan-formatters';
 import { useApp } from '@/state';
 
@@ -58,15 +60,6 @@ export default function HomeScreen() {
         <ScreenHeader
           eyebrow={today}
           title={`С возвращением, ${firstName}`}
-          subtitle={
-            currentMission
-              ? missionTiming === 'future' && missionDate
-                ? `Следующий шаг запланирован на ${missionDate}. При желании его можно открыть заранее.`
-                : missionTiming === 'past' && missionDate
-                  ? `В календаре остался незавершённый шаг на ${missionDate}.`
-                  : 'Сегодня нужен один честный шаг.'
-              : 'Маршрут пройден. Время посмотреть на путь.'
-          }
           action={
             <View style={styles.levelChip}>
               <ThemedText type="eyebrow" style={styles.levelChipLabel}>
@@ -126,8 +119,16 @@ export default function HomeScreen() {
               <ThemedText style={styles.questGlyph}>✦</ThemedText>
             </View>
             <View style={styles.missionCopy}>
-              <ThemedText type="title">{currentMission.title}</ThemedText>
-              <ThemedText style={styles.missionDescription}>{currentMission.description}</ThemedText>
+              <View style={styles.missionTitleRow}>
+                <ThemedText type="title" style={styles.flex}>
+                  {currentMission.title}
+                </ThemedText>
+                <InfoPopover
+                  title="О сегодняшнем шаге"
+                  accessibilityLabel="Показать пояснение к сегодняшнему шагу"
+                  sections={missionContextSections(currentMission)}
+                />
+              </View>
             </View>
             <View style={styles.rewardRow}>
               <View>
@@ -169,9 +170,6 @@ export default function HomeScreen() {
             <ThemedText type="title" style={styles.center}>
               Маршрут пройден
             </ThemedText>
-            <ThemedText style={[styles.muted, styles.center]}>
-              Ты отчитался по всем миссиям. Посмотри разницу траекторий или начни новую главную цель.
-            </ThemedText>
             <View style={styles.buttonRow}>
               <AppButton
                 label="Сравнить двойников"
@@ -199,7 +197,7 @@ export default function HomeScreen() {
             </View>
             <ProgressBar value={planProgress} />
             <ThemedText type="small" style={styles.muted}>
-              {completedCount} полных побед · Нажми, чтобы открыть маршрут
+              {completedCount} полных побед
             </ThemedText>
           </View>
           <ThemedText style={styles.chevron}>›</ThemedText>
@@ -288,7 +286,7 @@ const styles = StyleSheet.create({
   },
   questGlyph: { fontSize: 25, color: Palette.goldBright },
   missionCopy: { gap: Spacing.two },
-  missionDescription: { color: Palette.textMuted, fontSize: 17, lineHeight: 26 },
+  missionTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two },
   rewardRow: {
     flexDirection: 'row',
     alignItems: 'center',

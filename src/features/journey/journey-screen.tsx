@@ -1,18 +1,17 @@
 import { useState } from 'react';
+import { router } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { CheckInModal } from '@/features/check-in';
 import { MissionRunner, RunSummary } from '@/features/mission-session';
 import { ThemedText } from '@/components/themed-text';
-import { Card, Pill, ProgressBar, Screen, ScreenHeader } from '@/components/ui/primitives';
+import { InfoPopover } from '@/components/ui/info-popover';
+import { AppButton, Card, Pill, ProgressBar, Screen, ScreenHeader } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import type { Mission, MissionOutcome } from '@/domain/types';
 import { formatCalendarDate } from '@/lib/calendar-date';
-import {
-  formatBaselineMetric,
-  formatMissionDuration,
-  formatSourceDomain,
-} from '@/shared/presentation/plan-formatters';
+import { planContextSections } from '@/shared/presentation/context-info';
+import { formatMissionDuration } from '@/shared/presentation/plan-formatters';
 import { useApp } from '@/state';
 
 const OUTCOME_META: Record<MissionOutcome, { icon: string; color: string; label: string }> = {
@@ -34,13 +33,10 @@ export default function JourneyScreen() {
         <ScreenHeader
           eyebrow="Маршрут"
           title="Сначала выбери цель"
-          subtitle="После создания цели здесь появятся главы, миссии и история решений."
         />
         <Card>
           <ThemedText type="subtitle">Путь ещё не начат</ThemedText>
-          <ThemedText style={styles.muted}>
-            Вернись на вкладку «Сегодня» и сформулируй одно реальное намерение.
-          </ThemedText>
+          <AppButton label="Перейти к новой цели" onPress={() => router.push('/')} />
         </Card>
       </Screen>
     );
@@ -54,9 +50,6 @@ export default function JourneyScreen() {
   );
   const checkInRun = checkInMission ? state.missionRuns[checkInMission.id] : undefined;
   const detailIsCurrent = detailMission?.id === currentMission?.id;
-  const baseline = state.activePlan.baseline ?? state.activeGoal.baseline;
-  const targetTimeline = state.activePlan.targetTimeline ?? state.activeGoal.targetTimeline;
-
   return (
     <>
       <Screen>
@@ -74,6 +67,14 @@ export default function JourneyScreen() {
               </Pill>
               <ThemedText type="subtitle">{state.activeGoal.targetMetric}</ThemedText>
             </View>
+            <InfoPopover
+              title="О плане"
+              accessibilityLabel="Показать пояснения и источники плана"
+              sections={planContextSections(state.activePlan, {
+                baseline: state.activeGoal.baseline,
+                targetTimeline: state.activeGoal.targetTimeline,
+              })}
+            />
             <View style={styles.percentCircle}>
               <ThemedText type="smallBold" style={styles.gold}>
                 {Math.round(progress * 100)}%
@@ -82,38 +83,9 @@ export default function JourneyScreen() {
           </View>
           <ProgressBar value={progress} />
           <ThemedText type="small" style={styles.muted}>
-            План v{state.activePlan.version} · {state.activePlan.dailyMinutes} минут в день ·{' '}
-            {state.activePlan.research.confidence === 'high' ? 'высокая' : 'средняя'} уверенность
-            шаблона
+            {state.activePlan.dailyMinutes} мин/день · {state.activePlan.horizonDays} дней
           </ThemedText>
         </Card>
-
-        {baseline || targetTimeline ? (
-          <Card style={styles.baselineCard}>
-            <ThemedText type="eyebrow" style={styles.violet}>
-              Основа расчёта плана
-            </ThemedText>
-            {baseline ? (
-              <View style={styles.baselineSection}>
-                <ThemedText type="smallBold">{baseline.userStatement}</ThemedText>
-                <ThemedText type="small" style={styles.baselineMetric}>
-                  {formatBaselineMetric(baseline)}
-                </ThemedText>
-                <ThemedText type="small" style={styles.muted}>
-                  {baseline.calculationRule}
-                </ThemedText>
-              </View>
-            ) : null}
-            {targetTimeline ? (
-              <View style={styles.baselineSection}>
-                <ThemedText type="eyebrow" style={styles.muted}>
-                  срок большой цели
-                </ThemedText>
-                <ThemedText type="smallBold">{targetTimeline}</ThemedText>
-              </View>
-            ) : null}
-          </Card>
-        ) : null}
 
         <View style={styles.timeline}>
           {state.activePlan.chapters.map((chapter, chapterIndex) => {
@@ -146,11 +118,13 @@ export default function JourneyScreen() {
                   <View style={styles.chapterTitle}>
                     <View style={styles.questCopy}>
                       <ThemedText type="smallBold">{chapter.title}</ThemedText>
-                      <ThemedText type="small" style={styles.muted}>
-                        {chapter.subtitle}
-                      </ThemedText>
                     </View>
                     {active ? <Pill tone="violet">сейчас</Pill> : null}
+                    <InfoPopover
+                      title={chapter.title}
+                      accessibilityLabel={`Показать пояснение к фазе ${chapter.title}`}
+                      sections={[{ body: chapter.subtitle }]}
+                    />
                   </View>
                   <View style={styles.missionList}>
                     {missions.map((mission) => (
@@ -167,59 +141,6 @@ export default function JourneyScreen() {
             );
           })}
         </View>
-
-        <Card style={styles.methodCard}>
-          <View style={styles.questHeader}>
-            <View style={styles.questCopy}>
-              <ThemedText type="eyebrow" style={styles.violet}>
-                Research dossier
-              </ThemedText>
-              <ThemedText type="subtitle">Почему план выглядит так</ThemedText>
-            </View>
-            <Pill tone="neutral">
-              {state.activePlan.research.method === 'openai-web-research-v1'
-                ? 'web research v1'
-                : state.activePlan.research.method === 'openai-responses-v1'
-                  ? 'GPT v1'
-                  : 'local v1'}
-            </Pill>
-          </View>
-          {state.activePlan.research.assumptions.map((assumption) => (
-            <Bullet key={assumption}>{assumption}</Bullet>
-          ))}
-          {state.activePlan.research.safetyNotes.map((note) => (
-            <Bullet key={note} tone="warning">
-              {note}
-            </Bullet>
-          ))}
-          {state.activePlan.research.sources?.length ? (
-            <View style={styles.sources}>
-              <ThemedText type="eyebrow" style={styles.muted}>
-                Использованные источники
-              </ThemedText>
-              <ThemedText type="small" style={styles.muted}>
-                Research уже учтён в назначениях — открывать сайты для выполнения не нужно.
-              </ThemedText>
-              {state.activePlan.research.sources.map((source) => (
-                <View key={source.url} style={styles.sourceRecord}>
-                  <ThemedText type="smallBold" style={styles.sourceText}>
-                    {source.title}
-                  </ThemedText>
-                  <ThemedText type="small" style={styles.sourceDomain}>
-                    {formatSourceDomain(source.url)}
-                  </ThemedText>
-                </View>
-              ))}
-            </View>
-          ) : null}
-          {state.activePlan.research.request ? (
-            <ThemedText type="small" selectable style={styles.requestMeta}>
-              OpenAI {state.activePlan.research.request.model} ·{' '}
-              {state.activePlan.research.request.webSearchCount} search ·{' '}
-              {state.activePlan.research.request.requestId}
-            </ThemedText>
-          ) : null}
-        </Card>
 
         {state.checkIns.length ? (
           <View style={styles.history}>
@@ -356,43 +277,13 @@ function formatCheckInDate(value: string) {
   }).format(date);
 }
 
-function Bullet({ children, tone = 'neutral' }: { children: string; tone?: 'neutral' | 'warning' }) {
-  return (
-    <View style={styles.bulletRow}>
-      <View style={[styles.bullet, tone === 'warning' && styles.bulletWarning]} />
-      <ThemedText type="small" style={styles.bulletText}>
-        {children}
-      </ThemedText>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   muted: { color: Palette.textMuted },
   gold: { color: Palette.goldBright },
-  violet: { color: Palette.violetSoft },
-  baselineMetric: { color: Palette.cyan },
   missionDay: { color: Palette.goldBright },
   questHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
   questCopy: { flex: 1, gap: 4 },
   pressed: { opacity: 0.7 },
-  sources: { gap: Spacing.two, paddingTop: Spacing.two },
-  sourceRecord: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Palette.line,
-    paddingTop: Spacing.two,
-    gap: 3,
-  },
-  sourceText: { color: Palette.violetSoft },
-  sourceDomain: { color: Palette.textDim },
-  requestMeta: { color: Palette.textDim, paddingTop: Spacing.two },
-  baselineCard: { gap: Spacing.two },
-  baselineSection: {
-    gap: 4,
-    paddingTop: Spacing.two,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Palette.line,
-  },
   percentCircle: {
     width: 54,
     height: 54,
@@ -446,11 +337,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   strike: { color: Palette.textMuted, textDecorationLine: 'line-through' },
-  methodCard: { backgroundColor: '#131525' },
-  bulletRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two },
-  bullet: { width: 6, height: 6, borderRadius: 3, backgroundColor: Palette.violetSoft, marginTop: 7 },
-  bulletWarning: { backgroundColor: Palette.warning },
-  bulletText: { flex: 1, color: Palette.textMuted },
   history: { gap: Spacing.two },
   historyEntry: {
     gap: Spacing.two,

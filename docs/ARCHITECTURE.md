@@ -88,8 +88,11 @@ State разделён на отдельные ответственности:
 низкоуровневые utilities. Platform suffixes `.native`/`.web` выбирает Expo bundler.
 
 `shared/presentation` содержит только общие правила отображения: подписи архетипов,
-форматирование baseline, источника и длительности миссии. Визуальный компонент больше
-не является владельцем бизнес- или display-справочника.
+форматирование baseline, источника и длительности миссии. `context-info.ts` отдельно
+выбирает объяснения, предупреждения и provenance, которые можно спрятать за `?`, не
+затронув исполняемые инструкции, дозировки и критерии. Универсальный
+`components/ui/info-popover.tsx` отвечает только за показ и доступность. Поэтому стиль
+подсказки, политика отбора текста и бизнес-контракт плана меняются независимо.
 
 ## AI gateway
 
@@ -123,6 +126,7 @@ validator остаётся второй линией проверки резул
 |---|---|---|
 | Цвета, интервалы, радиусы | `src/constants/theme.ts` | domain, AI, storage |
 | Общие UI primitives | `src/components/ui` | маршруты, pipeline |
+| Контекст за `?` | `src/shared/presentation/context-info.ts` | исполняемые поля плана, AI-кэш |
 | Экран/сценарий | `src/features/<name>` | Router и другие feature internals |
 | Навигационный путь | `src/app` | реализация feature |
 | Переходы runner | `src/domain/mission-run-machine.ts` | React view, persistence adapter |

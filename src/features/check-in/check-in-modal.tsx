@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
+import { InfoPopover } from '@/components/ui/info-popover';
 import { RunSummary } from '@/features/mission-session';
 import { AppButton, Pill } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
@@ -104,18 +105,37 @@ export function CheckInModal({
 
             {!canSubmit ? (
               <View style={styles.unavailableCard}>
-                <ThemedText type="smallBold">Сначала заверши встроенную сессию Actum.</ThemedText>
-                <ThemedText type="small" style={styles.muted}>
-                  Check-in привязывается к сохранённому журналу, поэтому пустой результат не будет принят.
-                </ThemedText>
+                <View style={styles.rowBetween}>
+                  <ThemedText type="smallBold" style={styles.flex}>
+                    Сначала заверши сессию
+                  </ThemedText>
+                  <InfoPopover
+                    title="Почему check-in недоступен?"
+                    sections={[
+                      {
+                        body: 'Check-in привязывается к сохранённому журналу, поэтому пустой результат не будет принят.',
+                      },
+                    ]}
+                  />
+                </View>
               </View>
             ) : null}
 
             <View style={styles.options}>
+              <View style={styles.rowBetween}>
+                <ThemedText type="smallBold">Результат</ThemedText>
+                <InfoPopover
+                  title="Как считается результат?"
+                  sections={[
+                    { heading: 'Выполнено', body: `Полная награда: +${mission?.xp ?? 0} XP.` },
+                    { heading: 'Частично', body: 'Часть награды; серия не увеличивается.' },
+                    { heading: 'Не выполнено', body: 'Результат сохранится без награды.' },
+                  ]}
+                />
+              </View>
               <OutcomeChoice
                 icon="✓"
                 title="Выполнено"
-                text={`Полная награда · +${mission?.xp ?? 0} XP`}
                 selected={outcome === 'completed'}
                 disabled={!canSubmit || !runSuccessful}
                 tone="success"
@@ -124,7 +144,6 @@ export function CheckInModal({
               <OutcomeChoice
                 icon="≈"
                 title="Частично"
-                text="Часть награды · серия не растёт"
                 selected={outcome === 'partial'}
                 disabled={!canSubmit}
                 tone="warning"
@@ -133,7 +152,6 @@ export function CheckInModal({
               <OutcomeChoice
                 icon="—"
                 title="Не выполнено"
-                text="Результат сохранится без награды"
                 selected={outcome === 'skipped'}
                 disabled={!canSubmit}
                 tone="danger"
@@ -143,7 +161,7 @@ export function CheckInModal({
 
             <View style={styles.noteBlock}>
               <ThemedText type="smallBold">
-                Итоговый комментарий и недочёты{' '}
+                Комментарий{' '}
                 <ThemedText type="small" style={styles.muted}>
                   (необязательно)
                 </ThemedText>
@@ -174,9 +192,6 @@ export function CheckInModal({
               disabled={!canSubmit}
               onPress={submit}
             />
-            <ThemedText type="small" style={[styles.muted, styles.center]}>
-              Фактические результаты и комментарии останутся в журнале Actum.
-            </ThemedText>
           </ScrollView>
         </SafeAreaView>
       </KeyboardAvoidingView>
@@ -187,7 +202,6 @@ export function CheckInModal({
 function OutcomeChoice({
   icon,
   title,
-  text,
   selected,
   disabled = false,
   tone,
@@ -195,7 +209,6 @@ function OutcomeChoice({
 }: {
   icon: string;
   title: string;
-  text: string;
   selected: boolean;
   disabled?: boolean;
   tone: 'success' | 'warning' | 'danger';
@@ -223,9 +236,6 @@ function OutcomeChoice({
       </View>
       <View style={styles.optionCopy}>
         <ThemedText type="smallBold">{title}</ThemedText>
-        <ThemedText type="small" style={styles.muted}>
-          {text}
-        </ThemedText>
       </View>
       <View style={[styles.radio, selected && { borderWidth: 5, borderColor: colors[tone] }]} />
     </Pressable>
@@ -257,6 +267,8 @@ const styles = StyleSheet.create({
   closeText: { color: Palette.textMuted, fontSize: 27, lineHeight: 29 },
   muted: { color: Palette.textMuted },
   center: { textAlign: 'center' },
+  flex: { flex: 1 },
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.two },
   criterionCard: {
     gap: Spacing.one,
     borderRadius: Radius.medium,

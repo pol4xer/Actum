@@ -3,11 +3,16 @@ import { Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
+import { InfoPopover } from '@/components/ui/info-popover';
 import { InAppMissionRunner } from './in-app-mission-runner';
 import { AppButton, Pill, ProgressBar } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import type { Mission, RoutineAction, RoutineLoadBasis } from '@/domain/types';
 import { formatCalendarDate } from '@/lib/calendar-date';
+import {
+  missionContextSections,
+  type ContextInfoSection,
+} from '@/shared/presentation/context-info';
 import { useApp } from '@/state';
 
 type RunnerPhase = 'instructions' | 'running' | 'finished';
@@ -268,6 +273,11 @@ function LegacyMissionRunner({
       ? Math.max(0, mission.repeatTotal - (mission.repeatIndex ?? 1))
       : undefined;
   const scheduledDate = formatCalendarDate(mission.scheduledDate);
+  const legacyContext = legacyMissionContextSections(
+    mission,
+    explicitSteps.length > 0 || isRoutine,
+    legacyRepeatRemaining,
+  );
 
   const start = () => {
     if (readOnly) return;
@@ -340,8 +350,13 @@ function LegacyMissionRunner({
               {typeof mission.repeatTotal === 'number' && mission.repeatTotal > 1
                 ? ` · повтор ${mission.repeatIndex ?? 1}/${mission.repeatTotal}`
                 : ''}
-            </ThemedText>
-          </View>
+              </ThemedText>
+            </View>
+          <InfoPopover
+            title="О миссии"
+            accessibilityLabel="Показать пояснение к миссии"
+            sections={legacyContext}
+          />
           <Pressable
             accessibilityLabel={readOnly ? 'Закрыть просмотр дня' : 'Закрыть миссию'}
             accessibilityRole="button"
@@ -358,7 +373,6 @@ function LegacyMissionRunner({
             <>
               <View style={styles.titleBlock}>
                 <ThemedText type="title">{mission.title}</ThemedText>
-                <ThemedText style={styles.description}>{mission.description}</ThemedText>
               </View>
 
               <View style={styles.modeCard}>
@@ -375,15 +389,6 @@ function LegacyMissionRunner({
                         ? `${formatCount(routineActions.length, ['действие', 'действия', 'действий'])} · ${formatCount(routineTotalSets, ['подход', 'подхода', 'подходов'])}`
                         : 'Выполнение в своём темпе'}
                   </ThemedText>
-                  <ThemedText type="small" style={styles.muted}>
-                    {readOnly
-                      ? 'Ниже показана полная схема дня. Запуск и check-in остаются у текущего дня.'
-                      : isLegacyTimed
-                        ? 'Отсчёт начнётся только после нажатия кнопки.'
-                        : isRoutine
-                          ? 'Приложение проведёт по каждому подходу, включит рабочие таймеры и отдых.'
-                          : 'Во время миссии будет виден прошедший срок и текущий шаг.'}
-                  </ThemedText>
                 </View>
               </View>
 
@@ -393,37 +398,22 @@ function LegacyMissionRunner({
               ) : null}
               <MissionOutcomeDetails
                 completionCriterion={mission.completionCriterion}
-                progressionRule={mission.progressionRule}
-                legacyRepeatRemaining={legacyRepeatRemaining}
               />
-              {mission.warning ? <MissionWarning warning={mission.warning} /> : null}
-
               <View style={styles.footerActions}>
                 {readOnly ? (
-                  <>
-                    <AppButton label="Закрыть просмотр" variant="secondary" onPress={onClose} />
-                    <ThemedText type="small" style={[styles.muted, styles.center]}>
-                      Это другой день календаря. Здесь можно проверить точную нагрузку, но check-in
-                      остаётся у текущего дня.
-                    </ThemedText>
-                  </>
+                  <AppButton label="Закрыть просмотр" variant="secondary" onPress={onClose} />
                 ) : (
-                  <>
-                    <AppButton
-                      label={
-                        isLegacyTimed
-                          ? `Запустить ${formatDuration(timerSeconds)}`
-                          : isRoutine
-                            ? 'Начать первый подход'
-                            : 'Начать выполнение'
-                      }
-                      icon="→"
-                      onPress={start}
-                    />
-                    <ThemedText type="small" style={[styles.muted, styles.center]}>
-                      Результат не запишется автоматически — после выполнения ты сам его оценишь.
-                    </ThemedText>
-                  </>
+                  <AppButton
+                    label={
+                      isLegacyTimed
+                        ? `Запустить ${formatDuration(timerSeconds)}`
+                        : isRoutine
+                          ? 'Начать первый подход'
+                          : 'Начать выполнение'
+                    }
+                    icon="→"
+                    onPress={start}
+                  />
                 )}
               </View>
             </>
@@ -488,8 +478,6 @@ function LegacyMissionRunner({
                   <ThemedText type="subtitle">{activeStep}</ThemedText>
                 </View>
               )}
-
-              {mission.warning ? <MissionWarning warning={mission.warning} compact /> : null}
 
               <View style={styles.footerActions}>
                 {isRoutine && routineStage === 'rest' ? (
@@ -562,9 +550,8 @@ function LegacyMissionRunner({
                         : 'Все шаги пройдены'
                       : 'Выполнение остановлено'}
                 </ThemedText>
-                <ThemedText style={[styles.description, styles.center]}>
-                  В миссии прошло {formatDuration(Math.max(1, Math.round(elapsedMs / 1000)))}. Это ещё
-                  не отчёт — отметь честный результат следующим шагом.
+                <ThemedText type="small" style={[styles.muted, styles.center]}>
+                  {formatDuration(Math.max(1, Math.round(elapsedMs / 1000)))}
                 </ThemedText>
               </View>
 
@@ -597,8 +584,6 @@ function LegacyMissionRunner({
 
               <MissionOutcomeDetails
                 completionCriterion={mission.completionCriterion}
-                progressionRule={mission.progressionRule}
-                legacyRepeatRemaining={legacyRepeatRemaining}
               />
 
               <View style={styles.footerActions}>
@@ -635,6 +620,7 @@ function RoutinePlan({ actions }: { actions: RoutineAction[] }) {
               <ThemedText type="subtitle" style={styles.actionTitle}>
                 {action.title}
               </ThemedText>
+              <LoadBasisInfo value={action.loadBasis} title={action.title} />
             </View>
 
             <ThemedText style={styles.actionInstruction}>{action.instruction}</ThemedText>
@@ -659,12 +645,6 @@ function RoutinePlan({ actions }: { actions: RoutineAction[] }) {
                 }
               />
               {action.tempo ? <PrescriptionValue label="темп" value={action.tempo} /> : null}
-              {action.loadBasis ? (
-                <PrescriptionValue
-                  label="расчёт нагрузки"
-                  value={formatLoadBasis(action.loadBasis)}
-                />
-              ) : null}
             </View>
 
             <View style={styles.actionCriterion}>
@@ -701,7 +681,7 @@ function ActiveRoutineAction({
         <ThemedText style={styles.muted}>
           Подход {setIndex + 1} из {action.sets} · {formatRoutineQuantity(action)}
         </ThemedText>
-        {action.loadBasis ? <LoadBasis value={action.loadBasis} /> : null}
+        <LoadBasisInfo value={action.loadBasis} title={action.title} />
       </View>
     );
   }
@@ -711,7 +691,12 @@ function ActiveRoutineAction({
       <ThemedText type="eyebrow" style={styles.gold}>
         действие {actionIndex + 1} · подход {setIndex + 1} из {action.sets}
       </ThemedText>
-      <ThemedText type="subtitle">{action.title}</ThemedText>
+      <View style={styles.actionTitleRow}>
+        <ThemedText type="subtitle" style={styles.actionTitle}>
+          {action.title}
+        </ThemedText>
+        <LoadBasisInfo value={action.loadBasis} title={action.title} />
+      </View>
       <ThemedText>{action.instruction}</ThemedText>
       <View style={styles.activePrescription}>
         <ThemedText type="smallBold" style={styles.cyan}>
@@ -727,7 +712,6 @@ function ActiveRoutineAction({
             Расчётное время подхода: ≈ {formatDuration(action.workSecondsPerSet)}
           </ThemedText>
         ) : null}
-        {action.loadBasis ? <LoadBasis value={action.loadBasis} /> : null}
       </View>
       <View style={styles.actionCriterion}>
         <ThemedText type="eyebrow" style={styles.successLabel}>
@@ -750,61 +734,38 @@ function PrescriptionValue({ label, value }: { label: string; value: string }) {
   );
 }
 
-function LoadBasis({ value }: { value: RoutineLoadBasis | string }) {
+function LoadBasisInfo({
+  value,
+  title,
+}: {
+  value?: RoutineLoadBasis | string;
+  title: string;
+}) {
+  if (!value) return null;
   return (
-    <View style={styles.loadBasis}>
-      <ThemedText type="eyebrow" style={styles.muted}>
-        расчёт нагрузки
-      </ThemedText>
-      <ThemedText type="small">{formatLoadBasis(value)}</ThemedText>
-    </View>
+    <InfoPopover
+      title={`Расчёт: ${title}`}
+      accessibilityLabel={`Показать расчёт нагрузки для ${title}`}
+      sections={[{ heading: 'Расчёт нагрузки', body: formatLoadBasis(value) }]}
+    />
   );
 }
 
 function MissionOutcomeDetails({
   completionCriterion,
-  progressionRule,
-  legacyRepeatRemaining,
 }: {
   completionCriterion?: string;
-  progressionRule?: string;
-  legacyRepeatRemaining?: number;
 }) {
-  if (!completionCriterion && !progressionRule && !legacyRepeatRemaining) return null;
+  if (!completionCriterion) return null;
 
   return (
     <View style={styles.outcomeCard}>
-      {completionCriterion ? (
-        <View style={styles.outcomeSection}>
-          <ThemedText type="eyebrow" style={styles.successLabel}>
-            миссия выполнена, если
-          </ThemedText>
-          <ThemedText>{completionCriterion}</ThemedText>
-        </View>
-      ) : null}
-      {legacyRepeatRemaining !== undefined && legacyRepeatRemaining > 0 ? (
-        <View style={styles.outcomeSection}>
-          <ThemedText type="eyebrow" style={styles.cyan}>
-            сначала закрепи эту дозировку
-          </ThemedText>
-          <ThemedText>
-            После check-in впереди ещё{' '}
-            {formatCount(legacyRepeatRemaining, ['такая же сессия', 'такие же сессии', 'таких же сессий'])}.
-            Числа останутся прежними.
-          </ThemedText>
-        </View>
-      ) : progressionRule ? (
-        <View style={styles.outcomeSection}>
-          <ThemedText type="eyebrow" style={styles.cyan}>
-            правило корректировки календарной нагрузки
-          </ThemedText>
-          <ThemedText>{progressionRule}</ThemedText>
-          <ThemedText type="small" style={styles.muted}>
-            Используй это правило как ориентир при пересмотре нагрузки следующих дней после
-            check-in.
-          </ThemedText>
-        </View>
-      ) : null}
+      <View style={styles.outcomeSection}>
+        <ThemedText type="eyebrow" style={styles.successLabel}>
+          миссия выполнена, если
+        </ThemedText>
+        <ThemedText>{completionCriterion}</ThemedText>
+      </View>
     </View>
   );
 }
@@ -831,20 +792,28 @@ function MissionSteps({ steps, title = 'что делать' }: { steps: string[
   );
 }
 
-function MissionWarning({ warning, compact = false }: { warning: string; compact?: boolean }) {
-  return (
-    <View style={[styles.warningCard, compact && styles.warningCardCompact]}>
-      <ThemedText type="eyebrow" style={styles.warningText}>
-        важно знать
-      </ThemedText>
-      <ThemedText type={compact ? 'small' : 'default'}>{warning}</ThemedText>
-      {!compact ? (
-        <ThemedText type="small" style={styles.muted}>
-          Это подсказка, а не блокировка: ты сам решаешь, как выполнять миссию.
-        </ThemedText>
-      ) : null}
-    </View>
-  );
+function legacyMissionContextSections(
+  mission: Mission,
+  descriptionIsContext: boolean,
+  legacyRepeatRemaining?: number,
+): ContextInfoSection[] {
+  const sections: ContextInfoSection[] = [];
+  if (descriptionIsContext && mission.description.trim()) {
+    sections.push({ heading: 'О миссии', body: mission.description.trim() });
+  }
+  sections.push(...missionContextSections(mission));
+  if (legacyRepeatRemaining && legacyRepeatRemaining > 0) {
+    sections.push({
+      heading: 'Повторение нагрузки',
+      body: `После check-in впереди ещё ${formatCount(legacyRepeatRemaining, ['такая же сессия', 'такие же сессии', 'таких же сессий'])}. Числа останутся прежними.`,
+    });
+  } else if (mission.progressionRule?.trim()) {
+    sections.push({
+      heading: 'Правило следующей нагрузки',
+      body: mission.progressionRule.trim(),
+    });
+  }
+  return sections;
 }
 
 function formatClock(totalSeconds: number) {
