@@ -1,5 +1,17 @@
 import type { Goal, GoalInput, PlanVersion } from '@/domain/types';
 
+const RESEARCH_ANCHOR_PATTERN = /^[a-f0-9]{64}$/u;
+
+export function reusableResearchAnchor(plan: PlanVersion): string | undefined {
+  const anchor = plan.research.researchAnchor;
+  return plan.version >= 7 &&
+    plan.research.method === 'openai-web-research-v1' &&
+    typeof anchor === 'string' &&
+    RESEARCH_ANCHOR_PATTERN.test(anchor)
+    ? anchor
+    : undefined;
+}
+
 /** Builds the only data sent for an adaptive cycle; the full MissionRun journal stays local. */
 export function createNextCycleInput(
   goal: Goal,
@@ -15,6 +27,7 @@ export function createNextCycleInput(
   if (normalizedBaseline.length < 2) {
     throw new Error('Next cycle requires a measured baseline.');
   }
+  const researchAnchor = reusableResearchAnchor(plan);
 
   return {
     prompt: goal.rawPrompt,
@@ -27,10 +40,11 @@ export function createNextCycleInput(
       target: program.target,
       roadmap: program.roadmap,
       completedCycles: program.completedCycles,
+      ...(researchAnchor ? { researchAnchor } : {}),
+      ...(plan.targetCycleNumber
+        ? { targetCycleNumber: plan.targetCycleNumber }
+        : {}),
     },
-    researchMode:
-      plan.version >= 6 && plan.research.method === 'openai-web-research-v1'
-        ? 'web'
-        : 'quick',
+    researchMode: researchAnchor ? 'web' : 'quick',
   };
 }

@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import type { GeneratedGoal, GoalDuration, GoalInput } from '@/domain/types';
+import type {
+  GeneratedGoal,
+  GoalDuration,
+  GoalInput,
+  PlanVersion,
+} from '@/domain/types';
 
 import { AIPlannerError, type AIPlannerErrorCode } from './errors';
 import { defaultGoalPlanner } from './http-goal-planner';
@@ -16,6 +21,13 @@ export type UseGoalBuilderControllerOptions = Readonly<{
 
 export function shouldReuseSavedResponseForRetry(errorCode?: AIPlannerErrorCode) {
   return errorCode === 'INVALID_RESPONSE';
+}
+
+export function recoveredCurrentLevel(plan: PlanVersion): GoalInput['currentLevel'] {
+  return (
+    plan.currentLevel ??
+    (plan.baseline?.value != null ? 'some-experience' : 'starting')
+  );
 }
 
 export function useGoalBuilderController({
@@ -65,7 +77,7 @@ export function useGoalBuilderController({
         setBaseline(saved.plan.baseline?.userStatement ?? 'Сохранённая исходная точка');
         setDuration(saved.goal.program.duration);
         setDailyMinutes(saved.plan.dailyMinutes);
-        setCurrentLevel(saved.plan.baseline?.value != null ? 'some-experience' : 'starting');
+        setCurrentLevel(recoveredCurrentLevel(saved.plan));
         setResearchMode(
           saved.plan.research.method === 'openai-web-research-v1' ? 'web' : 'quick',
         );

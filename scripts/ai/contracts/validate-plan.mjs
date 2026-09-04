@@ -1,6 +1,6 @@
 import { CYCLE_DAYS, programDurationConfig } from './program-duration.mjs';
 
-export const PLAN_VALIDATOR_VERSION = 'plan-validator-v6';
+export const PLAN_VALIDATOR_VERSION = 'plan-validator-v9';
 
 const COUNTER_UNITS = new Set([
   'reps',
@@ -91,6 +91,7 @@ const PLAN_KEYS = [
   'duration',
   'totalCycles',
   'cycleNumber',
+  'targetCycleNumber',
   'target',
   'cycleGoal',
   'roadmap',
@@ -119,7 +120,7 @@ const DAY_KEYS = [
   'execution',
   'warning',
 ];
-const EXECUTION_KEYS = ['kind', 'blocks', 'successCriterion'];
+const EXECUTION_KEYS = ['kind', 'blocks', 'primaryBlockIndex', 'successCriterion'];
 const TIMER_BLOCK_KEYS = [
   'kind',
   'title',
@@ -216,6 +217,25 @@ const SAFETY_PROHIBITION_PATTERN =
   /(?:\b(?:do not|don't|never|avoid|must not|should not|without)\b|(?:не\s+(?:добав|использ|отправ|заполня|открыва|запуска|выполня|дела|обращ|посещ|ищ)\w*|нельзя|запрещ\w*|избег\w*|без\s+(?:внешн|друг|сторонн)\w*))/iu;
 const SAFETY_CONDITIONAL_RISK_PATTERN =
   /(?:(?:\b(?:if|when|in case)\b|если|в\s+случае).{0,180}(?:pain|symptom|dizz|nause|seiz|loss|worsen|боль|симптом|дискомфорт|головокруж|тошнот|судорог|потер|ухудш)|при\s+(?:(?:появлен|возникновен|ухудшен)\w*.{0,48})?(?:бол|симптом|дискомфорт|головокруж|тошнот|судорог|потер)\w*)/iu;
+const EXPLICIT_NO_PRACTICE_PATTERN =
+  /(?:\b(?:without|no)\s+(?:holds?|practice|training)\b|\b(?:do\s+not|don't|never)\s+hold\s+(?:(?:your|the)\s+)?breath\b|(?:без|нет)\s+(?:задерж|упражнен|трениров|практик)[\p{L}\p{M}]*|не\s+(?:задерж|удерж)[\p{L}\p{M}]*\s+(?:(?:сво|ваш)[\p{L}\p{M}]*\s+)?дыхани[\p{L}\p{M}]*|не\s+выполня[\p{L}\p{M}]*\s+(?:задерж|упражнен|трениров|практик)[\p{L}\p{M}]*)/iu;
+const ORDINARY_BREATHING_PATTERN =
+  /(?:\b(?:normal\s+breathing|breathe\s+normally|ordinary\s+breathing)\b|(?:обычн|естественн|спокойн)[\p{L}\p{M}]*\s+дыхани[\p{L}\p{M}]*)/iu;
+const BREATH_HOLD_ACTION_PATTERN =
+  /(?:\b(?:hold(?:ing)?\s+(?:(?:your|the|my)\s+)?breath|breath[- ]hold(?:ing)?s?)\b|(?:задерж|удерж)[\p{L}\p{M}]*\s+(?:(?:сво|ваш)[\p{L}\p{M}]*\s+)?дыхани[\p{L}\p{M}]*|дыхани[\p{L}\p{M}]*\s+(?:задерж|удерж)[\p{L}\p{M}]*)/iu;
+const BREATH_HOLD_INSTRUCTION_ACTION_PATTERN =
+  /(?:\b(?:hold|keep\s+holding)\s+(?:(?:your|the)\s+)?breath\b|\b(?:perform|do|start)\s+(?:a\s+)?breath[- ]hold\b|(?:задерж(?:и|ивай|ивайте|ите)|удерж(?:и|ивай|ивайте|ите))\s+(?:(?:сво|ваш)[\p{L}\p{M}]*\s+)?дыхани[\p{L}\p{M}]*|(?:выполни|выполняй|выполняйте|сделай|сделайте|начни|начните)\s+(?:сух[\p{L}\p{M}]*\s+)?задержк[\p{L}\p{M}]*\s+дыхани[\p{L}\p{M}]*)/iu;
+const BREATHING_GOAL_PATTERN = /(?:\bbreath(?:e|ing)?\b|дыш|дыхани)/iu;
+const PASSIVE_ONLY_PRIMARY_PATTERN =
+  /(?:\b(?:lie|lay)\s+down\b|\b(?:sit|stand|stay)\s+still\b|\b(?:stare|look)\s+(?:at|into)\b|\b(?:relax|rest|wait)\b|(?:ляг|лежи|сядь|сиди|стой|оставайся)\s+(?:неподвижн|спокойн|на\s+(?:спин|пол))|(?:смотри|гляди)\s+в\s+(?:одну\s+)?точк|расслаб|отдыхай|жди\b)/iu;
+const AFFIRMATIVE_ACTIVE_PRIMARY_PATTERN =
+  /(?:\b(?:perform|do|start|hold|raise|lower|lift|read|write|draw|speak|repeat|walk|run|swim|press|pull|push|squeeze|breathe)\b|(?:выполн|сдел|делай|начн|подним|опуск|сгиб|разгиб|читай|пиш|рисуй|говор|произнос|повтор|шагай|бег|иди|ход|плыв|нажим|тяни|толкай|сжим|держи|удерж|задерж|дыши)[\p{L}\p{M}]*|сохраняй\s+(?:ровн[\p{L}\p{M}]*\s+)?дыхани[\p{L}\p{M}]*)/iu;
+const PASSIVE_PRACTICE_GOAL_PATTERN =
+  /(?:\b(?:meditat|mindful|relaxation|stillness)\w*\b|(?:медит|осознанн|релаксац|расслаб(?:иться|ляться)|неподвижност|концентрир|удерживать\s+внимани)[\p{L}\p{M}]*)/iu;
+const SAFETY_ONLY_ITEM_PATTERN =
+  /(?:безопасн|медицин|врач|доктор|инструктор|противопоказ|головокруж|тошнот|боль|судорог|потер[\p{L}]*\s+сознани|одышк|симптом|самочувств|гипервентил|(?:без|нет)\s+(?:воды|ванн|задерж|упражнен|трениров|практик)[\p{L}\p{M}]*|практик[\p{L}\p{M}]*.{0,32}на\s+суше|только\s+на\s+суше|(?:устойчив[\p{L}]*.{0,20}положени|положени[\p{L}]*.{0,20}устойчив)|(?:обычн|спокойн)[\p{L}]*\s+дыхани|(?:непрерывн[\p{L}]*.{0,20}дыхани|дыхани[\p{L}]*.{0,20}непрерывн)|dizz|nause|pain|seiz|symptom|hypervent|underwater|dry\s+only|normal\s+breathing|without\s+holds?)/iu;
+const SYMPTOM_JOURNAL_PATTERN =
+  /(?:симптом|самочувств|головокруж|тошнот|боль|судорог|одышк|symptom|well-?being|dizz|nause|pain|seiz)/iu;
 const EMBEDDED_TIME_QUANTITY_PATTERN =
   /(?:^|[^\p{L}\p{N}])(?:\d+(?:[.,]\d+)?\s*(?:[-–—]\s*)?(?:milliseconds?|msecs?|ms|seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?|months?|years?|мс|миллисекунд\p{L}*|сек(?:унд\p{L}*)?|мин(?:ут\p{L}*)?|час\p{L}*|дн(?:я|ей)?|день|недел\p{L}*|месяц\p{L}*|год\p{L}*|лет)|\d{1,3}:\d{2})(?=$|[^\p{L}\p{N}])/iu;
 const EMBEDDED_SUBDAY_TIME_QUANTITY_PATTERN =
@@ -232,6 +252,7 @@ export function validatePlanActionability(
     trustedBaseline,
     trustedTarget,
     programContext,
+    researchTargetCycleNumber,
   },
 ) {
   assertExactObject(plan, 'plan', PLAN_KEYS);
@@ -256,6 +277,39 @@ export function validatePlanActionability(
   if (plan.cycleNumber !== cycleNumber) {
     fail('cycleNumber', `ожидается цикл ${cycleNumber}`);
   }
+  assertInteger(
+    plan.targetCycleNumber,
+    'targetCycleNumber',
+    cycleNumber,
+    durationConfig.totalCycles,
+  );
+  if (Number.isInteger(researchTargetCycleNumber)) {
+    assertInteger(researchTargetCycleNumber, 'researchTargetCycleNumber', 1, 12);
+    const earliestAllowed = Math.max(cycleNumber, researchTargetCycleNumber);
+    if (
+      (cycleNumber === 1 && plan.targetCycleNumber !== researchTargetCycleNumber) ||
+      (cycleNumber > 1 && plan.targetCycleNumber < earliestAllowed)
+    ) {
+      fail(
+        'targetCycleNumber',
+        cycleNumber === 1
+          ? `ожидается подтверждённый research цикл ${researchTargetCycleNumber}`
+          : `после нового замера ожидается цикл не раньше ${earliestAllowed}`,
+      );
+    }
+  } else if (researchTargetCycleNumber === null) {
+    const quickTargetCycle = quickTargetCycleNumber(
+      programContext,
+      cycleNumber,
+      durationConfig.totalCycles,
+    );
+    if (plan.targetCycleNumber !== quickTargetCycle) {
+      fail(
+        'targetCycleNumber',
+        `без web-research ожидается сохранённый ближайший цикл ${quickTargetCycle}`,
+      );
+    }
+  }
   validateTarget(
     plan.target,
     expectedTargetStatement,
@@ -268,6 +322,7 @@ export function validatePlanActionability(
     plan.roadmap,
     durationConfig.totalCycles,
     cycleNumber,
+    plan.targetCycleNumber,
     trustedBaseline,
     trustedTarget,
     programContext,
@@ -290,7 +345,6 @@ export function validatePlanActionability(
     fail('days', `цикл должен содержать ровно ${CYCLE_DAYS} календарных дней`);
   }
 
-  let loadLinkedBlockCount = 0;
   plan.days.forEach((day, index) => {
     const path = `days.${index}`;
     assertExactObject(day, path, DAY_KEYS);
@@ -303,18 +357,18 @@ export function validatePlanActionability(
     if (day.phaseIndex !== expectedPhaseIndex) {
       fail(`${path}.phaseIndex`, `день ${day.dayNumber} не входит в указанную фазу`);
     }
-    loadLinkedBlockCount += validateDay(day, dailyMinutes, trustedBaseline, path);
+    validateDay(
+      day,
+      dailyMinutes,
+      trustedBaseline,
+      trustedTarget,
+      plan.target.userStatement,
+      path,
+    );
   });
 
-  if (
-    trustedBaseline &&
-    (plan.domain === 'move' || plan.domain === 'practice') &&
-    loadLinkedBlockCount < 1
-  ) {
-    fail('days', 'измеримая двигательная цель не использует baseline ни в одном расчёте');
-  }
-
   validateAssessment(plan.assessment, plan, cycleNumber);
+  validateNumericPracticeTrajectory(plan, trustedBaseline, trustedTarget, cycleNumber);
 
   return plan;
 }
@@ -348,6 +402,30 @@ function validateTarget(target, expectedStatement, trustedTarget, previousTarget
   validateFrozenProgramTarget(target, previousTarget);
 }
 
+function quickTargetCycleNumber(programContext, currentCycleNumber, totalCycles) {
+  if (!programContext) return currentCycleNumber;
+  if (Number.isInteger(programContext.targetCycleNumber)) {
+    return Math.min(
+      totalCycles,
+      Math.max(currentCycleNumber, programContext.targetCycleNumber),
+    );
+  }
+  const programTarget = programContext.target;
+  if (Number.isFinite(programTarget?.value) && typeof programTarget?.unit === 'string') {
+    const targetUnit = canonicalUnit(programTarget.unit);
+    const targetIndex = programContext.roadmap?.findIndex(
+      (entry, index) =>
+        index >= currentCycleNumber - 1 &&
+        Object.is(entry?.targetValue, programTarget.value) &&
+        canonicalUnit(entry?.targetUnit) === targetUnit,
+    );
+    if (Number.isInteger(targetIndex) && targetIndex >= currentCycleNumber - 1) {
+      return targetIndex + 1;
+    }
+  }
+  return totalCycles;
+}
+
 function validateFrozenProgramTarget(target, previousTarget) {
   if (!previousTarget) return;
   const sameClientIdentity =
@@ -370,6 +448,7 @@ function validateRoadmap(
   roadmap,
   totalCycles,
   currentCycleNumber,
+  targetCycleNumber,
   trustedBaseline,
   trustedTarget,
   programContext,
@@ -409,6 +488,9 @@ function validateRoadmap(
     const currentDirection = Math.sign(
       trustedTarget.value - trustedBaseline.value,
     );
+    if (currentDirection === 0 && targetCycleNumber !== currentCycleNumber) {
+      fail('targetCycleNumber', 'уже достигнутая цель должна завершаться в текущем цикле');
+    }
     const numericEntries = [];
     roadmap.forEach((entry, index) => {
       const path = `roadmap.${index}`;
@@ -429,20 +511,41 @@ function validateRoadmap(
       numericEntries.push({ entry, index, path });
     });
 
-    const firstNumericValue = numericEntries[0]?.entry.targetValue;
-    const programDirection = Math.sign(
-      trustedTarget.value - (firstNumericValue ?? trustedBaseline.value),
-    );
-    let previousValue;
+    // Frozen milestones are historical intentions, not measured results. A missed
+    // target may legitimately make the new roadmap start below that old intention,
+    // so current/future monotonicity starts from the measured baseline instead.
+    let previousValue = trustedBaseline.value;
     numericEntries.forEach(({ entry, index, path }) => {
-      if (programDirection > 0 && previousValue != null && entry.targetValue < previousValue) {
+      const isCurrentOrFuture = index >= currentCycleNumber - 1;
+      if (!isCurrentOrFuture) return;
+      const atOrAfterTargetCycle = index >= targetCycleNumber - 1;
+      if (
+        atOrAfterTargetCycle &&
+        entry.targetValue !== trustedTarget.value
+      ) {
+        fail(
+          `${path}.targetValue`,
+          'целевой и последующие циклы должны точно совпадать с конечной целью',
+        );
+      }
+      if (
+        !atOrAfterTargetCycle &&
+        entry.targetValue === trustedTarget.value
+      ) {
+        fail(
+          `${path}.targetValue`,
+          'конечная цель достигнута раньше указанного targetCycleNumber',
+        );
+      }
+
+      if (currentDirection > 0 && previousValue != null && entry.targetValue < previousValue) {
         fail(`${path}.targetValue`, 'этапы должны монотонно приближаться к цели');
       }
-      if (programDirection < 0 && previousValue != null && entry.targetValue > previousValue) {
+      if (currentDirection < 0 && previousValue != null && entry.targetValue > previousValue) {
         fail(`${path}.targetValue`, 'этапы должны монотонно приближаться к цели');
       }
       if (
-        programDirection === 0 &&
+        currentDirection === 0 &&
         previousValue != null &&
         !nearlyEqual(entry.targetValue, trustedTarget.value)
       ) {
@@ -450,31 +553,31 @@ function validateRoadmap(
       }
       if (
         currentDirection > 0 &&
-        index >= currentCycleNumber - 1 &&
-        (entry.targetValue < trustedBaseline.value || entry.targetValue > trustedTarget.value)
+        (entry.targetValue <= trustedBaseline.value || entry.targetValue > trustedTarget.value)
       ) {
-        fail(`${path}.targetValue`, 'текущий и будущие этапы должны приближаться к цели');
+        fail(`${path}.targetValue`, 'текущий и будущие этапы должны строго приближаться к цели');
       }
       if (
         currentDirection < 0 &&
-        index >= currentCycleNumber - 1 &&
-        (entry.targetValue > trustedBaseline.value || entry.targetValue < trustedTarget.value)
+        (entry.targetValue >= trustedBaseline.value || entry.targetValue < trustedTarget.value)
       ) {
-        fail(`${path}.targetValue`, 'текущий и будущие этапы должны приближаться к цели');
+        fail(`${path}.targetValue`, 'текущий и будущие этапы должны строго приближаться к цели');
+      }
+      if (
+        index < targetCycleNumber - 1 &&
+        previousValue != null &&
+        nearlyEqual(entry.targetValue, previousValue)
+      ) {
+        fail(`${path}.targetValue`, 'промежуточные будущие этапы не должны создавать плато');
       }
       if (
         currentDirection === 0 &&
-        index >= currentCycleNumber - 1 &&
         !nearlyEqual(entry.targetValue, trustedTarget.value)
       ) {
         fail(`${path}.targetValue`, 'достигнутая цель не должна удаляться от исходной точки');
       }
       previousValue = entry.targetValue;
     });
-    const finalEntry = roadmap.at(-1);
-    if (finalEntry.targetValue !== trustedTarget.value) {
-      fail('roadmap', 'последний этап должен точно совпадать с конечной целью');
-    }
   }
 }
 
@@ -483,7 +586,7 @@ function validateAssessment(assessment, plan, currentCycleNumber) {
   if (assessment.dayNumber !== CYCLE_DAYS) {
     fail('assessment.dayNumber', `контрольный замер должен быть назначен на день ${CYCLE_DAYS}`);
   }
-  assertInteger(assessment.blockIndex, 'assessment.blockIndex', 0, 11);
+  assertInteger(assessment.blockIndex, 'assessment.blockIndex', 0, 2);
   assertString(assessment.metric, 'assessment.metric', 2, 180);
   assertGeneratedText(assessment.metric, 'assessment.metric');
   validateNullableMetricPair(
@@ -501,6 +604,9 @@ function validateAssessment(assessment, plan, currentCycleNumber) {
   }
 
   const finalDay = plan.days[CYCLE_DAYS - 1];
+  if (assessment.blockIndex !== finalDay.execution.primaryBlockIndex) {
+    fail('assessment.blockIndex', 'контрольный замер должен быть главным блоком дня 30');
+  }
   const block = finalDay.execution.blocks[assessment.blockIndex];
   if (!block) fail('assessment.blockIndex', 'указанный блок отсутствует в дне 30');
   if (block.kind !== 'timer' && block.kind !== 'counter') {
@@ -525,6 +631,90 @@ function validateAssessment(assessment, plan, currentCycleNumber) {
   if (block.targetPerSet !== assessment.targetValue) {
     fail('assessment.targetValue', 'targetPerSet не совпадает с целью замера');
   }
+}
+
+function validateNumericPracticeTrajectory(
+  plan,
+  trustedBaseline,
+  trustedTarget,
+  currentCycleNumber,
+) {
+  if (
+    !trustedBaseline ||
+    !trustedTarget ||
+    canonicalUnit(trustedBaseline.unit) !== canonicalUnit(trustedTarget.unit) ||
+    trustedTarget.value <= trustedBaseline.value
+  ) {
+    return;
+  }
+  const milestone = plan.roadmap[currentCycleNumber - 1];
+  if (
+    !Number.isFinite(milestone?.targetValue) ||
+    canonicalUnit(milestone?.targetUnit) !== canonicalUnit(trustedTarget.unit) ||
+    milestone.targetValue <= trustedBaseline.value
+  ) {
+    return;
+  }
+
+  // A structurally valid one-second timer is still filler. Keep every training
+  // day connected both to the measured ability and to this month's milestone,
+  // while allowing genuinely light sessions instead of daily maximal attempts.
+  // A zero baseline cannot produce loadBasis percentages, but the milestone
+  // still supplies a positive absolute floor.
+  const targetUnit = canonicalUnit(trustedTarget.unit);
+  const discreteDose = targetUnit === 'seconds' || DISCRETE_COUNTER_UNITS.has(targetUnit);
+  const normalizeFloor = (value) =>
+    discreteDose ? Math.max(1, Math.ceil(value)) : Math.max(0.01, value);
+  const minimumDailyDose = normalizeFloor(
+    Math.max(trustedBaseline.value * 0.25, milestone.targetValue * 0.1),
+  );
+  const practiceDays = plan.days.slice(0, CYCLE_DAYS - 1);
+  practiceDays.forEach((day, index) => {
+    const primary = day.execution.blocks[day.execution.primaryBlockIndex];
+    const { dose, property } = primaryDose(primary, targetUnit);
+    if (dose < minimumDailyDose) {
+      fail(
+        `days.${index}.execution.blocks.${day.execution.primaryBlockIndex}.${property}`,
+        `каждый тренировочный день должен содержать целевую дозу не меньше ${formatDose(minimumDailyDose)} ${trustedTarget.unit} (max из 25% baseline и 10% цели текущего цикла)`,
+      );
+    }
+  });
+
+  // The last practice day is the bridge into the assessment. Requiring the
+  // existing 25%-of-milestone floor specifically there prevents an arbitrary
+  // early spike from masking a 4-week jump straight into the day-30 target.
+  const minimumPreAssessmentDose = normalizeFloor(milestone.targetValue * 0.25);
+  const preAssessmentDayIndex = CYCLE_DAYS - 2;
+  const preAssessmentDay = plan.days[preAssessmentDayIndex];
+  const preAssessmentPrimary =
+    preAssessmentDay.execution.blocks[preAssessmentDay.execution.primaryBlockIndex];
+  const { dose: preAssessmentDose, property: preAssessmentProperty } =
+    primaryDose(preAssessmentPrimary, targetUnit);
+  if (preAssessmentDose < minimumPreAssessmentDose) {
+    fail(
+      `days.${preAssessmentDayIndex}.execution.blocks.${preAssessmentDay.execution.primaryBlockIndex}.${preAssessmentProperty}`,
+      `последний тренировочный день перед замером должен содержать целевую дозу не меньше ${formatDose(minimumPreAssessmentDose)} ${trustedTarget.unit} (25% цели текущего цикла)`,
+    );
+  }
+}
+
+function primaryDose(primary, targetUnit) {
+  if (targetUnit === 'seconds' && primary?.kind === 'timer') {
+    return { dose: primary.durationSecondsPerSet, property: 'durationSecondsPerSet' };
+  }
+  if (primary?.kind === 'counter') {
+    const blockUnit = canonicalUnit(
+      primary.unit === 'custom' ? primary.unitLabel : primary.unit,
+    );
+    if (blockUnit === targetUnit) {
+      return { dose: primary.targetPerSet, property: 'targetPerSet' };
+    }
+  }
+  return { dose: 0, property: primary?.kind === 'timer' ? 'durationSecondsPerSet' : 'targetPerSet' };
+}
+
+function formatDose(value) {
+  return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100);
 }
 
 function validateNullableMetricPair(value, unit, path) {
@@ -610,7 +800,14 @@ function phaseIndexForDay(phases, dayNumber) {
   return index + 1;
 }
 
-function validateDay(day, dailyMinutes, trustedBaseline, path) {
+function validateDay(
+  day,
+  dailyMinutes,
+  trustedBaseline,
+  trustedTarget,
+  targetStatement,
+  path,
+) {
   assertString(day.title, `${path}.title`, 2, 120);
   assertGeneratedText(day.title, `${path}.title`);
   assertString(day.description, `${path}.description`, 5, 560);
@@ -629,7 +826,7 @@ function validateDay(day, dailyMinutes, trustedBaseline, path) {
   const execution = day.execution;
   assertExactObject(execution, `${path}.execution`, EXECUTION_KEYS);
   if (execution.kind !== 'in_app') {
-    fail(`${path}.execution.kind`, 'для plan-v6 ожидается только in_app');
+    fail(`${path}.execution.kind`, 'для plan-v7 ожидается только in_app');
   }
   assertString(execution.successCriterion, `${path}.execution.successCriterion`, 5, 320);
   assertGeneratedText(execution.successCriterion, `${path}.execution.successCriterion`);
@@ -637,18 +834,28 @@ function validateDay(day, dailyMinutes, trustedBaseline, path) {
     execution.successCriterion,
     `${path}.execution.successCriterion`,
   );
-  if (!Array.isArray(execution.blocks) || execution.blocks.length < 1 || execution.blocks.length > 12) {
-    fail(`${path}.execution.blocks`, 'in_app должна содержать от одного до двенадцати блоков');
+  if (!Array.isArray(execution.blocks) || execution.blocks.length < 1 || execution.blocks.length > 3) {
+    fail(`${path}.execution.blocks`, 'in_app должна содержать от одного до трёх блоков');
+  }
+  assertInteger(execution.primaryBlockIndex, `${path}.execution.primaryBlockIndex`, 0, 2);
+  const primaryBlock = execution.blocks[execution.primaryBlockIndex];
+  if (!primaryBlock) {
+    fail(`${path}.execution.primaryBlockIndex`, 'указанный главный блок отсутствует');
   }
 
   let knownDurationSeconds = 0;
-  let loadLinkedBlockCount = 0;
   execution.blocks.forEach((block, blockIndex) => {
     const blockPath = `${path}.execution.blocks.${blockIndex}`;
-    const result = validateBlock(block, trustedBaseline, blockPath);
+    const result = validateBlock(block, trustedBaseline, targetStatement, blockPath);
     knownDurationSeconds += result.durationSeconds;
-    loadLinkedBlockCount += result.loadLinked ? 1 : 0;
   });
+  validatePrimaryBlock(
+    primaryBlock,
+    trustedBaseline,
+    trustedTarget,
+    targetStatement,
+    `${path}.execution.blocks.${execution.primaryBlockIndex}`,
+  );
 
   if (knownDurationSeconds > day.estimatedMinutes * 60) {
     fail(
@@ -656,24 +863,78 @@ function validateDay(day, dailyMinutes, trustedBaseline, path) {
       'известная длительность блоков превышает заявленную длительность дня',
     );
   }
-  return loadLinkedBlockCount;
 }
 
-function validateBlock(block, trustedBaseline, path) {
+function validatePrimaryBlock(block, trustedBaseline, trustedTarget, targetStatement, path) {
+  if (block.kind !== 'timer' && block.kind !== 'counter') {
+    fail(path, 'главный блок дня должен быть измеримым timer или counter');
+  }
+  const targetUnit = trustedTarget ? canonicalUnit(trustedTarget.unit) : undefined;
+  if (trustedTarget) {
+    if (targetUnit === 'seconds' && block.kind !== 'timer') {
+      fail(path, 'для временной цели главным блоком должен быть timer');
+    }
+    if (targetUnit !== 'seconds') {
+      if (block.kind !== 'counter') {
+        fail(path, 'для счётной цели главным блоком должен быть counter');
+      }
+      const blockUnit = block.unit === 'custom' ? block.unitLabel : block.unit;
+      if (canonicalUnit(blockUnit) !== targetUnit) {
+        fail(path, `единица главного counter должна совпадать с целью ${trustedTarget.unit}`);
+      }
+    }
+  }
+
+  assertNotPassiveOnlyPrimary(block.instruction, targetStatement, path);
+
+  if (
+    BREATH_HOLD_ACTION_PATTERN.test(targetStatement) &&
+    !BREATH_HOLD_INSTRUCTION_ACTION_PATTERN.test(block.instruction)
+  ) {
+    fail(
+      path,
+      'главный блок дня должен содержать явное действие задержки дыхания непосредственно в instruction',
+    );
+  }
+  if (!trustedTarget) return;
+
+  const baselineMatchesTarget =
+    trustedBaseline && canonicalUnit(trustedBaseline.unit) === targetUnit;
+  if (baselineMatchesTarget && trustedBaseline.value > 0 && block.loadBasis === null) {
+    fail(`${path}.loadBasis`, 'главный блок должен содержать точную нагрузку от baseline');
+  }
+}
+
+function assertNotPassiveOnlyPrimary(instruction, targetStatement, path) {
+  if (!PASSIVE_ONLY_PRIMARY_PATTERN.test(instruction)) return;
+  if (PASSIVE_PRACTICE_GOAL_PATTERN.test(targetStatement)) return;
+  const affirmativeText = instruction
+    .replace(/\b(?:do\s+not|don't|never)\s+[\p{L}\p{M}-]+/giu, '')
+    .replace(/(?:^|[;,.!?]\s*|\s)не\s+[\p{L}\p{M}-]+/giu, ' ');
+  if (AFFIRMATIVE_ACTIVE_PRIMARY_PATTERN.test(affirmativeText)) return;
+  fail(path, 'пассивное ожидание, отдых или расслабление не может быть главной целевой практикой');
+}
+
+function validateBlock(block, trustedBaseline, targetStatement, path) {
   if (!block || typeof block !== 'object' || Array.isArray(block)) {
     fail(path, 'блок должен быть объектом');
   }
 
-  if (block.kind === 'timer') return validateTimerBlock(block, trustedBaseline, path);
-  if (block.kind === 'counter') return validateCounterBlock(block, trustedBaseline, path);
+  if (block.kind === 'timer') {
+    return validateTimerBlock(block, trustedBaseline, targetStatement, path);
+  }
+  if (block.kind === 'counter') {
+    return validateCounterBlock(block, trustedBaseline, targetStatement, path);
+  }
   if (block.kind === 'checklist') return validateChecklistBlock(block, path);
   if (block.kind === 'text_log') return validateTextLogBlock(block, path);
   fail(`${path}.kind`, 'неизвестный вид in_app-блока');
 }
 
-function validateTimerBlock(block, trustedBaseline, path) {
+function validateTimerBlock(block, trustedBaseline, targetStatement, path) {
   assertExactObject(block, path, TIMER_BLOCK_KEYS);
   validateCommonBlockText(block, path, true);
+  assertNotPassiveRecoveryOnlyBlock(block, targetStatement, path);
   assertInteger(block.sets, `${path}.sets`, 1, 20);
   assertInteger(block.durationSecondsPerSet, `${path}.durationSecondsPerSet`, 1, 7200);
   assertInteger(block.restSeconds, `${path}.restSeconds`, 0, 1800);
@@ -693,9 +954,10 @@ function validateTimerBlock(block, trustedBaseline, path) {
   };
 }
 
-function validateCounterBlock(block, trustedBaseline, path) {
+function validateCounterBlock(block, trustedBaseline, targetStatement, path) {
   assertExactObject(block, path, COUNTER_BLOCK_KEYS);
   validateCommonBlockText(block, path, true);
+  assertNotPassiveRecoveryOnlyBlock(block, targetStatement, path);
   assertInteger(block.sets, `${path}.sets`, 1, 20);
   assertFiniteNumber(block.targetPerSet, `${path}.targetPerSet`, 0.01, 1_000_000);
   if (!COUNTER_UNITS.has(block.unit)) fail(`${path}.unit`, 'неизвестная единица счётчика');
@@ -749,6 +1011,9 @@ function validateChecklistBlock(block, path) {
       fail(itemPath, 'пункт checklist подменён общей фразой');
     }
   });
+  if (block.items.every((item) => SAFETY_ONLY_ITEM_PATTERN.test(item))) {
+    fail(path, 'проверка безопасности или восстановления не является исполняемой практикой');
+  }
   assertInteger(block.estimatedSeconds, `${path}.estimatedSeconds`, 1, 7200);
   return { durationSeconds: block.estimatedSeconds, loadLinked: false };
 }
@@ -758,6 +1023,9 @@ function validateTextLogBlock(block, path) {
   validateCommonBlockText(block, path, false, true);
   assertString(block.prompt, `${path}.prompt`, 5, 360);
   assertGeneratedText(block.prompt, `${path}.prompt`, true);
+  if (SYMPTOM_JOURNAL_PATTERN.test(`${block.title} ${block.prompt}`)) {
+    fail(path, 'журнал симптомов или восстановления должен быть вынесен из исполняемой практики');
+  }
   assertNoEmbeddedTimeQuantity(block.prompt, `${path}.prompt`);
   assertInteger(block.minCharacters, `${path}.minCharacters`, 1, 2000);
   assertInteger(block.maxCharacters, `${path}.maxCharacters`, 1, 4000);
@@ -792,6 +1060,21 @@ function validateCommonBlockText(block, path, hasInstruction, isInAppTextLog = f
   }
 }
 
+function assertNotPassiveRecoveryOnlyBlock(block, targetStatement, path) {
+  const text = `${block.title} ${block.instruction} ${block.successCriterion}`;
+  if (EXPLICIT_NO_PRACTICE_PATTERN.test(text)) {
+    fail(path, 'пассивное восстановление не может заменять целевую практику');
+  }
+  if (!ORDINARY_BREATHING_PATTERN.test(text)) return;
+  if (BREATH_HOLD_ACTION_PATTERN.test(text)) return;
+  const breathingItselfIsGoal =
+    BREATHING_GOAL_PATTERN.test(targetStatement) &&
+    !BREATH_HOLD_ACTION_PATTERN.test(targetStatement);
+  if (!breathingItselfIsGoal) {
+    fail(path, 'обычное дыхание без целевого действия не является практикой');
+  }
+}
+
 function assertNoEmbeddedTimeQuantity(value, path) {
   if (typeof value === 'string' && EMBEDDED_TIME_QUANTITY_PATTERN.test(value)) {
     fail(
@@ -803,7 +1086,7 @@ function assertNoEmbeddedTimeQuantity(value, path) {
 
 function validateLoadBasis(basis, trustedBaseline, targetUnit, targetValue, path) {
   assertExactObject(basis, `${path}.loadBasis`, LOAD_BASIS_KEYS);
-  assertFiniteNumber(basis.percentage, `${path}.loadBasis.percentage`, 0.01, 1000);
+  assertFiniteNumber(basis.percentage, `${path}.loadBasis.percentage`, 0.01, 1_000_000);
   assertFiniteNumber(basis.baseValue, `${path}.loadBasis.baseValue`, 0, 1_000_000_000);
   assertString(basis.baseUnit, `${path}.loadBasis.baseUnit`, 1, 40);
   assertFiniteNumber(basis.result, `${path}.loadBasis.result`, 0, 1_000_000);
@@ -935,7 +1218,7 @@ function assertExactObject(value, path, expectedKeys) {
     if (!Object.hasOwn(value, key)) fail(`${path}.${key}`, 'обязательное поле отсутствует');
   }
   for (const key of Object.keys(value)) {
-    if (!expected.has(key)) fail(`${path}.${key}`, 'поле не поддерживается контрактом plan-v6');
+    if (!expected.has(key)) fail(`${path}.${key}`, 'поле не поддерживается контрактом plan-v7');
   }
 }
 

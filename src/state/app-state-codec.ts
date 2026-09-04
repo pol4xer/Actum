@@ -236,6 +236,19 @@ function isProgramCycleResult(value: unknown): boolean {
   );
 }
 
+function isProgramAchievement(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    Number.isInteger(value.cycleNumber) &&
+    typeof value.completedAt === 'string' &&
+    Number.isFinite(Date.parse(value.completedAt)) &&
+    isFiniteNumber(value.measuredValue) &&
+    value.measuredValue >= 0 &&
+    typeof value.unit === 'string' &&
+    value.unit.trim().length > 0
+  );
+}
+
 function isGoalProgram(value: unknown): value is GoalProgram {
   if (!isRecord(value) || !['month', 'half-year', 'year'].includes(String(value.duration))) {
     return false;
@@ -248,7 +261,8 @@ function isGoalProgram(value: unknown): value is GoalProgram {
     !Array.isArray(value.roadmap) ||
     !value.roadmap.every(isProgramMilestone) ||
     !Array.isArray(value.completedCycles) ||
-    !value.completedCycles.every(isProgramCycleResult)
+    !value.completedCycles.every(isProgramCycleResult) ||
+    (value.achievement !== undefined && !isProgramAchievement(value.achievement))
   ) {
     return false;
   }
@@ -256,6 +270,7 @@ function isGoalProgram(value: unknown): value is GoalProgram {
   const expected = createGoalProgram({ duration, target: value.target as GoalProgram['target'] });
   const roadmap = value.roadmap as GoalProgram['roadmap'];
   const completedCycles = value.completedCycles as GoalProgram['completedCycles'];
+  const achievement = value.achievement as GoalProgram['achievement'];
   return (
     value.totalDays === expected.totalDays &&
     value.totalCycles === expected.totalCycles &&
@@ -263,6 +278,7 @@ function isGoalProgram(value: unknown): value is GoalProgram {
     (value.activeCycle as number) <= expected.totalCycles &&
     roadmap.length === expected.totalCycles &&
     roadmap.every((milestone, index) => milestone.cycleNumber === index + 1) &&
+    (achievement === undefined || achievement.cycleNumber === value.activeCycle) &&
     completedCycles.every(
       (result, index) =>
         result.cycleNumber === index + 1 && result.cycleNumber <= (value.activeCycle as number),
@@ -282,11 +298,24 @@ function hasValidV3ProgramState(value: Record<string, unknown>): boolean {
   const hasActiveResult = program.completedCycles.some(
     (result) => result.cycleNumber === program.activeCycle,
   );
+  const achievementIsConsistent = program.achievement === undefined || (
+    value.activeGoal.status === 'completed' &&
+    Number(value.activePlan.version) >= 7 &&
+    programTargetReached(
+      program.target,
+      {
+        measuredValue: program.achievement.measuredValue,
+        unit: program.achievement.unit,
+      },
+      (value.activeGoal as unknown as Goal).baseline,
+    )
+  );
   return (
     Number.isInteger(value.activePlan.cycleNumber) &&
     value.activePlan.cycleNumber === program.activeCycle &&
     value.activePlan.totalCycles === program.totalCycles &&
     typeof value.activePlan.cycleGoal === 'string' &&
+    achievementIsConsistent &&
     planCycleComplete === hasActiveResult
   );
 }

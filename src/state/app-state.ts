@@ -17,6 +17,7 @@ import {
   inferGoalDuration,
   isGoalProgramCycleComplete,
   parseLegacyGoalTarget,
+  primaryActualFromMissionRun,
   programTargetReached,
 } from '../domain/goal-program';
 import { addCalendarDaysToKey } from '../lib/calendar-date';
@@ -78,6 +79,11 @@ export type AppStateAction =
   | { type: 'start-new-goal'; now: string }
   | { type: 'reset'; state: AppState };
 
+export function getCurrentMission(state: AppState) {
+  if (state.activeGoal?.status !== 'active') return undefined;
+  return state.activePlan?.missions.find((mission) => mission.outcome === 'pending');
+}
+
 function withTimestamp(state: AppState, now: string): AppState {
   return { ...state, lastUpdatedAt: now };
 }
@@ -105,10 +111,12 @@ function ensureGeneratedProgram(generated: GeneratedGoal): GeneratedGoal {
   const program: GoalProgram = {
     ...base,
     completedCycles: supplied?.completedCycles ?? [],
+    achievement: supplied?.achievement,
   };
   const cycleNumber = generated.plan.cycleNumber ?? program.activeCycle;
-  const targetDate = goalDurationEndDate(generated.goal.createdAt, duration)
-    ?? generated.goal.targetDate;
+  const targetDate = generated.plan.targetCycleNumber === undefined
+    ? goalDurationEndDate(generated.goal.createdAt, duration) ?? generated.goal.targetDate
+    : generated.goal.targetDate;
   const cycleGoal = generated.plan.cycleGoal?.trim()
     || generated.plan.missions[0]?.title?.trim()
     || generated.plan.chapters?.[0]?.title?.trim()
@@ -197,14 +205,21 @@ function completeActiveCycle(input: {
           unit: actual.unit,
         },
       ].sort((left, right) => left.cycleNumber - right.cycleNumber);
-  const reached =
+  const measuredTargetReached =
     !hasDevSkip && programTargetReached(program.target, actual, goal.baseline);
+  const qualitativeTargetReached =
+    plan.version >= 7 &&
+    program.target.value === null &&
+    plan.targetCycleNumber === cycleNumber &&
+    !hasDevSkip &&
+    plan.missions.every((mission) => mission.outcome === 'completed');
+  const reached = measuredTargetReached || qualitativeTargetReached;
   const isFinalCycle = cycleNumber >= program.totalCycles;
   const status = reached
     ? 'completed'
     : !isFinalCycle
       ? 'active'
-      : program.target.value === null && !hasDevSkip
+      : plan.version < 7 && program.target.value === null && !hasDevSkip
         ? 'completed'
         : 'paused';
   return {
@@ -368,6 +383,9 @@ export function appStateReducer(state: AppState, action: AppStateAction): AppSta
         ...state,
         activeGoal: {
           ...state.activeGoal,
+          targetDate: generated.plan.targetCycleNumber === undefined
+            ? state.activeGoal.targetDate
+            : generated.goal.targetDate,
           status: 'active',
           program: {
             ...currentProgram,
@@ -526,7 +544,7 @@ export function appStateReducer(state: AppState, action: AppStateAction): AppSta
     };
     const checkIns = [checkIn, ...state.checkIns];
     const activePlan = { ...state.activePlan, missions };
-    const activeGoal = state.activeGoal
+    const cycleGoal = state.activeGoal
       ? completeActiveCycle({
           goal: state.activeGoal,
           plan: activePlan,
@@ -535,6 +553,43 @@ export function appStateReducer(state: AppState, action: AppStateAction): AppSta
           hasDevSkip: checkIns.some((item) => item.provenance === 'dev-skip'),
         })
       : undefined;
+    const primaryActual = state.activeGoal && reportedRun
+      ? primaryActualFromMissionRun(
+          mission,
+          reportedRun,
+          state.activeGoal.program.target,
+          state.activeGoal.baseline ?? state.activePlan.baseline,
+        )
+      : { measuredValue: null, unit: null };
+    const reachedFromPrimary =
+      state.activeGoal?.status === 'active' &&
+      state.activePlan.version >= 7 &&
+      action.outcome === 'completed' &&
+      !checkIns.some((item) => item.provenance === 'dev-skip') &&
+      programTargetReached(
+        state.activeGoal.program.target,
+        primaryActual,
+        state.activeGoal.baseline ?? state.activePlan.baseline,
+      );
+    const activeGoal =
+      reachedFromPrimary &&
+      cycleGoal &&
+      primaryActual.measuredValue !== null &&
+      primaryActual.unit !== null
+      ? {
+          ...cycleGoal,
+          status: 'completed' as const,
+          program: {
+            ...cycleGoal.program,
+            achievement: {
+              cycleNumber: activePlan.cycleNumber ?? cycleGoal.program.activeCycle,
+              completedAt: action.now,
+              measuredValue: primaryActual.measuredValue,
+              unit: primaryActual.unit,
+            },
+          },
+        }
+      : cycleGoal;
 
     return withTimestamp(
       {
@@ -643,6 +698,7 @@ export function appStateReducer(state: AppState, action: AppStateAction): AppSta
     const program = state.activeGoal.program && activeCycle
       ? {
           ...state.activeGoal.program,
+          achievement: undefined,
           completedCycles: state.activeGoal.program.completedCycles.filter(
             (result) => result.cycleNumber !== activeCycle,
           ),

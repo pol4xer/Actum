@@ -3,13 +3,16 @@ import { router } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { CheckInModal } from '@/features/check-in';
-import { ProgramRoadmap } from '@/features/goal-planning';
+import {
+  ProgramRoadmap,
+  estimatedTargetCycleLabel,
+} from '@/features/goal-planning';
 import { MissionRunner, RunSummary } from '@/features/mission-session';
 import { ThemedText } from '@/components/themed-text';
 import { InfoPopover } from '@/components/ui/info-popover';
 import { AppButton, Card, Pill, ProgressBar, Screen, ScreenHeader } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
-import { goalMetricProgress } from '@/domain/goal-program';
+import { goalMetricProgress, latestProgramActual } from '@/domain/goal-program';
 import type { GeneratedGoal, Mission, MissionOutcome } from '@/domain/types';
 import { formatCalendarDate } from '@/lib/calendar-date';
 import {
@@ -71,13 +74,16 @@ export default function JourneyScreen() {
     plan: state.activePlan,
   };
   const program = state.activeGoal.program;
-  const latestMeasured = [...program.completedCycles]
-    .reverse()
-    .find((cycle) => cycle.measuredValue != null && cycle.unit);
-  const currentValue = latestMeasured?.measuredValue ?? state.activeGoal.baseline?.value;
-  const currentUnit = latestMeasured?.unit ?? state.activeGoal.baseline?.unit;
+  const currentActual = latestProgramActual(program, state.activeGoal.baseline);
+  const currentValue = currentActual.measuredValue;
+  const currentUnit = currentActual.unit;
   const targetValue = program.target.value;
   const targetUnit = program.target.unit;
+  const estimatedTargetCycle = estimatedTargetCycleLabel(
+    state.activePlan.targetCycleNumber,
+  );
+  const achievedCycle = program.achievement?.cycleNumber;
+  const usesCurrentPlanContract = state.activePlan.version >= 7;
   const metricProgress = goalMetricProgress(
     {
       value: state.activeGoal.baseline?.value,
@@ -98,19 +104,32 @@ export default function JourneyScreen() {
 
         <Card style={styles.summaryCard}>
           <View style={styles.row}>
-            <ThemedText type="smallBold" numberOfLines={2} style={styles.flex}>
-              {state.activePlan.cycleGoal}
-            </ThemedText>
+            <View style={styles.summaryTitle}>
+              <ThemedText type="smallBold" numberOfLines={2} style={styles.flex}>
+                {state.activePlan.cycleGoal}
+              </ThemedText>
+              {!usesCurrentPlanContract ? <Pill tone="warning">старый план</Pill> : null}
+            </View>
             <InfoPopover
               title="О плане"
               accessibilityLabel="Показать методику и источники плана"
-              sections={planInfoWithoutSafety(planPreview)}
+              sections={[
+                ...(!usesCurrentPlanContract
+                  ? [{ body: 'Этот сохранённый план создан по старым правилам. Ежедневная целевая практика и самый ранний месяц достижения применяются только к новому plan-v7.' }]
+                  : []),
+                ...planInfoWithoutSafety(planPreview),
+              ]}
             />
           </View>
           <ProgressBar value={progress} />
           <View style={styles.row}>
             <ThemedText type="small" style={styles.muted}>
-              Цикл {state.activePlan.cycleNumber} из {state.activePlan.totalCycles}
+              Цикл {state.activePlan.cycleNumber}/{state.activePlan.totalCycles}
+              {achievedCycle
+                ? ` · достигнута: месяц ${achievedCycle}`
+                : estimatedTargetCycle
+                ? ` · цель: ${estimatedTargetCycle.toLocaleLowerCase('ru-RU')}`
+                : ''}
             </ThemedText>
             <ThemedText type="small" style={styles.muted}>
               {reported}/{state.activePlan.missions.length} дней
@@ -131,7 +150,10 @@ export default function JourneyScreen() {
           ) : null}
         </Card>
 
-        <ProgramRoadmap program={program} />
+        <ProgramRoadmap
+          program={program}
+          targetCycleNumber={state.activePlan.targetCycleNumber}
+        />
 
         <View style={styles.daySections}>
           {state.activePlan.chapters.map((chapter) => {
@@ -431,6 +453,7 @@ const styles = StyleSheet.create({
   dayLabel: { color: Palette.goldBright },
   pressed: { opacity: 0.7 },
   summaryCard: { gap: Spacing.two },
+  summaryTitle: { flex: 1, alignItems: 'flex-start', gap: Spacing.one },
   metricProgress: { gap: Spacing.one },
   daySections: { gap: Spacing.three },
   chapterSection: { gap: Spacing.two },

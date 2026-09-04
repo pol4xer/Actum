@@ -6,21 +6,43 @@ process.env.TZ = 'UTC';
 
 register(new URL('./typescript-extension-loader.mjs', import.meta.url));
 
-const { createPlanResponseDtoSchema } = await import(
+const { createPlanResponseDtoSchema, savedPlanEnvelopeDtoSchema } = await import(
   '@/features/goal-planning/api-contract'
 );
-const { mapServerErrorCode } = await import('@/features/goal-planning/errors');
+const {
+  AIPlannerError,
+  GOAL_NOT_FEASIBLE_MESSAGE,
+  RETRY_CAP_TOO_SHORT_MESSAGE,
+  SAVED_RESPONSE_RETRY_LABEL,
+  SAVED_RESPONSE_REVIEW_MESSAGE,
+  mapServerErrorCode,
+  RESEARCH_CACHE_UNAVAILABLE_MESSAGE,
+  isFeasibilityPlannerError,
+  shouldOfferPlannerRetry,
+} = await import(
+  '@/features/goal-planning/errors'
+);
 const { mapPlanDtoToGeneratedGoal } = await import(
   '@/features/goal-planning/generated-goal-mapper'
 );
 const { HttpGoalPlanner } = await import(
   '@/features/goal-planning/http-goal-planner'
 );
-const { shouldReuseSavedResponseForRetry } = await import(
+const { recoveredCurrentLevel, shouldReuseSavedResponseForRetry } = await import(
   '@/features/goal-planning/use-goal-builder-controller'
 );
-const { createNextCycleInput } = await import(
+const { createNextCycleInput, reusableResearchAnchor } = await import(
   '@/features/goal-planning/next-cycle-input'
+);
+const {
+  RETRY_LIMIT_HELP,
+  RETRY_LIMIT_OPTIONS,
+  RETRY_LIMIT_QUESTION,
+  estimatedTargetCycleLabel,
+  retryLimitLabel,
+} = await import('@/features/goal-planning/program-labels');
+const { createProgramRoadmapPresentation, roadmapMilestoneMetricLabel } = await import(
+  '@/features/goal-planning/program-roadmap-model'
 );
 
 test('test loader resolves public feature barrels and TSX modules like Expo', () => {
@@ -36,8 +58,105 @@ const input = {
   dailyMinutes: 20,
   researchMode: 'web',
 };
+const RESEARCH_ANCHOR = 'a'.repeat(64);
 
-test('plan-v6 API DTO remains strict and trims contract text', () => {
+test('retry-cap copy keeps ASAP target separate from the required limit choice', () => {
+  assert.equal(RETRY_LIMIT_QUESTION, 'Если за месяц не получится?');
+  assert.deepEqual(RETRY_LIMIT_OPTIONS, [
+    { value: 'month', label: 'Остановиться после месяца' },
+    { value: 'half-year', label: 'Продолжать до 6 месяцев' },
+    { value: 'year', label: 'Продолжать до года' },
+  ]);
+  assert.match(RETRY_LIMIT_HELP, /самый ранний обоснованный месяц/u);
+  assert.match(RETRY_LIMIT_HELP, /не растягивает план/u);
+  assert.equal(retryLimitLabel('month'), '1 месяц');
+  assert.equal(retryLimitLabel('half-year'), 'до 6 месяцев');
+  assert.equal(retryLimitLabel('year'), 'до года');
+  assert.equal(estimatedTargetCycleLabel(2), 'Месяц 2');
+  assert.equal(estimatedTargetCycleLabel(undefined), undefined);
+});
+
+test('roadmap progress ends at the estimated target and keeps later retries in reserve', () => {
+  const roadmap = Array.from({ length: 12 }, (_, index) => ({
+    cycleNumber: index + 1,
+    title: `Месяц ${index + 1}`,
+    focus: `Фокус ${index + 1}`,
+    targetValue: index >= 2 ? 600 : (index + 1) * 200,
+    targetUnit: 'seconds',
+  }));
+  const program = {
+    duration: 'year',
+    totalDays: 365,
+    totalCycles: 12,
+    activeCycle: 2,
+    target: {
+      userStatement: 'Задерживать дыхание 10 минут',
+      normalizedMetric: 'Длительность задержки',
+      value: 600,
+      unit: 'seconds',
+    },
+    roadmap,
+    completedCycles: [
+      {
+        cycleNumber: 1,
+        completedAt: '2026-10-03T12:00:00.000Z',
+        measuredValue: 180,
+        unit: 'seconds',
+      },
+    ],
+  };
+
+  const direct = createProgramRoadmapPresentation(program, 3);
+  assert.equal(direct.progress, 1 / 3);
+  assert.equal(direct.plannedCycles, 3);
+  assert.deepEqual(
+    direct.primaryMilestones.map(({ milestone }) => milestone.cycleNumber),
+    [1, 2, 3],
+  );
+  assert.deepEqual(
+    direct.reserveMilestones.map(({ milestone }) => milestone.cycleNumber),
+    [4, 5, 6, 7, 8, 9, 10, 11, 12],
+  );
+  assert.equal(direct.primaryMilestones[0].result.measuredValue, 180);
+  assert.equal(
+    roadmapMilestoneMetricLabel(direct.primaryMilestones[0]),
+    'Факт 3 мин · ориентир 3:20',
+  );
+  assert.equal(
+    roadmapMilestoneMetricLabel(direct.primaryMilestones[1]),
+    'Ориентир 6:40',
+  );
+
+  const legacy = createProgramRoadmapPresentation(program, undefined);
+  assert.equal(legacy.progress, 1 / 12);
+  assert.equal(legacy.plannedCycles, 12);
+  assert.equal(legacy.primaryMilestones.length, 12);
+  assert.deepEqual(legacy.reserveMilestones, []);
+
+  const achieved = createProgramRoadmapPresentation(
+    {
+      ...program,
+      achievement: {
+        cycleNumber: 2,
+        completedAt: '2026-10-20T12:00:00.000Z',
+        measuredValue: 600,
+        unit: 'seconds',
+      },
+    },
+    3,
+  );
+  assert.equal(achieved.progress, 1);
+  assert.equal(achieved.plannedCycles, 2);
+  assert.equal(achieved.primaryMilestones.length, 2);
+  assert.equal(achieved.reserveMilestones.length, 0);
+  assert.equal(achieved.primaryMilestones[1].achievement.measuredValue, 600);
+  assert.equal(
+    roadmapMilestoneMetricLabel(achieved.primaryMilestones[1]),
+    'Факт 10 мин · ориентир 6:40',
+  );
+});
+
+test('plan-v7 API DTO remains strict and trims contract text', () => {
   const raw = createResponseFixture();
   raw.plan.title = '  Прочитать 120 страниц  ';
 
@@ -45,8 +164,15 @@ test('plan-v6 API DTO remains strict and trims contract text', () => {
   assert.equal(parsed.plan.title, 'Прочитать 120 страниц');
 
   const wrongContract = structuredClone(raw);
-  wrongContract.meta.contractVersion = 'plan-v5';
+  wrongContract.meta.contractVersion = 'plan-v6';
   assert.equal(createPlanResponseDtoSchema(input).safeParse(wrongContract).success, false);
+
+  const malformedResearchAnchor = structuredClone(raw);
+  malformedResearchAnchor.meta.researchAnchor = 'ABC123';
+  assert.equal(
+    createPlanResponseDtoSchema(input).safeParse(malformedResearchAnchor).success,
+    false,
+  );
 
   const fractionalDiscreteCounter = structuredClone(raw);
   fractionalDiscreteCounter.plan.days[1].execution.blocks[0].targetPerSet = 2.5;
@@ -57,6 +183,64 @@ test('plan-v6 API DTO remains strict and trims contract text', () => {
       (issue) => issue.path.join('.') === 'plan.days.1.execution.blocks.0.targetPerSet',
     ),
   );
+
+  const missingPrimaryIndex = structuredClone(raw);
+  delete missingPrimaryIndex.plan.days[0].execution.primaryBlockIndex;
+  assert.equal(
+    createPlanResponseDtoSchema(input).safeParse(missingPrimaryIndex).success,
+    false,
+  );
+
+  const invalidPrimaryBlock = structuredClone(raw);
+  invalidPrimaryBlock.plan.days[0].execution.blocks = [
+    invalidPrimaryBlock.plan.days[0].execution.blocks[0],
+    {
+      kind: 'checklist',
+      title: 'Проверка главы',
+      items: ['Назвать главную мысль'],
+      estimatedSeconds: 60,
+      successCriterion: 'Главная мысль названа.',
+    },
+  ];
+  invalidPrimaryBlock.plan.days[0].execution.primaryBlockIndex = 1;
+  assert.equal(
+    createPlanResponseDtoSchema(input).safeParse(invalidPrimaryBlock).success,
+    false,
+  );
+});
+
+test('saved plan recovery accepts an optional valid research anchor only', () => {
+  const response = createResponseFixture();
+  const recoveryInput = {
+    ...input,
+    cycleNumber: 2,
+    programContext: {
+      target: response.plan.target,
+      roadmap: response.plan.roadmap,
+      completedCycles: [],
+      researchAnchor: RESEARCH_ANCHOR,
+      targetCycleNumber: 3,
+    },
+  };
+  const envelope = {
+    input: recoveryInput,
+    plan: response.plan,
+    meta: response.meta,
+  };
+
+  assert.equal(savedPlanEnvelopeDtoSchema.safeParse(envelope).success, true);
+
+  const legacyWithoutAnchor = structuredClone(envelope);
+  delete legacyWithoutAnchor.input.programContext.researchAnchor;
+  assert.equal(savedPlanEnvelopeDtoSchema.safeParse(legacyWithoutAnchor).success, true);
+
+  const malformedAnchor = structuredClone(envelope);
+  malformedAnchor.input.programContext.researchAnchor = 'abc';
+  assert.equal(savedPlanEnvelopeDtoSchema.safeParse(malformedAnchor).success, false);
+
+  const malformedTargetCycle = structuredClone(envelope);
+  malformedTargetCycle.input.programContext.targetCycleNumber = 13;
+  assert.equal(savedPlanEnvelopeDtoSchema.safeParse(malformedTargetCycle).success, false);
 });
 
 test('DTO mapper is deterministic with injected clock and ID factory', () => {
@@ -87,7 +271,7 @@ test('DTO mapper is deterministic with injected clock and ID factory', () => {
   );
   assert.equal(generated.goal.rawPrompt, 'Прочитать 120 страниц');
   assert.equal(generated.goal.createdAt, '2026-01-31T12:00:00.000Z');
-  assert.equal(generated.goal.targetDate, '2026-07-29T12:00:00.000Z');
+  assert.equal(generated.goal.targetDate, '2026-04-30T12:00:00.000Z');
   assert.equal(generated.plan.missions[0].scheduledDate, '2026-01-31');
   assert.equal(generated.plan.missions[1].scheduledDate, '2026-02-01');
   assert.equal(generated.plan.missions[29].scheduledDate, '2026-03-01');
@@ -98,12 +282,35 @@ test('DTO mapper is deterministic with injected clock and ID factory', () => {
   assert.equal(generated.plan.missions[29].execution.blocks[0].unitLabel, undefined);
   assert.equal(generated.plan.research.method, 'openai-web-research-v1');
   assert.equal(generated.plan.research.request.requestId, 'request-123');
-  assert.equal(generated.plan.version, 6);
+  assert.equal(generated.plan.research.researchAnchor, RESEARCH_ANCHOR);
+  assert.equal(generated.plan.version, 7);
+  assert.equal(generated.plan.currentLevel, 'some-experience');
   assert.equal(generated.goal.program.duration, 'half-year');
   assert.equal(generated.goal.program.totalCycles, 6);
   assert.equal(generated.goal.program.target.value, 120);
   assert.equal(generated.plan.cycleNumber, 1);
+  assert.equal(generated.plan.targetCycleNumber, 3);
   assert.equal(generated.plan.assessment.dayNumber, 30);
+  assert.equal(generated.plan.missions[0].execution.primaryBlockIndex, 0);
+});
+
+test('saved plan recovery preserves the exact current-level research identity', () => {
+  const returningInput = { ...input, currentLevel: 'returning' };
+  const parsed = createPlanResponseDtoSchema(returningInput).parse(
+    createResponseFixture(),
+  );
+  const generated = mapPlanDtoToGeneratedGoal(
+    returningInput,
+    parsed.plan,
+    parsed.meta,
+  );
+
+  assert.equal(generated.plan.currentLevel, 'returning');
+  assert.equal(recoveredCurrentLevel(generated.plan), 'returning');
+
+  const legacy = structuredClone(generated.plan);
+  delete legacy.currentLevel;
+  assert.equal(recoveredCurrentLevel(legacy), 'some-experience');
 });
 
 test('server error mapping preserves free reuse-only and retry semantics', () => {
@@ -112,7 +319,31 @@ test('server error mapping preserves free reuse-only and retry semantics', () =>
     'SAVED_RESPONSE_UNAVAILABLE',
   );
   assert.equal(
+    mapServerErrorCode({ code: 'research_cache_unavailable' }, 409),
+    'RESEARCH_CACHE_UNAVAILABLE',
+  );
+  assert.equal(
+    mapServerErrorCode({ code: 'research_target_exceeds_retry_cap' }, 422),
+    'RETRY_CAP_TOO_SHORT',
+  );
+  assert.equal(
+    mapServerErrorCode({ code: 'research_target_not_feasible' }, 422),
+    'GOAL_NOT_FEASIBLE',
+  );
+  assert.equal(
+    RESEARCH_CACHE_UNAVAILABLE_MESSAGE,
+    'Сохранённый research недоступен. Новый поиск не запускался.',
+  );
+  assert.equal(
     mapServerErrorCode({ code: 'upstream_invalid_plan_contract' }, 502),
+    'INVALID_RESPONSE',
+  );
+  assert.equal(
+    mapServerErrorCode({ code: 'upstream_invalid_research_json' }, 502),
+    'INVALID_RESPONSE',
+  );
+  assert.equal(
+    mapServerErrorCode({ code: 'upstream_invalid_research_contract' }, 502),
     'INVALID_RESPONSE',
   );
   assert.equal(mapServerErrorCode({ code: 'upstream_timeout' }, 504), 'UPSTREAM_TIMEOUT');
@@ -122,6 +353,26 @@ test('server error mapping preserves free reuse-only and retry semantics', () =>
   assert.equal(shouldReuseSavedResponseForRetry('INVALID_RESPONSE'), true);
   assert.equal(shouldReuseSavedResponseForRetry('UPSTREAM_TIMEOUT'), false);
   assert.equal(shouldReuseSavedResponseForRetry('SAVED_RESPONSE_UNAVAILABLE'), false);
+  assert.equal(shouldReuseSavedResponseForRetry('RESEARCH_CACHE_UNAVAILABLE'), false);
+  assert.equal(isFeasibilityPlannerError('RETRY_CAP_TOO_SHORT'), true);
+  assert.equal(isFeasibilityPlannerError('GOAL_NOT_FEASIBLE'), true);
+  assert.equal(RETRY_CAP_TOO_SHORT_MESSAGE, 'Выбери более длинный срок.');
+  assert.equal(
+    GOAL_NOT_FEASIBLE_MESSAGE,
+    'Достижимость цели в пределах года не подтверждена.',
+  );
+  assert.equal(shouldOfferPlannerRetry('RETRY_CAP_TOO_SHORT'), false);
+  assert.equal(shouldOfferPlannerRetry('GOAL_NOT_FEASIBLE'), false);
+  assert.equal(shouldOfferPlannerRetry('RESEARCH_CACHE_UNAVAILABLE'), false);
+  assert.equal(shouldOfferPlannerRetry('UPSTREAM_TIMEOUT'), true);
+  assert.equal(
+    SAVED_RESPONSE_REVIEW_MESSAGE,
+    'Ответ сохранён и ждёт повторной проверки',
+  );
+  assert.equal(
+    SAVED_RESPONSE_RETRY_LABEL,
+    'Проверить сохранённый ответ · без GPT',
+  );
 });
 
 test('next cycle input reuses program research context but keeps the execution journal local', () => {
@@ -153,13 +404,37 @@ test('next cycle input reuses program research context but keeps the execution j
     next.programContext.completedCycles,
     generated.goal.program.completedCycles,
   );
+  assert.equal(next.programContext.researchAnchor, RESEARCH_ANCHOR);
+  assert.equal(next.programContext.targetCycleNumber, 3);
+  assert.equal(reusableResearchAnchor(generated.plan), RESEARCH_ANCHOR);
   assert.equal('missionRuns' in next, false);
 
-  generated.plan.version = 5;
+  generated.plan.version = 6;
   assert.equal(
     createNextCycleInput(generated.goal, generated.plan, '24 страницы').researchMode,
     'quick',
   );
+
+  generated.plan.version = 7;
+  generated.plan.research.researchAnchor = undefined;
+  const missingAnchor = createNextCycleInput(
+    generated.goal,
+    generated.plan,
+    '24 страницы',
+  );
+  assert.equal(missingAnchor.researchMode, 'quick');
+  assert.equal('researchAnchor' in missingAnchor.programContext, false);
+  assert.equal(reusableResearchAnchor(generated.plan), undefined);
+
+  generated.plan.research.researchAnchor = 'not-a-valid-anchor';
+  const malformedAnchor = createNextCycleInput(
+    generated.goal,
+    generated.plan,
+    '24 страницы',
+  );
+  assert.equal(malformedAnchor.researchMode, 'quick');
+  assert.equal('researchAnchor' in malformedAnchor.programContext, false);
+  assert.equal(reusableResearchAnchor(generated.plan), undefined);
 
   generated.goal.program.activeCycle = generated.goal.program.totalCycles;
   assert.throws(
@@ -205,6 +480,34 @@ test('HTTP adapter marks reuse-only validation and never rebills saved-plan reco
   assert.equal(recoveryCalls[0].url, 'https://planner.test/saved-plan/latest');
   assert.equal(recoveryCalls[0].init.method, 'GET');
   assert.equal(recoveryCalls[0].init.body, undefined);
+});
+
+test('HTTP adapter exposes a research-cache miss without a hidden retry', async () => {
+  let calls = 0;
+  const planner = new HttpGoalPlanner({
+    baseUrl: 'https://planner.test',
+    requestIdFactory: () => 'client-request-cache-miss',
+    fetch: async () => {
+      calls += 1;
+      return Response.json(
+        {
+          code: 'research_cache_unavailable',
+          error:
+            'Сохранённое исследование для следующего цикла недоступно. Actum не запустил новый web-поиск, чтобы избежать повторного списания.',
+        },
+        { status: 409 },
+      );
+    },
+  });
+
+  await assert.rejects(
+    planner.generateGoal(input),
+    (error) =>
+      error instanceof AIPlannerError &&
+      error.code === 'RESEARCH_CACHE_UNAVAILABLE' &&
+      /не запустил новый web-поиск/u.test(error.message),
+  );
+  assert.equal(calls, 1);
 });
 
 function createResponseFixture() {
@@ -258,6 +561,7 @@ function createResponseFixture() {
       duration: 'half-year',
       totalCycles: 6,
       cycleNumber: 1,
+      targetCycleNumber: 3,
       target: {
         userStatement: 'Прочитать 120 страниц',
         normalizedMetric: 'Прочитанные страницы',
@@ -281,7 +585,7 @@ function createResponseFixture() {
         cycleNumber: index + 1,
         title: `Месяц ${index + 1}`,
         focus: `Последовательный этап чтения ${index + 1}.`,
-        targetValue: index === 5 ? 120 : 24 + index * 20,
+        targetValue: index >= 2 ? 120 : 24 + index * 48,
         targetUnit: 'pages',
       })),
       assessment: {
@@ -306,12 +610,18 @@ function createResponseFixture() {
         xp: 10,
         execution: {
           kind: 'in_app',
+          primaryBlockIndex: 0,
           blocks: [
-            structuredClone(index === 29 ? {
-              ...blocks[1],
-              targetPerSet: 24,
-              successCriterion: 'Фактическое число страниц записано.',
-            } : blocks[index % blocks.length]),
+            structuredClone(
+              index === 29
+                ? {
+                    ...blocks[1],
+                    targetPerSet: 24,
+                    successCriterion: 'Фактическое число страниц записано.',
+                  }
+                : blocks[index % 2],
+            ),
+            structuredClone(blocks[2 + (index % 2)]),
           ],
           successCriterion: 'Назначенный блок выполнен полностью.',
         },
@@ -322,9 +632,10 @@ function createResponseFixture() {
       requestId: 'request-123',
       providerResponseId: 'response-123',
       researchResponseId: 'research-123',
+      researchAnchor: RESEARCH_ANCHOR,
       model: 'gpt-test',
-      promptVersion: 'prompt-v6',
-      contractVersion: 'plan-v6',
+      promptVersion: 'prompt-v7',
+      contractVersion: 'plan-v7',
       durationMs: 1234,
       webSearchCount: 2,
       inputTokens: 100,

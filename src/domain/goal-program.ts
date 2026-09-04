@@ -3,6 +3,7 @@ import type {
   GoalDuration,
   GoalProgram,
   GoalTarget,
+  Mission,
   MissionRun,
   PlanVersion,
   ProgramMilestone,
@@ -237,6 +238,29 @@ export type MetricPoint = {
   unit: string | null | undefined;
 };
 
+/** Returns the newest trustworthy program measurement without treating an early win as a cycle. */
+export function latestProgramActual(
+  program: GoalProgram,
+  baseline?: MetricPoint,
+): ProgramAssessmentActual {
+  if (program.achievement) {
+    return {
+      measuredValue: program.achievement.measuredValue,
+      unit: program.achievement.unit,
+    };
+  }
+  const latestCycle = [...program.completedCycles]
+    .reverse()
+    .find((cycle) => cycle.measuredValue !== null && cycle.unit !== null);
+  if (latestCycle?.measuredValue !== null && latestCycle?.unit) {
+    return { measuredValue: latestCycle.measuredValue, unit: latestCycle.unit };
+  }
+  return {
+    measuredValue: Number.isFinite(baseline?.value) ? (baseline?.value as number) : null,
+    unit: baseline?.unit ?? null,
+  };
+}
+
 /** Progress along the original baseline→target direction, clamped for UI presentation. */
 export function goalMetricProgress(
   baseline: MetricPoint,
@@ -274,18 +298,16 @@ function timerUnitValue(seconds: number, targetUnit: string | null): ProgramAsse
 }
 
 function assessmentValue(
-  plan: PlanVersion,
   values: number[],
-  targetUnit: string | null,
+  baseline: MetricPoint | undefined,
+  target: MetricPoint,
 ): number | undefined {
   if (values.length === 0) return undefined;
-  const baseline = plan.baseline;
-  const targetValue = plan.assessment?.targetValue;
   const decreasing =
     Number.isFinite(baseline?.value) &&
-    Number.isFinite(targetValue) &&
-    canonicalMetricUnit(baseline?.unit) === canonicalMetricUnit(targetUnit) &&
-    (baseline?.value as number) > (targetValue as number);
+    Number.isFinite(target.value) &&
+    canonicalMetricUnit(baseline?.unit) === canonicalMetricUnit(target.unit) &&
+    (baseline?.value as number) > (target.value as number);
   return decreasing ? Math.min(...values) : Math.max(...values);
 }
 
@@ -298,7 +320,7 @@ function recordedSetValue(
     : undefined;
 }
 
-/** Reads the assessment block named by plan-v6. It never infers work from a missing run. */
+/** Reads the explicit assessment block used by plan-v6+. It never infers work from a missing run. */
 export function assessmentActualFromMissionRun(
   plan: PlanVersion,
   missionRuns: Record<string, MissionRun>,
@@ -316,7 +338,10 @@ export function assessmentActualFromMissionRun(
     const values = block.sets
       .map((set) => recordedSetValue(set, set.actualDurationSeconds))
       .filter((value): value is number => value !== undefined && value >= 0);
-    const measuredValue = assessmentValue(plan, values, assessment.targetUnit);
+    const measuredValue = assessmentValue(values, plan.baseline, {
+      value: assessment.targetValue,
+      unit: assessment.targetUnit,
+    });
     return measuredValue !== undefined
       ? timerUnitValue(measuredValue, assessment.targetUnit)
       : { measuredValue: null, unit: null };
@@ -326,12 +351,58 @@ export function assessmentActualFromMissionRun(
     const values = block.sets
       .map((set) => recordedSetValue(set, set.actualQuantity))
       .filter((value): value is number => value !== undefined && value >= 0);
-    const measuredValue = assessmentValue(plan, values, assessment.targetUnit);
+    const measuredValue = assessmentValue(values, plan.baseline, {
+      value: assessment.targetValue,
+      unit: assessment.targetUnit,
+    });
     return measuredValue !== undefined
       ? {
           measuredValue,
           unit: assessment.targetUnit ?? block.unitLabel ?? block.unit,
         }
+      : { measuredValue: null, unit: null };
+  }
+
+  return { measuredValue: null, unit: null };
+}
+
+/** Reads only the goal-linked primary timer/counter recorded inside this mission run. */
+export function primaryActualFromMissionRun(
+  mission: Mission,
+  run: MissionRun | undefined,
+  target: GoalTarget,
+  baseline?: MetricPoint,
+): ProgramAssessmentActual {
+  const execution = mission.execution;
+  if (
+    execution?.kind !== 'in_app' ||
+    execution.primaryBlockIndex === undefined ||
+    run?.missionId !== mission.id
+  ) {
+    return { measuredValue: null, unit: null };
+  }
+  const block = run.blockResults[execution.primaryBlockIndex];
+  if (!block) return { measuredValue: null, unit: null };
+
+  if (block.kind === 'timer') {
+    const values = block.sets
+      .map((set) => recordedSetValue(set, set.actualDurationSeconds))
+      .filter((value): value is number => value !== undefined && value >= 0);
+    const measuredValue = assessmentValue(values, baseline, target);
+    if (measuredValue === undefined) return { measuredValue: null, unit: null };
+    const targetUnit = canonicalMetricUnit(target.unit);
+    return targetUnit === 'seconds' || targetUnit === 'minutes'
+      ? timerUnitValue(measuredValue, target.unit)
+      : { measuredValue, unit: 'seconds' };
+  }
+
+  if (block.kind === 'counter') {
+    const values = block.sets
+      .map((set) => recordedSetValue(set, set.actualQuantity))
+      .filter((value): value is number => value !== undefined && value >= 0);
+    const measuredValue = assessmentValue(values, baseline, target);
+    return measuredValue !== undefined
+      ? { measuredValue, unit: block.unitLabel ?? block.unit }
       : { measuredValue: null, unit: null };
   }
 

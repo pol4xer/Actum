@@ -32,7 +32,7 @@ const discreteCounterUnits = new Set(['reps', 'pages', 'items', 'words', 'attemp
 
 const routineLoadBasisSchema = z
   .object({
-    percentage: z.number().min(0.01).max(1000),
+    percentage: z.number().min(0.01).max(1_000_000),
     baseValue: z.number().min(0).max(1_000_000_000),
     baseUnit: contractText(1, 40),
     result: z.number().min(0).max(1_000_000),
@@ -125,10 +125,27 @@ function createExecutionSchema(maximumTimerSeconds: number) {
   return z
     .object({
       kind: z.literal('in_app'),
-      blocks: z.array(z.union([timer, counter, checklist, textLog])).min(1).max(12),
+      blocks: z.array(z.union([timer, counter, checklist, textLog])).min(1).max(3),
+      primaryBlockIndex: z.number().int().min(0).max(2),
       successCriterion: contractText(5, 320),
     })
-    .strict();
+    .strict()
+    .superRefine((execution, context) => {
+      const primaryBlock = execution.blocks[execution.primaryBlockIndex];
+      if (!primaryBlock) {
+        context.addIssue({
+          code: 'custom',
+          message: 'primaryBlockIndex must point to an existing block.',
+          path: ['primaryBlockIndex'],
+        });
+      } else if (primaryBlock.kind !== 'timer' && primaryBlock.kind !== 'counter') {
+        context.addIssue({
+          code: 'custom',
+          message: 'The primary block must be a timer or counter.',
+          path: ['primaryBlockIndex'],
+        });
+      }
+    });
 }
 
 const durationCycles = {
@@ -138,6 +155,7 @@ const durationCycles = {
 } as const;
 
 const goalDurationSchema = z.enum(['month', 'half-year', 'year']);
+const researchAnchorSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 
 const goalTargetSchema = z
   .object({
@@ -196,6 +214,7 @@ export function createPlanDtoSchema(
       duration: z.literal(duration),
       totalCycles: z.literal(totalCycles),
       cycleNumber: z.literal(cycleNumber),
+      targetCycleNumber: z.number().int().min(cycleNumber).max(totalCycles),
       target: goalTargetSchema,
       targetMetric: contractText(3, 220),
       cycleGoal: contractText(5, 300),
@@ -216,7 +235,7 @@ export function createPlanDtoSchema(
       assessment: z
         .object({
           dayNumber: z.literal(30),
-          blockIndex: z.number().int().min(0).max(11),
+          blockIndex: z.number().int().min(0).max(2),
           metric: contractText(2, 180),
           targetValue: z.number().min(0).nullable(),
           targetUnit: contractText(1, 40).nullable(),
@@ -246,9 +265,10 @@ export const planMetaDtoSchema = z
     requestId: z.string().min(4).max(120),
     providerResponseId: z.string().min(4).max(180).optional(),
     researchResponseId: z.string().min(4).max(180).optional(),
+    researchAnchor: researchAnchorSchema,
     model: z.string().min(2).max(100),
     promptVersion: z.string().min(2).max(120),
-    contractVersion: z.literal('plan-v6'),
+    contractVersion: z.literal('plan-v7'),
     durationMs: z.number().int().nonnegative(),
     webSearchCount: z.number().int().nonnegative(),
     inputTokens: z.number().int().nonnegative().optional(),
@@ -298,6 +318,8 @@ const recoveredInputDtoSchema = z
         target: goalTargetSchema,
         roadmap: z.array(programMilestoneSchema).min(1).max(12),
         completedCycles: z.array(programCycleResultSchema).max(12),
+        researchAnchor: researchAnchorSchema.optional(),
+        targetCycleNumber: z.number().int().min(1).max(12).optional(),
       })
       .strict()
       .optional(),

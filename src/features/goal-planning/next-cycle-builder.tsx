@@ -7,10 +7,15 @@ import { AppButton, Card, Pill } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import type { GeneratedGoal, Goal, PlanVersion } from '@/domain/types';
 
-import { AIPlannerError } from './errors';
+import {
+  AIPlannerError,
+  RESEARCH_CACHE_UNAVAILABLE_MESSAGE,
+  shouldOfferPlannerRetry,
+  type AIPlannerErrorCode,
+} from './errors';
 import { defaultGoalPlanner } from './http-goal-planner';
 import type { GoalPlanner } from './goal-planner';
-import { createNextCycleInput } from './next-cycle-input';
+import { createNextCycleInput, reusableResearchAnchor } from './next-cycle-input';
 
 export function NextCycleBuilder({
   goal,
@@ -38,21 +43,24 @@ export function NextCycleBuilder({
   const [baseline, setBaseline] = useState(suggestedBaseline);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const usesSavedResearch =
-    plan.version >= 6 && plan.research.method === 'openai-web-research-v1';
-  const hasLegacyResearch =
-    plan.version < 6 && plan.research.method === 'openai-web-research-v1';
+  const [errorCode, setErrorCode] = useState<AIPlannerErrorCode>();
+  const usesSavedResearch = Boolean(reusableResearchAnchor(plan));
+  const hasUnlinkableResearch =
+    plan.research.method === 'openai-web-research-v1' && !usesSavedResearch;
 
   const generate = async () => {
     if (loading || baseline.trim().length < 2) return;
     setLoading(true);
     setError('');
+    setErrorCode(undefined);
     try {
       onAccept(await planner.generateGoal(createNextCycleInput(goal, plan, baseline)));
     } catch (reason) {
+      const plannerError = reason instanceof AIPlannerError ? reason : undefined;
+      setErrorCode(plannerError?.code);
       setError(
-        reason instanceof AIPlannerError
-          ? reason.message
+        plannerError
+          ? plannerError.message
           : 'Не удалось собрать следующий цикл.',
       );
     } finally {
@@ -70,8 +78,8 @@ export function NextCycleBuilder({
             {
               body: usesSavedResearch
                 ? 'Actum использует сохранённый web-research и отправит только новый запрос на адаптацию заданий.'
-                : hasLegacyResearch
-                  ? 'Это старый план. Чтобы не запускать новый web-поиск без подтверждения, Actum отправит только запрос на адаптацию заданий.'
+                : hasUnlinkableResearch
+                  ? 'Сохранённый web-research нельзя связать с этим циклом. Чтобы не запускать новый поиск без подтверждения, Actum отправит только запрос на адаптацию заданий.'
                   : 'Для этой цели web-research ранее не выполнялся. Будет отправлен только запрос на адаптацию заданий.',
             },
           ]}
@@ -93,17 +101,29 @@ export function NextCycleBuilder({
       {error ? (
         <View style={styles.errorRow}>
           <ThemedText type="small" style={styles.error} numberOfLines={2}>
-            План пока не получен
+            {errorCode === 'RESEARCH_CACHE_UNAVAILABLE'
+              ? RESEARCH_CACHE_UNAVAILABLE_MESSAGE
+              : 'План пока не получен'}
           </ThemedText>
-          <InfoPopover title="Ошибка генерации" sections={[{ body: error, tone: 'warning' }]} />
+          <InfoPopover
+            title="Ошибка генерации"
+            sections={[
+              { body: error, tone: 'warning' },
+              ...(errorCode === 'RESEARCH_CACHE_UNAVAILABLE'
+                ? [{ body: 'Новый research запускается только явно через «Настройки» → «Новая цель».' }]
+                : []),
+            ]}
+          />
         </View>
       ) : null}
-      <AppButton
-        label={`Собрать месяц ${nextCycle}`}
-        loading={loading}
-        disabled={baseline.trim().length < 2}
-        onPress={generate}
-      />
+      {shouldOfferPlannerRetry(errorCode) ? (
+        <AppButton
+          label={`Собрать месяц ${nextCycle}`}
+          loading={loading}
+          disabled={baseline.trim().length < 2}
+          onPress={generate}
+        />
+      ) : null}
     </Card>
   );
 }

@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
 
-import { parseTrustedTarget } from '../contracts/parse-baseline.mjs';
+import {
+  parseTrustedBaseline,
+  parseTrustedTarget,
+} from '../contracts/parse-baseline.mjs';
 import { programDurationConfig } from '../contracts/program-duration.mjs';
 
 const INPUT_KEYS = new Set([
@@ -17,7 +20,7 @@ const INPUT_KEYS = new Set([
 export function validateInput(input) {
   if (!input || typeof input !== 'object') throw new Error('Некорректный запрос.');
   if (Object.hasOwn(input, 'targetTimeline') || Object.hasOwn(input, 'horizonDays')) {
-    throw new Error('Устаревший формат запроса. Выбери фиксированный срок программы.');
+    throw new Error('Устаревший формат запроса. Выбери предел продолжения программы.');
   }
   if (Object.keys(input).some((key) => !INPUT_KEYS.has(key))) {
     throw new Error('Запрос содержит неподдерживаемые поля.');
@@ -30,7 +33,7 @@ export function validateInput(input) {
     throw new Error('Некорректный лимит времени.');
   }
   const durationConfig = programDurationConfig(input.duration);
-  if (!durationConfig) throw new Error('Некорректный срок программы.');
+  if (!durationConfig) throw new Error('Некорректный предел продолжения программы.');
   const cycleNumber = input.cycleNumber ?? 1;
   if (
     !Number.isInteger(cycleNumber) ||
@@ -68,14 +71,86 @@ export function validateInput(input) {
     ) {
       throw new Error('Контекст программы неполный.');
     }
+    if (
+      input.programContext.researchAnchor != null &&
+      (typeof input.programContext.researchAnchor !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(input.programContext.researchAnchor))
+    ) {
+      throw new Error('Некорректная привязка исследования программы.');
+    }
+    if (
+      input.programContext.targetCycleNumber != null &&
+      (!Number.isInteger(input.programContext.targetCycleNumber) ||
+        input.programContext.targetCycleNumber < 1 ||
+        input.programContext.targetCycleNumber > durationConfig.totalCycles)
+    ) {
+      throw new Error('Некорректный целевой цикл контекста программы.');
+    }
+  }
+  if (
+    cycleNumber > 1 &&
+    input.researchMode !== 'quick' &&
+    !/^[a-f0-9]{64}$/.test(input.programContext?.researchAnchor ?? '')
+  ) {
+    throw new Error(
+      'Следующий цикл без привязки исходного исследования заблокирован: новый web-поиск не запущен.',
+    );
   }
   validateAssessmentCapacity(input, cycleNumber);
+  validateSupportedMetricDirection(input);
+}
+
+/**
+ * The current runner records timer/counter success as "at least the prescribed value".
+ * Reject a locally recognizable decreasing metric before any paid provider request rather
+ * than returning a plan the client cannot honestly complete.
+ */
+function validateSupportedMetricDirection(input) {
+  const baseline = parseTrustedBaseline(input.baseline);
+  const target = input.programContext?.target ?? parseTrustedTarget(input.prompt);
+  const unitsMatch =
+    typeof baseline?.unit === 'string' &&
+    typeof target?.unit === 'string' &&
+    baseline.unit.trim().toLocaleLowerCase('ru-RU') ===
+      target.unit.trim().toLocaleLowerCase('ru-RU');
+  const roadmapShowsDecrease =
+    Array.isArray(input.programContext?.roadmap) &&
+    input.programContext.roadmap.some(
+      (milestone) =>
+        Number.isFinite(target?.value) &&
+        Number.isFinite(milestone?.targetValue) &&
+        typeof milestone?.targetUnit === 'string' &&
+        typeof target?.unit === 'string' &&
+        milestone.targetUnit.trim().toLocaleLowerCase('ru-RU') ===
+          target.unit.trim().toLocaleLowerCase('ru-RU') &&
+        milestone.targetValue > target.value,
+    );
+
+  if (
+    (unitsMatch && Number.isFinite(baseline.value) && Number.isFinite(target.value) &&
+      target.value < baseline.value) ||
+    roadmapShowsDecrease
+  ) {
+    throw new Error(
+      'Цели на уменьшение числового показателя пока не поддерживаются встроенным runner. Сформулируй измеримое действие, значение которого должно расти.',
+    );
+  }
 }
 
 function validateAssessmentCapacity(input, cycleNumber) {
   const currentMilestone = input.programContext?.roadmap?.[cycleNumber - 1];
   const maximum = input.dailyMinutes * 60;
   const programTarget = input.programContext?.target ?? parseTrustedTarget(input.prompt);
+  if (
+    Number.isFinite(programTarget?.value) &&
+    programTarget.value === 0 &&
+    typeof programTarget.unit === 'string' &&
+    !isSecondsUnit(programTarget.unit)
+  ) {
+    throw new Error(
+      'Цель со счётчиком 0 не создаёт исполняемого действия. Укажи положительный целевой результат.',
+    );
+  }
   const candidates = [
     currentMilestone && isSecondsUnit(currentMilestone.targetUnit)
       ? { value: currentMilestone.targetValue, unit: 'seconds' }

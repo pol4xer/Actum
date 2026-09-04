@@ -163,8 +163,11 @@ export function completeTimerMissionRunSet(
   if (!set) return undefined;
   const startedAt = set.startedAt ? Date.parse(set.startedAt) : atMilliseconds;
   set.actualDurationSeconds = reachedZero
-    ? block.durationSecondsPerSet
-    : Math.max(0, Math.round((atMilliseconds - startedAt) / 1_000));
+    ? Math.max(set.actualDurationSeconds, block.durationSecondsPerSet)
+    : Math.max(
+        set.actualDurationSeconds,
+        Math.max(0, Math.round((atMilliseconds - startedAt) / 1_000)),
+      );
   set.targetMet = set.actualDurationSeconds >= block.durationSecondsPerSet;
   set.completedAt = atTimestamp;
   return advanceAfterSet(checkpoint, block, target, atMilliseconds);
@@ -172,6 +175,7 @@ export function completeTimerMissionRunSet(
 
 /**
  * Advances an automatic stage from its persisted deadline rather than callback time.
+ * Timer work enters open-ended overtime at its target instead of fabricating a completed set.
  * This keeps preparation, work, and rest deterministic after the app resumes.
  */
 export function advanceMissionRunTimedStage(
@@ -193,7 +197,18 @@ export function advanceMissionRunTimedStage(
     block?.kind === 'timer' &&
     result?.kind === 'timer'
   ) {
-    return completeTimerMissionRunSet(run, block, true, deadlineMilliseconds);
+    const checkpoint = cloneMissionRun(run);
+    const target = checkpoint.blockResults[run.cursor.blockIndex];
+    if (target?.kind !== 'timer') return undefined;
+    const set = target.sets[run.cursor.setIndex];
+    if (!set) return undefined;
+    set.actualDurationSeconds = Math.max(
+      set.actualDurationSeconds,
+      block.durationSecondsPerSet,
+    );
+    set.targetMet = true;
+    checkpoint.stageEndsAt = undefined;
+    return checkpoint;
   }
 
   return undefined;

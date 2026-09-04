@@ -463,28 +463,38 @@ export function extractWebSources(payload) {
   const seen = new Set();
   const sources = [];
 
+  const addSource = (candidate) => {
+    if (!candidate || typeof candidate !== 'object') return;
+    if (typeof candidate.url !== 'string') return;
+    const url = candidate.url.trim();
+    if (url.length > 2_000 || seen.has(url)) return;
+    try {
+      const parsedUrl = new URL(url);
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) return;
+    } catch {
+      return;
+    }
+    seen.add(url);
+    const rawTitle =
+      typeof candidate.title === 'string' && candidate.title.trim()
+        ? candidate.title.trim()
+        : url;
+    sources.push({
+      title: rawTitle.slice(0, 300),
+      url,
+    });
+  };
+
+  for (const item of Array.isArray(payload?.output) ? payload.output : []) {
+    if (item?.type !== 'web_search_call') continue;
+    for (const source of item?.action?.sources || []) addSource(source);
+  }
+
   for (const content of contentItems(payload)) {
     for (const annotation of content.annotations || []) {
       if (annotation.type !== 'url_citation') continue;
       const citation = annotation.url_citation || annotation;
-      if (typeof citation.url !== 'string') continue;
-      const url = citation.url.trim();
-      if (url.length > 2_000 || seen.has(url)) continue;
-      try {
-        const parsedUrl = new URL(url);
-        if (!['http:', 'https:'].includes(parsedUrl.protocol)) continue;
-      } catch {
-        continue;
-      }
-      seen.add(url);
-      const rawTitle =
-        typeof citation.title === 'string' && citation.title.trim()
-          ? citation.title.trim()
-          : url;
-      sources.push({
-        title: rawTitle.slice(0, 300),
-        url,
-      });
+      addSource(citation);
     }
   }
 

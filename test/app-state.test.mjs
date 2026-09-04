@@ -98,6 +98,7 @@ const {
   goalDurationLabel,
   goalMetricProgress,
   inferGoalDuration,
+  latestProgramActual,
   parseLegacyGoalTarget,
   programTargetReached,
 } = await import(pathToFileURL(join(compiledDirectory, 'goal-program.mjs')).href);
@@ -105,6 +106,7 @@ const {
   APP_STATE_STORAGE_KEY,
   appStateReducer,
   createInitialAppState,
+  getCurrentMission,
   restoreAppState,
 } = await import(pathToFileURL(join(compiledDirectory, 'app-state.mjs')).href);
 const { createAppStateRepository } = await import(
@@ -380,6 +382,8 @@ function generatedProgramGoal({
   targetValue = 100,
   targetUnit = 'pages',
   targetStatement = 'Read one hundred pages',
+  targetCycleNumber,
+  targetDate,
 } = {}) {
   const generated = generatedGoal();
   const target = {
@@ -395,6 +399,11 @@ function generatedProgramGoal({
   generated.plan.cycleNumber = cycleNumber;
   generated.plan.totalCycles = GOAL_DURATION_CONFIG[duration].totalCycles;
   generated.plan.cycleGoal = `Cycle ${cycleNumber} assessment`;
+  if (targetCycleNumber !== undefined) {
+    generated.plan.version = 7;
+    generated.plan.targetCycleNumber = targetCycleNumber;
+  }
+  if (targetDate !== undefined) generated.goal.targetDate = targetDate;
   generated.plan.assessment = {
     dayNumber: 1,
     blockIndex: 0,
@@ -429,6 +438,61 @@ function finishProgramMission(
     note,
     checkInId: `checkin-${outcome}-${actual}`,
     now,
+  });
+}
+
+function generatedEarlyNumericGoal({ primaryUnit = 'pages', primaryBlockIndex = 0 } = {}) {
+  const generated = generatedProgramGoal({
+    targetValue: 10,
+    targetUnit: 'pages',
+    targetCycleNumber: 1,
+  });
+  const baseline = {
+    userStatement: 'No pages read yet',
+    normalizedMetric: 'pages result',
+    value: 0,
+    unit: 'pages',
+    calculationRule: 'Count pages recorded in the primary block.',
+  };
+  generated.goal.baseline = baseline;
+  generated.plan.baseline = structuredClone(baseline);
+  const current = generated.plan.missions[0];
+  current.dayNumber = 10;
+  current.sequence = 10;
+  current.execution.primaryBlockIndex = primaryBlockIndex;
+  current.execution.blocks[0].unit = primaryUnit;
+  const next = structuredClone(current);
+  next.id = 'mission-day-11';
+  next.dayNumber = 11;
+  next.sequence = 11;
+  generated.plan.missions = [current, next];
+  generated.plan.horizonDays = 30;
+  return generated;
+}
+
+function reportFirstProgramMission(
+  state,
+  { actual, outcome = 'completed', targetMet = true } = {},
+) {
+  const mission = state.activePlan.missions[0];
+  const run = createMissionRun(mission, T0);
+  let next = appStateReducer(state, { type: 'begin-mission-run', run, now: T0 });
+  const checkpoint = completedCheckpoint(run, targetMet);
+  checkpoint.blockResults[0].sets[0].actualQuantity = actual;
+  checkpoint.blockResults[0].sets[0].targetMet = targetMet;
+  next = appStateReducer(next, {
+    type: 'finish-mission-run',
+    run: checkpoint,
+    finishReason: 'completed',
+    now: T1,
+  });
+  return appStateReducer(next, {
+    type: 'report-mission',
+    missionId: mission.id,
+    runId: run.id,
+    outcome,
+    checkInId: `early-${outcome}-${actual}`,
+    now: T2,
   });
 }
 
@@ -710,6 +774,322 @@ test('numeric assessment may finish early, while a missed final numeric target p
   assert.equal(decreasingHit.activeGoal.status, 'completed');
 });
 
+test('plan-v7 completes a numeric goal on day 10 from its successful primary block', () => {
+  let state = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: generatedEarlyNumericGoal(),
+    now: T0,
+  });
+  assert.equal(getCurrentMission(state).dayNumber, 10);
+
+  state = reportFirstProgramMission(state, { actual: 10 });
+
+  assert.equal(state.activeGoal.status, 'completed');
+  assert.equal(state.activePlan.missions[0].outcome, 'completed');
+  assert.equal(state.activePlan.missions[1].outcome, 'pending');
+  assert.deepEqual(state.activeGoal.program.completedCycles, []);
+  assert.deepEqual(state.activeGoal.program.achievement, {
+    cycleNumber: 1,
+    completedAt: T2,
+    measuredValue: 10,
+    unit: 'pages',
+  });
+  const current = latestProgramActual(state.activeGoal.program, state.activeGoal.baseline);
+  assert.deepEqual(current, { measuredValue: 10, unit: 'pages' });
+  assert.equal(goalMetricProgress(
+    state.activeGoal.baseline,
+    { value: current.measuredValue, unit: current.unit },
+    state.activeGoal.program.target,
+  ), 1);
+  assert.equal(getCurrentMission(state), undefined);
+
+  const persisted = JSON.parse(JSON.stringify(state));
+  assert.deepEqual(restoreAppState(JSON.stringify(state)), {
+    status: 'ready',
+    source: 'stored',
+    state: persisted,
+    migrated: false,
+  });
+
+  const restarted = appStateReducer(state, {
+    type: 'restart-active-plan',
+    planId: state.activePlan.id,
+    startDate: '2026-08-02',
+    now: '2026-08-02T09:00:00.000Z',
+  });
+  assert.equal(restarted.activeGoal.status, 'active');
+  assert.equal(restarted.activeGoal.program.achievement, undefined);
+  assert.deepEqual(
+    latestProgramActual(restarted.activeGoal.program, restarted.activeGoal.baseline),
+    { measuredValue: 0, unit: 'pages' },
+  );
+});
+
+test('plan-v7 completes a seconds goal from a manually finished overtime timer before day 30', () => {
+  const generated = generatedProgramGoal({
+    targetValue: 60,
+    targetUnit: 'seconds',
+    targetStatement: 'Hold for sixty seconds',
+    targetCycleNumber: 1,
+  });
+  const baseline = {
+    userStatement: 'Current hold is twenty seconds',
+    normalizedMetric: 'hold duration',
+    value: 20,
+    unit: 'seconds',
+    calculationRule: 'Use the completed primary timer duration.',
+  };
+  const timerBlock = {
+    kind: 'timer',
+    title: 'Hold',
+    instruction: 'Hold through the timer.',
+    sets: 1,
+    durationSecondsPerSet: 30,
+    restSeconds: 0,
+    successCriterion: 'The timer is recorded.',
+  };
+  generated.goal.baseline = baseline;
+  generated.plan.baseline = structuredClone(baseline);
+  generated.plan.missions[0].dayNumber = 10;
+  generated.plan.missions[0].sequence = 10;
+  generated.plan.missions[0].execution = {
+    kind: 'in_app',
+    primaryBlockIndex: 0,
+    blocks: [timerBlock],
+    successCriterion: 'The timer is recorded.',
+  };
+  const nextMission = structuredClone(generated.plan.missions[0]);
+  nextMission.id = 'timer-day-11';
+  nextMission.dayNumber = 11;
+  nextMission.sequence = 11;
+  generated.plan.missions.push(nextMission);
+
+  let state = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated,
+    now: T0,
+  });
+  const mission = state.activePlan.missions[0];
+  const initial = createMissionRun(mission, T0);
+  state = appStateReducer(state, { type: 'begin-mission-run', run: initial, now: T0 });
+  const preparing = startMissionRunWork(initial, [timerBlock], T0);
+  assert.ok(preparing);
+  const started = advanceMissionRunTimedStage(preparing, [timerBlock]);
+  assert.ok(started);
+  const overtime = advanceMissionRunTimedStage(started, [timerBlock]);
+  assert.ok(overtime);
+  assert.equal(overtime.cursor.stage, 'work');
+  assert.equal(overtime.stageEndsAt, undefined);
+  const recorded = completeTimerMissionRunSet(
+    overtime,
+    timerBlock,
+    false,
+    '2026-08-01T09:01:08.000Z',
+  );
+  assert.ok(recorded);
+  assert.equal(recorded.blockResults[0].sets[0].actualDurationSeconds, 65);
+  recorded.blockResults[0].criterionMet = true;
+  const transition = continueMissionRunAfterReview(
+    recorded,
+    [timerBlock],
+    '2026-08-01T09:01:09.000Z',
+  );
+  assert.equal(transition.kind, 'finish');
+  state = appStateReducer(state, {
+    type: 'finish-mission-run',
+    run: transition.run,
+    finishReason: transition.reason,
+    now: '2026-08-01T09:01:09.000Z',
+  });
+  state = appStateReducer(state, {
+    type: 'report-mission',
+    missionId: mission.id,
+    runId: initial.id,
+    outcome: 'completed',
+    checkInId: 'timer-overtime-goal',
+    now: '2026-08-01T09:01:10.000Z',
+  });
+
+  assert.equal(state.activeGoal.status, 'completed');
+  assert.deepEqual(state.activeGoal.program.completedCycles, []);
+  assert.deepEqual(state.activeGoal.program.achievement, {
+    cycleNumber: 1,
+    completedAt: '2026-08-01T09:01:10.000Z',
+    measuredValue: 65,
+    unit: 'seconds',
+  });
+  assert.equal(state.activePlan.missions[1].outcome, 'pending');
+});
+
+test('a successful primary block below the numeric goal keeps plan-v7 active', () => {
+  const generated = generatedEarlyNumericGoal();
+  generated.plan.missions[0].execution.blocks[0].targetPerSet = 8;
+  let state = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated,
+    now: T0,
+  });
+
+  state = reportFirstProgramMission(state, { actual: 8 });
+
+  assert.equal(state.activeGoal.status, 'active');
+  assert.equal(getCurrentMission(state).dayNumber, 11);
+});
+
+test('an incompatible primary-block unit cannot complete a numeric goal', () => {
+  let state = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: generatedEarlyNumericGoal({ primaryUnit: 'items' }),
+    now: T0,
+  });
+
+  state = reportFirstProgramMission(state, { actual: 10 });
+
+  assert.equal(state.activeGoal.status, 'active');
+  assert.equal(getCurrentMission(state).dayNumber, 11);
+});
+
+test('DEV skip cannot trigger plan-v7 numeric early completion', () => {
+  let state = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: generatedEarlyNumericGoal(),
+    now: T0,
+  });
+
+  state = appStateReducer(state, {
+    type: 'skip-mission-for-testing',
+    missionId: state.activePlan.missions[0].id,
+    checkInId: 'dev-skip-day-10',
+    now: T2,
+  });
+
+  assert.equal(state.activeGoal.status, 'active');
+  assert.equal(state.checkIns[0].provenance, 'dev-skip');
+  assert.equal(getCurrentMission(state).dayNumber, 11);
+});
+
+test('non-completed outcomes and legacy missions cannot trigger numeric early completion', () => {
+  for (const outcome of ['partial', 'skipped']) {
+    let state = appStateReducer(createInitialAppState(T0), {
+      type: 'create-goal',
+      generated: generatedEarlyNumericGoal(),
+      now: T0,
+    });
+    state = reportFirstProgramMission(state, { actual: 10, outcome });
+    assert.equal(state.activeGoal.status, 'active');
+  }
+
+  const legacy = generatedEarlyNumericGoal();
+  legacy.plan.version = 6;
+  delete legacy.plan.targetCycleNumber;
+  delete legacy.plan.missions[0].execution.primaryBlockIndex;
+  let legacyState = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: legacy,
+    now: T0,
+  });
+  legacyState = reportFirstProgramMission(legacyState, { actual: 10 });
+  assert.equal(legacyState.activeGoal.status, 'active');
+});
+
+test('plan-v7 qualitative goal completes when every mission succeeds in its target cycle', () => {
+  let state = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: generatedProgramGoal({
+      targetValue: null,
+      targetUnit: null,
+      targetStatement: 'Build a stable reading habit',
+      targetCycleNumber: 1,
+    }),
+    now: T0,
+  });
+
+  state = finishProgramMission(state, { actual: 10, outcome: 'completed' });
+
+  assert.equal(state.activeGoal.status, 'completed');
+  assert.equal(state.activeGoal.program.activeCycle, 1);
+  assert.equal(state.activeGoal.program.totalCycles, 6);
+});
+
+test('plan-v7 qualitative goal stays active before its target cycle', () => {
+  let state = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: generatedProgramGoal({
+      targetValue: null,
+      targetUnit: null,
+      targetStatement: 'Build a stable reading habit',
+      targetCycleNumber: 2,
+    }),
+    now: T0,
+  });
+
+  state = finishProgramMission(state, { actual: 10, outcome: 'completed' });
+
+  assert.equal(state.activeGoal.status, 'active');
+  assert.equal(state.activeGoal.program.completedCycles.length, 1);
+});
+
+test('a DEV skip cannot complete a plan-v7 qualitative goal in its target cycle', () => {
+  let state = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: generatedProgramGoal({
+      targetValue: null,
+      targetUnit: null,
+      targetStatement: 'Build a stable reading habit',
+      targetCycleNumber: 1,
+    }),
+    now: T0,
+  });
+
+  state = appStateReducer(state, {
+    type: 'skip-mission-for-testing',
+    missionId: state.activePlan.missions[0].id,
+    checkInId: 'dev-skip-qualitative-target',
+    now: T2,
+  });
+
+  assert.equal(state.activeGoal.status, 'active');
+  assert.equal(state.checkIns[0].provenance, 'dev-skip');
+});
+
+test('a user partial pauses plan-v7 qualitative goal at its final target cycle', () => {
+  let state = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: generatedProgramGoal({
+      duration: 'month',
+      targetValue: null,
+      targetUnit: null,
+      targetStatement: 'Build a stable reading habit',
+      targetCycleNumber: 1,
+    }),
+    now: T0,
+  });
+
+  state = finishProgramMission(state, { actual: 10, outcome: 'partial' });
+
+  assert.equal(state.activeGoal.status, 'paused');
+  assert.equal(state.checkIns[0].provenance, 'user');
+});
+
+test('a user skip pauses plan-v7 qualitative goal at its final target cycle', () => {
+  let state = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: generatedProgramGoal({
+      duration: 'month',
+      targetValue: null,
+      targetUnit: null,
+      targetStatement: 'Build a stable reading habit',
+      targetCycleNumber: 1,
+    }),
+    now: T0,
+  });
+
+  state = finishProgramMission(state, { actual: 10, outcome: 'skipped' });
+
+  assert.equal(state.activeGoal.status, 'paused');
+  assert.equal(state.checkIns[0].provenance, 'user');
+});
+
 test('a user comment cannot impersonate immutable DEV-skip provenance', () => {
   let state = appStateReducer(createInitialAppState(T0), {
     type: 'create-goal',
@@ -792,6 +1172,81 @@ test('advanceGoalCycle accepts only the exact next compatible cycle and preserve
   assert.deepEqual(state.character, character);
   assert.deepEqual(state.checkIns, []);
   assert.deepEqual(state.missionRuns, {});
+});
+
+test('plan-v7 keeps and re-estimates a target-cycle deadline without replacing goal identity', () => {
+  const firstTargetDate = '2026-09-29T09:00:00.000Z';
+  const firstGenerated = generatedProgramGoal({
+    duration: 'year',
+    targetCycleNumber: 2,
+    targetDate: firstTargetDate,
+  });
+  let state = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: firstGenerated,
+    now: T0,
+  });
+
+  assert.equal(state.activeGoal.targetDate, firstTargetDate);
+  assert.notEqual(state.activeGoal.targetDate, goalDurationEndDate(T0, 'year'));
+
+  state = finishProgramMission(state, { actual: 10, outcome: 'partial' });
+  const firstCycleResult = structuredClone(state.activeGoal.program.completedCycles);
+  const originalIdentity = {
+    id: state.activeGoal.id,
+    createdAt: state.activeGoal.createdAt,
+    target: structuredClone(state.activeGoal.program.target),
+  };
+  const reestimatedTargetDate = '2026-10-29T09:00:00.000Z';
+  const secondGenerated = generatedProgramGoal({
+    duration: 'year',
+    cycleNumber: 2,
+    targetCycleNumber: 3,
+    targetDate: reestimatedTargetDate,
+  });
+  secondGenerated.goal.id = 'replacement-goal-id';
+  secondGenerated.goal.createdAt = '2026-08-31T09:00:00.000Z';
+
+  state = appStateReducer(state, {
+    type: 'advance-goal-cycle',
+    generated: secondGenerated,
+    now: T2,
+  });
+
+  assert.equal(state.activePlan.cycleNumber, 2);
+  assert.equal(state.activePlan.targetCycleNumber, 3);
+  assert.equal(state.activeGoal.targetDate, reestimatedTargetDate);
+  assert.deepEqual({
+    id: state.activeGoal.id,
+    createdAt: state.activeGoal.createdAt,
+    target: state.activeGoal.program.target,
+  }, originalIdentity);
+  assert.deepEqual(state.activeGoal.program.completedCycles, firstCycleResult);
+
+  const restarted = appStateReducer(state, {
+    type: 'restart-active-plan',
+    planId: state.activePlan.id,
+    startDate: '2026-09-01',
+    now: '2026-09-01T09:00:00.000Z',
+  });
+  assert.equal(restarted.activeGoal.targetDate, reestimatedTargetDate);
+  assert.equal(restarted.activeGoal.id, originalIdentity.id);
+  assert.equal(restarted.activeGoal.createdAt, originalIdentity.createdAt);
+  assert.deepEqual(restarted.activeGoal.program.completedCycles, firstCycleResult);
+});
+
+test('legacy generated plans still derive their deadline from the retry-cap duration', () => {
+  const legacy = generatedProgramGoal({
+    duration: 'year',
+    targetDate: '2026-09-29T09:00:00.000Z',
+  });
+  const state = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: legacy,
+    now: T0,
+  });
+
+  assert.equal(state.activeGoal.targetDate, goalDurationEndDate(T0, 'year'));
 });
 
 test('next-cycle explicit baseline fills a missing cycle result without replacing the program baseline', () => {
@@ -1091,23 +1546,39 @@ test('mission-run machine advances timer sets through work, rest, review, and fi
   assert.equal(started.stageEndsAt, '2026-08-01T09:00:33.000Z');
   assert.equal(started.blockResults[0].sets[0].startedAt, '2026-08-01T09:00:03.000Z');
 
-  const afterFirst = advanceMissionRunTimedStage(started, [timerBlock]);
+  const overtime = advanceMissionRunTimedStage(started, [timerBlock]);
+  assert.ok(overtime);
+  assert.deepEqual(overtime.cursor, { blockIndex: 0, setIndex: 0, stage: 'work' });
+  assert.equal(overtime.stageStartedAt, '2026-08-01T09:00:03.000Z');
+  assert.equal(overtime.stageEndsAt, undefined);
+  assert.equal(overtime.blockResults[0].sets[0].actualDurationSeconds, 30);
+  assert.equal(overtime.blockResults[0].sets[0].targetMet, true);
+  assert.equal(overtime.blockResults[0].sets[0].completedAt, undefined);
+  assert.equal(isMissionRun(overtime), true);
+
+  const afterFirst = completeTimerMissionRunSet(
+    overtime,
+    timerBlock,
+    false,
+    '2026-08-01T09:00:38.000Z',
+  );
   assert.ok(afterFirst);
   assert.deepEqual(afterFirst.cursor, { blockIndex: 0, setIndex: 1, stage: 'rest' });
-  assert.equal(afterFirst.stageEndsAt, '2026-08-01T09:00:43.000Z');
+  assert.equal(afterFirst.stageEndsAt, '2026-08-01T09:00:48.000Z');
+  assert.equal(afterFirst.blockResults[0].sets[0].actualDurationSeconds, 35);
   assert.equal(afterFirst.blockResults[0].sets[0].targetMet, true);
 
   const secondPreparing = advanceMissionRunTimedStage(afterFirst, [timerBlock]);
   assert.ok(secondPreparing);
   assert.equal(secondPreparing.cursor.stage, 'preparing');
-  assert.equal(secondPreparing.stageEndsAt, '2026-08-01T09:00:46.000Z');
+  assert.equal(secondPreparing.stageEndsAt, '2026-08-01T09:00:51.000Z');
   const secondStarted = advanceMissionRunTimedStage(secondPreparing, [timerBlock]);
   assert.ok(secondStarted);
   const afterSecond = completeTimerMissionRunSet(
     secondStarted,
     timerBlock,
     false,
-    '2026-08-01T09:00:56.000Z',
+    '2026-08-01T09:01:01.000Z',
   );
   assert.ok(afterSecond);
   assert.equal(afterSecond.cursor.stage, 'review');
@@ -1118,7 +1589,7 @@ test('mission-run machine advances timer sets through work, rest, review, and fi
   const transition = continueMissionRunAfterReview(
     afterSecond,
     [timerBlock],
-    '2026-08-01T09:00:51.000Z',
+    '2026-08-01T09:01:02.000Z',
   );
   assert.equal(transition.kind, 'finish');
   assert.equal(transition.reason, 'completed');

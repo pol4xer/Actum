@@ -1,6 +1,6 @@
 import { CYCLE_DAYS, programDurationConfig } from './program-duration.mjs';
 
-export const PLAN_CONTRACT_VERSION = 'plan-v6';
+export const PLAN_CONTRACT_VERSION = 'plan-v7';
 
 const LOAD_BASIS_SCHEMA = {
   anyOf: [
@@ -9,7 +9,7 @@ const LOAD_BASIS_SCHEMA = {
       additionalProperties: false,
       required: ['percentage', 'baseValue', 'baseUnit', 'result'],
       properties: {
-        percentage: { type: 'number', minimum: 0.01, maximum: 1000 },
+        percentage: { type: 'number', minimum: 0.01, maximum: 1_000_000 },
         baseValue: { type: 'number', minimum: 0, maximum: 1_000_000_000 },
         baseUnit: { type: 'string', minLength: 1, maxLength: 40 },
         result: { type: 'number', minimum: 0, maximum: 1_000_000 },
@@ -134,13 +134,13 @@ const TEXT_LOG_BLOCK_SCHEMA = {
 const EXECUTION_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['kind', 'blocks', 'successCriterion'],
+  required: ['kind', 'blocks', 'primaryBlockIndex', 'successCriterion'],
   properties: {
     kind: { type: 'string', enum: ['in_app'] },
     blocks: {
       type: 'array',
       minItems: 1,
-      maxItems: 12,
+      maxItems: 3,
       items: {
         anyOf: [
           TIMER_BLOCK_SCHEMA,
@@ -150,6 +150,7 @@ const EXECUTION_SCHEMA = {
         ],
       },
     },
+    primaryBlockIndex: { type: 'integer', minimum: 0, maximum: 2 },
     successCriterion: { type: 'string', minLength: 5, maxLength: 320 },
   },
 };
@@ -251,7 +252,7 @@ const ASSESSMENT_SCHEMA = {
   required: ['dayNumber', 'blockIndex', 'metric', 'targetValue', 'targetUnit'],
   properties: {
     dayNumber: { type: 'number', enum: [CYCLE_DAYS] },
-    blockIndex: { type: 'integer', minimum: 0, maximum: 11 },
+    blockIndex: { type: 'integer', minimum: 0, maximum: 2 },
     metric: { type: 'string', minLength: 2, maxLength: 180 },
     targetValue: {
       anyOf: [
@@ -278,6 +279,7 @@ export const PLAN_SCHEMA = {
     'duration',
     'totalCycles',
     'cycleNumber',
+    'targetCycleNumber',
     'target',
     'cycleGoal',
     'roadmap',
@@ -300,6 +302,7 @@ export const PLAN_SCHEMA = {
     duration: { type: 'string', enum: ['month', 'half-year', 'year'] },
     totalCycles: { type: 'number', enum: [1, 6, 12] },
     cycleNumber: { type: 'integer', minimum: 1, maximum: 12 },
+    targetCycleNumber: { type: 'integer', minimum: 1, maximum: 12 },
     target: TARGET_SCHEMA,
     cycleGoal: { type: 'string', minLength: 5, maxLength: 300 },
     roadmap: {
@@ -393,6 +396,8 @@ export function createPlanSchema(dailyMinutes, duration, cycleNumber = 1) {
   schema.properties.duration.enum = [duration];
   schema.properties.totalCycles.enum = [durationConfig.totalCycles];
   schema.properties.cycleNumber = { type: 'number', enum: [cycleNumber] };
+  schema.properties.targetCycleNumber.minimum = cycleNumber;
+  schema.properties.targetCycleNumber.maximum = durationConfig.totalCycles;
   schema.properties.roadmap.minItems = durationConfig.totalCycles;
   schema.properties.roadmap.maxItems = durationConfig.totalCycles;
   dayProperties.dayNumber.maximum = calendarDays;

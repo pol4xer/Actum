@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 
 import {
   createPlanCacheKey as createPlanCacheKeyForIdentity,
+  createResearchAnchor,
   createResearchCacheKey as createResearchCacheKeyForIdentity,
   providerStageKey,
 } from './ai/cache/keys.mjs';
@@ -19,6 +20,11 @@ import {
   parseTrustedTarget,
 } from './ai/contracts/parse-baseline.mjs';
 import { programDurationConfig } from './ai/contracts/program-duration.mjs';
+import {
+  MAX_RESEARCH_CYCLES,
+  parseResearchConclusion,
+  RESEARCH_SCHEMA,
+} from './ai/contracts/research-v1.mjs';
 import {
   PLAN_VALIDATOR_VERSION,
   validatePlanActionability,
@@ -112,7 +118,7 @@ export async function handleRequest(request, response) {
     try {
       const saved = readLatestSavedPlan();
       if (!saved) {
-        sendJson(response, 404, { error: 'Сохранённый plan-v6 не найден.' });
+        sendJson(response, 404, { error: 'Сохранённый plan-v7 не найден.' });
         return;
       }
       sendJson(response, 200, saved);
@@ -277,6 +283,8 @@ async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKe
   const trustedTarget = parseTrustedTarget(normalizedGoal);
   let research = {
     brief: '',
+    earliestTargetCycleNumber: null,
+    feasibilityReason: '',
     sources: [],
     meta: { webSearchCount: 0 },
   };
@@ -289,6 +297,18 @@ async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKe
         `[actum-ai] ${requestId} research_cache_hit response=${research.meta.providerResponseId || 'unknown'} searches=${research.meta.webSearchCount} sources=${research.sources.length}`,
       );
     } else {
+      if ((input.cycleNumber ?? 1) > 1) {
+        throw new OpenAIRequestError(
+          'Сохранённое исследование для следующего цикла недоступно. Actum не запустил новый web-поиск, чтобы избежать повторного списания.',
+          {
+            status: 409,
+            code: 'research_cache_unavailable',
+            stage: 'research',
+            operation: 'guard',
+            durationMs: 0,
+          },
+        );
+      }
       console.log(`[actum-ai] ${requestId} researching model=${RESEARCH_MODEL}`);
       research = await requestResearch(
         input,
@@ -302,6 +322,10 @@ async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKe
         `[actum-ai] ${requestId} researched response=${research.meta.providerResponseId || 'unknown'} searches=${research.meta.webSearchCount} sources=${research.sources.length} preserved=true`,
       );
     }
+    assertResearchFitsRetryCap(
+      research,
+      programDurationConfig(input.duration).totalCycles,
+    );
   }
 
   console.log(`[actum-ai] ${requestId} planning model=${MODEL}`);
@@ -347,6 +371,7 @@ async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKe
       trustedBaseline,
       trustedTarget,
       programContext: input.programContext,
+      researchTargetCycleNumber: research.earliestTargetCycleNumber,
     });
   } catch (cause) {
     throw invalidProviderOutput(
@@ -377,6 +402,7 @@ async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKe
       model: MODEL,
       promptVersion: PROMPT_VERSION,
       contractVersion: PLAN_CONTRACT_VERSION,
+      researchAnchor: createResearchAnchor(input),
       durationMs,
       webSearchCount,
       inputTokens,
@@ -387,7 +413,6 @@ async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKe
 }
 
 async function requestResearch(input, trustedBaseline, requestId, stageKey, reuseOnly) {
-  const durationConfig = programDurationConfig(input.duration);
   const trustedTarget = parseTrustedTarget(input.prompt.trim());
   const payload = await executeProviderStage({
     stageKey,
@@ -401,30 +426,52 @@ async function requestResearch(input, trustedBaseline, requestId, stageKey, reus
       store: false,
       safety_identifier: 'actum-local-mvp',
       instructions: RESEARCH_INSTRUCTIONS,
+      include: ['web_search_call.action.sources'],
       input: JSON.stringify({
         goal: input.prompt.trim(),
         startingPoint: input.currentLevel,
         userBaseline: input.baseline.trim(),
         trustedBaseline,
         trustedTarget,
-        duration: input.duration,
-        totalCycles: durationConfig.totalCycles,
-        totalDays: durationConfig.totalDays,
+        minutesPerMission: input.dailyMinutes,
+        maximumCycles: MAX_RESEARCH_CYCLES,
+        cycleDays: 30,
       }),
       tools: [{ type: 'web_search', search_context_size: 'high' }],
       tool_choice: 'required',
       max_tool_calls: 6,
-      text: { verbosity: 'high' },
+      text: {
+        verbosity: 'high',
+        format: {
+          type: 'json_schema',
+          name: 'actum_goal_research',
+          strict: true,
+          schema: RESEARCH_SCHEMA,
+        },
+      },
     },
   });
 
-  const brief = extractOutputText(payload);
-  if (!brief) {
+  const outputText = extractOutputText(payload);
+  if (!outputText) {
     throw invalidProviderOutput(
       'Web-research завершился без итогового брифа.',
       'upstream_missing_research_brief',
       'research',
       payload,
+    );
+  }
+
+  let conclusion;
+  try {
+    conclusion = parseResearchConclusion(outputText);
+  } catch (cause) {
+    throw invalidProviderOutput(
+      cause instanceof Error ? cause.message : 'Web-research не прошёл локальную проверку.',
+      cause?.code || 'upstream_invalid_research_contract',
+      'research',
+      payload,
+      cause,
     );
   }
 
@@ -448,7 +495,7 @@ async function requestResearch(input, trustedBaseline, requestId, stageKey, reus
   }
 
   return {
-    brief,
+    ...conclusion,
     sources,
     meta,
   };
@@ -475,7 +522,9 @@ async function requestStructuredPlan(
       reasoning: { effort: research.brief ? 'medium' : 'low' },
       store: false,
       safety_identifier: 'actum-local-mvp',
-      instructions: buildPlanInstructions({ hasResearch: Boolean(research.brief) }),
+      instructions: buildPlanInstructions({
+        researchTargetCycleNumber: research.earliestTargetCycleNumber,
+      }),
       input: JSON.stringify({
         goal: input.prompt.trim(),
         startingPoint: input.currentLevel,
@@ -489,8 +538,15 @@ async function requestStructuredPlan(
         cycleDays: 30,
         programContext: input.programContext ?? null,
         researchCacheKey,
-        researchBrief: research.brief || null,
+        researchConclusion: research.brief
+          ? {
+              brief: research.brief,
+              earliestTargetCycleNumber: research.earliestTargetCycleNumber,
+              feasibilityReason: research.feasibilityReason,
+            }
+          : null,
         verifiedSources: research.sources,
+        pipelineIdentity: effectivePlanningIdentity(input),
       }),
       max_output_tokens: 30_000,
       text: {
@@ -601,14 +657,16 @@ function sumNumbers(...values) {
 function readLatestSavedPlan() {
   const planning = durableState.latestCompletedStage('planning');
   if (!planning) return undefined;
+  if (!matchesCurrentPlanningIdentity(planning.inputSnapshot)) return undefined;
   const outputText = extractOutputText(planning.payload);
   if (!outputText) return undefined;
   const plan = JSON.parse(outputText);
   // `/saved-plan/latest` is a recovery path, not a legacy migration layer.
-  // A completed plan-v5 response stays on disk but must never masquerade as v6.
+  // Older completed responses stay on disk but must never masquerade as plan-v7.
   if (
     !plan ||
     !programDurationConfig(plan.duration) ||
+    !Object.hasOwn(plan, 'targetCycleNumber') ||
     !Object.hasOwn(plan, 'target') ||
     !Object.hasOwn(plan, 'roadmap') ||
     !Object.hasOwn(plan, 'assessment')
@@ -622,6 +680,12 @@ function readLatestSavedPlan() {
     input.researchMode === 'web'
       ? durableState.readResearch(linkedResearchKey)
       : undefined;
+  if (
+    input.researchMode === 'web' &&
+    (!research || !Number.isInteger(research.earliestTargetCycleNumber))
+  ) {
+    return undefined;
+  }
   const trustedBaseline = parseTrustedBaseline(input.baseline);
   const trustedTarget = parseTrustedTarget(input.prompt);
   validatePlanActionability(plan, {
@@ -633,6 +697,8 @@ function readLatestSavedPlan() {
     trustedBaseline,
     trustedTarget,
     programContext: input.programContext,
+    researchTargetCycleNumber:
+      input.researchMode === 'quick' ? null : research?.earliestTargetCycleNumber,
   });
 
   const planMeta = responseMeta(planning.payload);
@@ -646,6 +712,7 @@ function readLatestSavedPlan() {
       model: MODEL,
       promptVersion: PROMPT_VERSION,
       contractVersion: PLAN_CONTRACT_VERSION,
+      researchAnchor: createResearchAnchor(input),
       durationMs: 0,
       webSearchCount: research?.meta?.webSearchCount || 0,
       inputTokens: sumNumbers(research?.meta?.inputTokens, planMeta.inputTokens),
@@ -711,12 +778,79 @@ function createStageInputSnapshot(serializedInput) {
       duration: input.duration,
       cycleNumber: input.cycleNumber,
       dailyMinutes: input.minutesPerMission,
-      researchMode: input.researchBrief ? 'web' : 'quick',
+      researchMode: input.researchConclusion ? 'web' : 'quick',
       programContext: input.programContext ?? undefined,
       researchCacheKey: input.researchCacheKey,
+      pipelineIdentity: input.pipelineIdentity,
     };
   } catch {
     return undefined;
+  }
+}
+
+function effectivePlanningIdentity(input) {
+  const usesWebResearch = input.researchMode !== 'quick';
+  return {
+    promptVersion: AI_PIPELINE_CACHE_IDENTITY.promptVersion,
+    contractVersion: AI_PIPELINE_CACHE_IDENTITY.contractVersion,
+    validatorVersion: AI_PIPELINE_CACHE_IDENTITY.validatorVersion,
+    baselineParserVersion: AI_PIPELINE_CACHE_IDENTITY.baselineParserVersion,
+    model: AI_PIPELINE_CACHE_IDENTITY.model,
+    researchPromptVersion: usesWebResearch
+      ? AI_PIPELINE_CACHE_IDENTITY.researchPromptVersion
+      : 'not-used',
+    researchModel: usesWebResearch
+      ? AI_PIPELINE_CACHE_IDENTITY.researchModel
+      : 'not-used',
+  };
+}
+
+function matchesCurrentPlanningIdentity(inputSnapshot) {
+  const actual = inputSnapshot?.pipelineIdentity;
+  if (!actual || typeof actual !== 'object' || Array.isArray(actual)) return false;
+  const expected = effectivePlanningIdentity(inputSnapshot);
+  const expectedKeys = Object.keys(expected);
+  const actualKeys = Object.keys(actual);
+  return (
+    actualKeys.length === expectedKeys.length &&
+    expectedKeys.every((key) => Object.hasOwn(actual, key) && actual[key] === expected[key])
+  );
+}
+
+function assertResearchFitsRetryCap(research, totalCycles) {
+  const earliest = research?.earliestTargetCycleNumber;
+  if (earliest === null) {
+    throw new OpenAIRequestError(
+      'Исследование не подтвердило достижимость цели в пределах 12 месячных циклов. План не создан.',
+      {
+        status: 422,
+        code: 'research_target_not_feasible',
+        stage: 'planning',
+        operation: 'guard',
+        durationMs: 0,
+      },
+    );
+  }
+  if (!Number.isInteger(earliest) || earliest < 1 || earliest > MAX_RESEARCH_CYCLES) {
+    throw new OpenAIRequestError('Сохранённый web-research имеет несовместимый формат.', {
+      status: 502,
+      code: 'upstream_invalid_research_contract',
+      stage: 'research',
+      operation: 'validate',
+      durationMs: 0,
+    });
+  }
+  if (earliest > totalCycles) {
+    throw new OpenAIRequestError(
+      `Исследование оценивает достижение цели не раньше цикла ${earliest}, а выбранный предел — ${totalCycles}. Выбери более длинный срок.`,
+      {
+        status: 422,
+        code: 'research_target_exceeds_retry_cap',
+        stage: 'planning',
+        operation: 'guard',
+        durationMs: 0,
+      },
+    );
   }
 }
 
@@ -781,10 +915,18 @@ function createProgressLogger(requestId) {
 
 function providerHttpStatus(error) {
   if (!(error instanceof OpenAIRequestError)) return 400;
-  if (error.code === 'ambiguous_create' || error.code === 'saved_response_unavailable') {
+  if (
+    error.code === 'ambiguous_create' ||
+    error.code === 'saved_response_unavailable' ||
+    error.code === 'research_cache_unavailable'
+  ) {
     return 409;
   }
-  if (error.code === 'refusal') return 422;
+  if (
+    error.code === 'refusal' ||
+    error.code === 'research_target_not_feasible' ||
+    error.code === 'research_target_exceeds_retry_cap'
+  ) return 422;
   if (error.code === 'upstream_timeout') return 504;
   return 502;
 }

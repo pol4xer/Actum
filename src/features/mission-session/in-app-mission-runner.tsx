@@ -425,10 +425,14 @@ function ActiveBlock({
   onMutate(runId: string, mutation: MissionRunMutation): void;
 }) {
   if (block.kind === 'timer' && result.kind === 'timer') {
+    const targetReached =
+      !run.stageEndsAt && elapsedSeconds >= block.durationSecondsPerSet;
     return (
       <View style={styles.activeCard}>
-        <ThemedText type="eyebrow" style={styles.gold}>
-          подход {run.cursor.setIndex + 1} из {block.sets}
+        <ThemedText type="eyebrow" style={targetReached ? styles.cyan : styles.gold}>
+          {targetReached
+            ? `цель выполнена · подход ${run.cursor.setIndex + 1} из ${block.sets}`
+            : `подход ${run.cursor.setIndex + 1} из ${block.sets}`}
         </ThemedText>
         <View style={styles.titleRow}>
           <ThemedText type="subtitle" style={styles.flex}>
@@ -437,12 +441,22 @@ function ActiveBlock({
           <BlockInfoPopover block={block} />
         </View>
         <ThemedText>{primaryInstruction(block.instruction)}</ThemedText>
-        <ThemedText accessibilityLiveRegion="polite" style={styles.clock}>
-          {formatClock(remainingSeconds)}
+        <ThemedText
+          accessibilityLabel={targetReached
+            ? `Прошло ${formatClock(elapsedSeconds)}`
+            : `Осталось ${formatClock(remainingSeconds)}`}
+          accessibilityLiveRegion="polite"
+          style={styles.clock}>
+          {formatClock(targetReached ? elapsedSeconds : remainingSeconds)}
         </ThemedText>
+        {targetReached ? (
+          <ThemedText type="small" style={styles.muted}>
+            План {formatClock(block.durationSecondsPerSet)} выполнен · таймер идёт вверх
+          </ThemedText>
+        ) : null}
         <AppButton
-          label="Остановить и записать"
-          variant="secondary"
+          label={targetReached ? 'Завершить подход' : 'Остановить раньше'}
+          variant={targetReached ? undefined : 'secondary'}
           onPress={() => {
             const checkpoint = completeTimerMissionRunSet(run, block, false, new Date());
             if (checkpoint) onSave(checkpoint);

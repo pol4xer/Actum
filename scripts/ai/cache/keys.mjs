@@ -26,18 +26,44 @@ export function createPlanCacheKey(input, identity) {
 }
 
 export function createResearchCacheKey(input, identity) {
+  const researchAnchor = createResearchAnchor(input);
   return createHash('sha256')
     .update(
       JSON.stringify({
         researchPromptVersion: identity.researchPromptVersion,
         baselineParserVersion: identity.baselineParserVersion,
         researchModel: identity.researchModel,
-        prompt: input.prompt.trim(),
-        duration: input.duration,
+        researchAnchor,
         researchMode: input.researchMode === 'quick' ? 'quick' : 'web',
       }),
     )
     .digest('hex');
+}
+
+export function createResearchAnchor(input) {
+  const supplied = input.programContext?.researchAnchor;
+  if (supplied != null) {
+    if (typeof supplied !== 'string' || !/^[a-f0-9]{64}$/.test(supplied)) {
+      throw new TypeError('Invalid research anchor');
+    }
+    return supplied;
+  }
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        prompt: normalizedIdentityText(input.prompt),
+        currentLevel: input.currentLevel,
+        baseline: normalizedIdentityText(input.baseline),
+        dailyMinutes: input.dailyMinutes,
+      }),
+    )
+    .digest('hex');
+}
+
+function normalizedIdentityText(value) {
+  return typeof value === 'string'
+    ? value.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase('ru-RU')
+    : '';
 }
 
 export function providerStageKey(cacheKey, stage) {

@@ -102,6 +102,14 @@ export function planContextSections(
     );
   }
 
+  if (plan.targetCycleNumber) {
+    appendSection(
+      sections,
+      'Ориентир достижения',
+      `Месяц ${plan.targetCycleNumber}`,
+    );
+  }
+
   if (baseline) {
     appendSection(
       sections,
@@ -114,7 +122,11 @@ export function planContextSections(
     );
   }
 
-  appendSection(sections, 'Срок большой цели', targetTimeline);
+  appendSection(
+    sections,
+    plan.targetCycleNumber ? 'Лимит продолжения' : 'Срок большой цели',
+    targetTimeline,
+  );
   appendListSection(
     sections,
     'Допущения',

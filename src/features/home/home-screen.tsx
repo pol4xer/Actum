@@ -3,7 +3,11 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { CheckInModal } from '@/features/check-in';
-import { GoalBuilder, NextCycleBuilder } from '@/features/goal-planning';
+import {
+  GoalBuilder,
+  NextCycleBuilder,
+  estimatedTargetCycleLabel,
+} from '@/features/goal-planning';
 import { MissionRunner } from '@/features/mission-session';
 import { ThemedText } from '@/components/themed-text';
 import { InfoPopover } from '@/components/ui/info-popover';
@@ -16,7 +20,7 @@ import {
   ScreenHeader,
 } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
-import { goalMetricProgress } from '@/domain/goal-program';
+import { goalMetricProgress, latestProgramActual } from '@/domain/goal-program';
 import { calendarDateRelation, formatCalendarDate } from '@/lib/calendar-date';
 import { missionContextSections } from '@/shared/presentation/context-info';
 import {
@@ -48,11 +52,12 @@ export default function HomeScreen() {
     cycleComplete &&
     state.activeGoal.status === 'active' &&
     state.activeGoal.program.activeCycle < state.activeGoal.program.totalCycles;
-  const latestMeasured = [...state.activeGoal.program.completedCycles]
-    .reverse()
-    .find((cycle) => cycle.measuredValue != null && cycle.unit);
-  const currentValue = latestMeasured?.measuredValue ?? state.activeGoal.baseline?.value;
-  const currentUnit = latestMeasured?.unit ?? state.activeGoal.baseline?.unit;
+  const currentActual = latestProgramActual(
+    state.activeGoal.program,
+    state.activeGoal.baseline,
+  );
+  const currentValue = currentActual.measuredValue;
+  const currentUnit = currentActual.unit;
   const targetValue = state.activeGoal.program.target.value;
   const targetUnit = state.activeGoal.program.target.unit;
   const goalProgress = goalMetricProgress(
@@ -67,6 +72,10 @@ export default function HomeScreen() {
   const missionDate = formatCalendarDate(currentMission?.scheduledDate);
   const missionTiming = calendarDateRelation(currentMission?.scheduledDate);
   const currentRun = currentMission ? state.missionRuns[currentMission.id] : undefined;
+  const estimatedTargetCycle = estimatedTargetCycleLabel(
+    state.activePlan.targetCycleNumber,
+  );
+  const achievedCycle = state.activeGoal.program.achievement?.cycleNumber;
   const today = new Intl.DateTimeFormat('ru-RU', {
     weekday: 'long',
     day: 'numeric',
@@ -151,12 +160,12 @@ export default function HomeScreen() {
               <ThemedText style={styles.victoryGlyph}>✦</ThemedText>
             </View>
             <Pill tone={state.activeGoal.status === 'completed' ? 'success' : 'warning'}>
-              {state.activeGoal.status === 'completed' ? 'цель достигнута' : 'срок завершён'}
+              {state.activeGoal.status === 'completed' ? 'цель достигнута' : 'лимит исчерпан'}
             </Pill>
             <ThemedText type="title" style={styles.center}>
               {state.activeGoal.status === 'completed'
                 ? 'Маршрут пройден'
-                : 'Нужен новый срок'}
+                : 'Выбери новую цель'}
             </ThemedText>
             <View style={styles.buttonRow}>
               <AppButton
@@ -180,7 +189,12 @@ export default function HomeScreen() {
                 {state.activeGoal.rawPrompt}
               </ThemedText>
               <ThemedText type="small" style={styles.muted}>
-                цикл {state.activePlan.cycleNumber}/{state.activePlan.totalCycles} · {reported}/{total}
+                цикл {state.activePlan.cycleNumber}/{state.activePlan.totalCycles}
+                {achievedCycle
+                  ? ` · достигнута: месяц ${achievedCycle}`
+                  : estimatedTargetCycle
+                  ? ` · цель: ${estimatedTargetCycle.toLocaleLowerCase('ru-RU')}`
+                  : ` · ${reported}/${total}`}
               </ThemedText>
             </View>
             <ProgressBar value={planProgress} />

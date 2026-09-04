@@ -16,6 +16,7 @@ import test from 'node:test';
 
 import {
   createPlanCacheKey,
+  createResearchAnchor,
   createResearchCacheKey,
   providerStageKey,
 } from '../scripts/ai/cache/keys.mjs';
@@ -25,6 +26,11 @@ import {
   PROGRAM_DURATIONS,
   programDurationConfig,
 } from '../scripts/ai/contracts/program-duration.mjs';
+import {
+  MAX_RESEARCH_CYCLES,
+  parseResearchConclusion,
+  RESEARCH_SCHEMA,
+} from '../scripts/ai/contracts/research-v1.mjs';
 import {
   readJson,
   requestIdFromRequest,
@@ -57,7 +63,7 @@ const webInput = Object.freeze({
   researchMode: 'web',
 });
 
-test('fixed duration choices map to one, six, or twelve 30-day cycles', () => {
+test('retry-cap choices map to one, six, or twelve 30-day cycles', () => {
   assert.equal(CYCLE_DAYS, 30);
   assert.deepEqual(PROGRAM_DURATIONS, {
     month: { totalCycles: 1, totalDays: 30 },
@@ -67,6 +73,30 @@ test('fixed duration choices map to one, six, or twelve 30-day cycles', () => {
   assert.equal(programDurationConfig('custom'), undefined);
 });
 
+test('structured research keeps one bounded feasibility conclusion', () => {
+  const conclusion = {
+    brief: 'Проверенная основа и конкретные протоколы для первого цикла. '.repeat(2),
+    earliestTargetCycleNumber: 3,
+    feasibilityReason: 'Три цикла — самый ранний обоснованный тренировочный ориентир.',
+  };
+  assert.equal(MAX_RESEARCH_CYCLES, 12);
+  assert.deepEqual(parseResearchConclusion(JSON.stringify(conclusion)), conclusion);
+  assert.deepEqual(RESEARCH_SCHEMA.required, [
+    'brief',
+    'earliestTargetCycleNumber',
+    'feasibilityReason',
+  ]);
+  assert.throws(
+    () => parseResearchConclusion(JSON.stringify({ ...conclusion, earliestTargetCycleNumber: 13 })),
+    /ожидается целый номер цикла от 1 до 12 или null/,
+  );
+  assert.throws(
+    () => parseResearchConclusion(JSON.stringify({ ...conclusion, unknown: true })),
+    /research\.unknown: поле не поддерживается/,
+  );
+  assert.throws(() => parseResearchConclusion('{broken'), /нечитаемый JSON/);
+});
+
 test('cache helpers separate cycle planning while reusing one program research result', () => {
   assert.equal(
     createPlanCacheKey(webInput, fixedIdentity),
@@ -74,7 +104,7 @@ test('cache helpers separate cycle planning while reusing one program research r
   );
   assert.equal(
     createResearchCacheKey(webInput, fixedIdentity),
-    '0fb40534572a34483c21db991fc495b76bee7daaca923e2e862517a12a746237',
+    'f54a46fe26bf2786c664d328fb3d888887d246a635c2c26bbdb7e0cf183fe14c',
   );
   assert.equal(
     createPlanCacheKey({ ...webInput, researchMode: 'quick' }, fixedIdentity),
@@ -82,28 +112,86 @@ test('cache helpers separate cycle planning while reusing one program research r
   );
   assert.equal(
     createResearchCacheKey({ ...webInput, researchMode: 'quick' }, fixedIdentity),
-    'd008e6041a59da5d579300fcad53e1b3105bff221b3088484d3632d02f0cc14c',
+    '94b0e01adec096e70b1b61dee3d9e81c75573e067f9b3e50c9e47a495477b89b',
   );
   assert.equal(providerStageKey('abc', 'planning'), 'planning\u0000abc');
 
+  assert.notEqual(
+    createResearchCacheKey(
+      { ...webInput, baseline: 'Current result: 12 reps' },
+      fixedIdentity,
+    ),
+    createResearchCacheKey(webInput, fixedIdentity),
+    'fresh programs with different baselines must never share research',
+  );
+  assert.notEqual(
+    createResearchCacheKey(
+      { ...webInput, currentLevel: 'some-experience' },
+      fixedIdentity,
+    ),
+    createResearchCacheKey(webInput, fixedIdentity),
+    'fresh programs with different experience levels must never share research',
+  );
+  assert.equal(
+    createResearchCacheKey({ ...webInput, duration: 'month' }, fixedIdentity),
+    createResearchCacheKey(webInput, fixedIdentity),
+    'changing only the retry cap must reuse the same twelve-cycle research',
+  );
+  assert.notEqual(
+    createResearchCacheKey({ ...webInput, dailyMinutes: 30 }, fixedIdentity),
+    createResearchCacheKey(webInput, fixedIdentity),
+    'fresh programs with different daily capacity need different feasibility research',
+  );
+
+  const researchAnchor = createResearchAnchor(webInput);
+  assert.match(researchAnchor, /^[a-f0-9]{64}$/);
+  const programContext = {
+    researchAnchor,
+    target: {
+      userStatement: 'Learn a skill',
+      normalizedMetric: 'Completed repetitions',
+      value: 20,
+      unit: 'reps',
+    },
+    roadmap: [{
+      cycleNumber: 1,
+      title: 'Done',
+      focus: 'Complete measurable practice',
+      targetValue: 20,
+      targetUnit: 'reps',
+    }],
+    completedCycles: [],
+  };
+  const anchoredCycle = { ...webInput, programContext };
   const nextCycle = {
     ...webInput,
     currentLevel: 'some-experience',
     baseline: 'Current result: 12 reps',
     dailyMinutes: 45,
     cycleNumber: 2,
-    programContext: {
-      roadmap: [{ cycleNumber: 1, title: 'Done' }],
-    },
+    programContext,
   };
   assert.equal(
-    createResearchCacheKey(nextCycle, fixedIdentity),
+    createResearchCacheKey(anchoredCycle, fixedIdentity),
     createResearchCacheKey(webInput, fixedIdentity),
+    'the explicit program anchor must resolve the initial paid research key',
+  );
+  assert.equal(
+    createResearchCacheKey(nextCycle, fixedIdentity),
+    createResearchCacheKey(anchoredCycle, fixedIdentity),
     'later cycles must reuse the paid research despite a new baseline, level, and time budget',
   );
   assert.notEqual(
     createPlanCacheKey(nextCycle, fixedIdentity),
     createPlanCacheKey(webInput, fixedIdentity),
+  );
+  assert.notEqual(
+    createResearchCacheKey(nextCycle, {
+      ...fixedIdentity,
+      researchPromptVersion: 'r-next',
+    }),
+    createResearchCacheKey(nextCycle, fixedIdentity),
+    'the stable anchor must not bypass research identity invalidation',
   );
 });
 
@@ -170,11 +258,23 @@ test('HTTP helpers retain validation, request-size, CORS, JSON, and request-ID c
   );
   assert.throws(
     () => validateInput({ ...webInput, duration: 'two-years' }),
-    /Некорректный срок программы\./,
+    /Некорректный предел продолжения программы\./,
   );
   assert.throws(
     () => validateInput({ ...webInput, cycleNumber: 13 }),
     /Некорректный номер цикла\./,
+  );
+  assert.throws(
+    () => validateInput({ ...webInput, prompt: 'Complete 0 repetitions' }),
+    /Цель со счётчиком 0 не создаёт исполняемого действия/,
+  );
+  assert.throws(
+    () => validateInput({
+      ...webInput,
+      prompt: 'Сократить время до 40 секунд',
+      baseline: 'Сейчас результат 60 секунд',
+    }),
+    /Цели на уменьшение числового показателя пока не поддерживаются встроенным runner/,
   );
   assert.throws(
     () => validateInput({ ...webInput, horizonDays: 30 }),
@@ -204,6 +304,7 @@ test('HTTP helpers retain validation, request-size, CORS, JSON, and request-ID c
     /Контрольный замер 900 сек\. не помещается в дневной лимит 600 сек\./,
   );
   const laterCycleContext = {
+    researchAnchor: 'a'.repeat(64),
     target: {
       userStatement: 'Hold a plank for 15 minutes',
       normalizedMetric: 'Plank duration',
@@ -216,6 +317,60 @@ test('HTTP helpers retain validation, request-size, CORS, JSON, and request-ID c
     ],
     completedCycles: [],
   };
+  assert.throws(
+    () => validateInput({
+      ...webInput,
+      cycleNumber: 2,
+      programContext: { ...laterCycleContext, researchAnchor: undefined },
+    }),
+    /Следующий цикл без привязки исходного исследования заблокирован/,
+  );
+  assert.throws(
+    () => validateInput({
+      ...webInput,
+      cycleNumber: 2,
+      programContext: { ...laterCycleContext, researchAnchor: 'invalid' },
+    }),
+    /Некорректная привязка исследования программы/,
+  );
+  assert.doesNotThrow(() => validateInput({
+    ...webInput,
+    cycleNumber: 2,
+    researchMode: 'quick',
+    programContext: { ...laterCycleContext, targetCycleNumber: 1 },
+  }));
+  assert.throws(
+    () => validateInput({
+      ...webInput,
+      prompt: 'Reduce the result to 40 seconds',
+      baseline: 'Current result is 35 seconds',
+      cycleNumber: 2,
+      researchMode: 'quick',
+      programContext: {
+        ...laterCycleContext,
+        target: {
+          ...laterCycleContext.target,
+          userStatement: 'Reduce the result to 40 seconds',
+          value: 40,
+          unit: 'seconds',
+        },
+        roadmap: [
+          { cycleNumber: 1, title: 'Start', focus: 'Start', targetValue: 50, targetUnit: 'seconds' },
+          { cycleNumber: 2, title: 'Next', focus: 'Next', targetValue: 40, targetUnit: 'seconds' },
+        ],
+      },
+    }),
+    /Цели на уменьшение числового показателя пока не поддерживаются встроенным runner/,
+  );
+  assert.throws(
+    () => validateInput({
+      ...webInput,
+      cycleNumber: 2,
+      researchMode: 'quick',
+      programContext: { ...laterCycleContext, targetCycleNumber: 13 },
+    }),
+    /Некорректный целевой цикл контекста программы/,
+  );
   assert.throws(
     () => validateInput({
       ...webInput,

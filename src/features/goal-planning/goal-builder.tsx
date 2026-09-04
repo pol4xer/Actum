@@ -14,7 +14,7 @@ import { InfoPopover } from '@/components/ui/info-popover';
 import { AppButton, Card, Pill, Screen, ScreenHeader } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import { goalDurationLabel } from '@/domain/goal-program';
-import type { GeneratedGoal, GoalDuration, Mission } from '@/domain/types';
+import type { GeneratedGoal, Mission } from '@/domain/types';
 import { formatCalendarDate } from '@/lib/calendar-date';
 import { actionableExecutionBlocks } from '@/shared/presentation/execution-visibility';
 import { presentMissionDay, type MissionActionPresentation } from '@/shared/presentation/mission-actions';
@@ -30,19 +30,29 @@ import {
 import { useApp } from '@/state';
 
 import type { GoalPlanner } from './goal-planner';
+import {
+  RETRY_LIMIT_HELP,
+  RETRY_LIMIT_OPTIONS,
+  RETRY_LIMIT_QUESTION,
+  estimatedTargetCycleLabel,
+  retryLimitLabel,
+} from './program-labels';
 import { ProgramRoadmap } from './program-roadmap';
-import type { AIPlannerErrorCode } from './errors';
+import {
+  GOAL_NOT_FEASIBLE_MESSAGE,
+  RETRY_CAP_TOO_SHORT_MESSAGE,
+  SAVED_RESPONSE_RETRY_LABEL,
+  SAVED_RESPONSE_REVIEW_MESSAGE,
+  isFeasibilityPlannerError,
+  shouldOfferPlannerRetry,
+  type AIPlannerErrorCode,
+} from './errors';
 import {
   useGoalBuilderController,
   type GoalBuilderStage,
 } from './use-goal-builder-controller';
 
 const MINUTES = [10, 20, 30, 45, 60];
-const DURATIONS: ReadonlyArray<{ value: GoalDuration; label: string }> = [
-  { value: 'month', label: '1 месяц' },
-  { value: 'half-year', label: '6 месяцев' },
-  { value: 'year', label: '1 год' },
-];
 
 export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
   const { createGoal } = useApp();
@@ -149,7 +159,7 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
                     title="Почему это бесплатно?"
                     sections={[
                       {
-                        body: `${savedPreview.goal.title} · ${goalDurationLabel(savedPreview.goal.program.duration)}. План уже сохранён на устройстве и откроется без повторного web-поиска или GPT-запроса.`,
+                        body: `${savedPreview.goal.title} · ${savedPreview.plan.targetCycleNumber ? `лимит ${retryLimitLabel(savedPreview.goal.program.duration)}` : `срок старого плана ${goalDurationLabel(savedPreview.goal.program.duration)}`}. План уже сохранён на устройстве и откроется без повторного web-поиска или GPT-запроса.`,
                       },
                     ]}
                   />
@@ -188,22 +198,22 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
             </Question>
 
             <Question
-              title="Срок достижения"
+              title={RETRY_LIMIT_QUESTION}
               help={[
                 {
-                  body: 'Actum построит маршрут на весь срок и подробно распишет ближайшие 30 дней. Следующий месяц адаптируется по записанному результату.',
+                  body: RETRY_LIMIT_HELP,
                 },
               ]}>
-              <ChoiceRow>
-                {DURATIONS.map((option) => (
-                  <Choice
+              <View style={styles.levelList}>
+                {RETRY_LIMIT_OPTIONS.map((option) => (
+                  <LevelChoice
                     key={option.value}
                     label={option.label}
                     selected={duration === option.value}
                     onPress={() => setDuration(option.value)}
                   />
                 ))}
-              </ChoiceRow>
+              </View>
             </Question>
 
             <Question title="Сколько минут в день?">
@@ -263,35 +273,15 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
         {stage === 'error' ? (
           <Card style={styles.errorCard}>
             <View style={styles.cardTop}>
-              <Pill tone="warning">
-                {generationErrorCode === 'INVALID_RESPONSE'
-                  ? 'Ответ не прочитан'
-                  : generationErrorCode === 'SAVED_RESPONSE_UNAVAILABLE'
-                    ? 'Ответ уже не сохранён'
-                  : generationErrorCode === 'TIMEOUT' || generationErrorCode === 'UPSTREAM_TIMEOUT'
-                    ? 'Долгая генерация'
-                    : generationErrorCode === 'CONNECTION_INTERRUPTED'
-                      ? 'Связь прервана'
-                      : generationErrorCode === 'GATEWAY_UNREACHABLE'
-                        ? 'Сервер недоступен'
-                        : 'Ошибка OpenAI'}
-              </Pill>
+              <Pill tone="warning">{generationErrorBadge(generationErrorCode)}</Pill>
               <InfoPopover title="Что произошло?" sections={screenContext} />
             </View>
-            <ThemedText type="subtitle">
-              {generationErrorCode === 'INVALID_RESPONSE'
-                ? 'План сохранён и ждёт повторной проверки'
-                : generationErrorCode === 'SAVED_RESPONSE_UNAVAILABLE'
-                  ? 'Новый запрос не был отправлен'
-                : generationErrorCode === 'TIMEOUT' || generationErrorCode === 'UPSTREAM_TIMEOUT'
-                  ? 'План ещё не завершён'
-                  : 'Не удалось получить план'}
-            </ThemedText>
-            {generationErrorCode !== 'SAVED_RESPONSE_UNAVAILABLE' ? (
+            <ThemedText type="subtitle">{generationErrorTitle(generationErrorCode)}</ThemedText>
+            {shouldOfferPlannerRetry(generationErrorCode) ? (
               <AppButton
                 label={
                   generationErrorCode === 'INVALID_RESPONSE'
-                    ? 'Проверить сохранённый план · без GPT'
+                    ? SAVED_RESPONSE_RETRY_LABEL
                     : 'Повторить запрос к GPT'
                 }
                 onPress={retryGeneration}
@@ -311,7 +301,10 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
                 <InfoPopover title="О плане" sections={planInfoWithoutSafety(preview)} />
               </View>
 
-              <ProgramRoadmap program={preview.goal.program} />
+              <ProgramRoadmap
+                program={preview.goal.program}
+                targetCycleNumber={preview.plan.targetCycleNumber}
+              />
 
               <View style={styles.dayList}>
                 {preview.plan.missions.map((mission, index) => {
@@ -352,8 +345,14 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
                   <InfoPopover title="О плане" sections={planInfoWithoutSafety(preview)} />
                 </View>
                 <View style={styles.planMeta}>
-                  <Meta value={goalDurationLabel(preview.goal.program.duration)} label="вся цель" />
-                  <Meta value={`${preview.plan.cycleNumber}/${preview.plan.totalCycles}`} label="цикл" />
+                  <Meta
+                    value={estimatedTargetCycleLabel(preview.plan.targetCycleNumber) ?? '—'}
+                    label="ориентир"
+                  />
+                  <Meta
+                    value={retryLimitLabel(preview.goal.program.duration)}
+                    label="лимит"
+                  />
                   <Meta value={`${preview.plan.dailyMinutes} мин`} label="в день" />
                 </View>
               </Card>
@@ -632,6 +631,15 @@ function missionPreviewContextSections(mission: Mission): ContextInfoSection[] {
 }
 
 function errorRetryContext(code?: AIPlannerErrorCode): ContextInfoSection | undefined {
+  if (isFeasibilityPlannerError(code)) {
+    return {
+      heading: 'Без нового запроса к планировщику',
+      body:
+        code === 'RETRY_CAP_TOO_SHORT'
+          ? 'Research сохранён, а сборка плана не запускалась. При смене только лимита Actum переиспользует этот research.'
+          : 'Research сохранён, а сборка плана не запускалась. Измени цель или исходный результат, если хочешь выполнить новый расчёт.',
+    };
+  }
   if (code === 'INVALID_RESPONSE') {
     return {
       heading: 'Без нового платного запроса',
@@ -666,6 +674,46 @@ function errorRetryContext(code?: AIPlannerErrorCode): ContextInfoSection | unde
     };
   }
   return undefined;
+}
+
+function generationErrorBadge(code?: AIPlannerErrorCode): string {
+  switch (code) {
+    case 'INVALID_RESPONSE':
+      return 'Ответ не прочитан';
+    case 'SAVED_RESPONSE_UNAVAILABLE':
+      return 'Ответ уже не сохранён';
+    case 'RETRY_CAP_TOO_SHORT':
+      return 'Срок слишком короткий';
+    case 'GOAL_NOT_FEASIBLE':
+      return 'Цель не подтверждена';
+    case 'TIMEOUT':
+    case 'UPSTREAM_TIMEOUT':
+      return 'Долгая генерация';
+    case 'CONNECTION_INTERRUPTED':
+      return 'Связь прервана';
+    case 'GATEWAY_UNREACHABLE':
+      return 'Сервер недоступен';
+    default:
+      return 'Ошибка OpenAI';
+  }
+}
+
+function generationErrorTitle(code?: AIPlannerErrorCode): string {
+  switch (code) {
+    case 'INVALID_RESPONSE':
+      return SAVED_RESPONSE_REVIEW_MESSAGE;
+    case 'SAVED_RESPONSE_UNAVAILABLE':
+      return 'Новый запрос не был отправлен';
+    case 'RETRY_CAP_TOO_SHORT':
+      return RETRY_CAP_TOO_SHORT_MESSAGE;
+    case 'GOAL_NOT_FEASIBLE':
+      return GOAL_NOT_FEASIBLE_MESSAGE;
+    case 'TIMEOUT':
+    case 'UPSTREAM_TIMEOUT':
+      return 'План ещё не завершён';
+    default:
+      return 'Не удалось получить план';
+  }
 }
 
 function missionCalendarLabel(mission: Mission, index: number) {

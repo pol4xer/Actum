@@ -21,6 +21,7 @@ import { disableDailyReminder } from '@/lib/notifications';
 import storage from '@/lib/storage';
 
 import { createAppCommands } from './app-commands';
+import { getCurrentMission } from './app-state';
 import { createInitialAppState } from './app-state-defaults';
 import { createAppStateRepository } from './app-state-repository';
 import {
@@ -68,10 +69,6 @@ export type AppContextValue = {
 
 const AppContext = createContext<AppContextValue | null>(null);
 const appStateRepository = createAppStateRepository(storage);
-
-function getCurrentMission(state: AppState) {
-  return state.activePlan?.missions.find((mission) => mission.outcome === 'pending');
-}
 
 export function AppProvider({ children }: PropsWithChildren) {
   const {

@@ -1,7 +1,6 @@
 import type { GeneratedGoal, GoalInput, Mission, QuestChapter } from '@/domain/types';
 import {
   GOAL_DURATION_CONFIG,
-  goalDurationEndDate,
   goalDurationLabel,
 } from '@/domain/goal-program';
 
@@ -62,6 +61,7 @@ export function mapPlanDtoToGeneratedGoal(
     outcome: 'pending' as const,
     execution: {
       kind: 'in_app' as const,
+      primaryBlockIndex: day.execution.primaryBlockIndex,
       successCriterion: day.execution.successCriterion,
       blocks: day.execution.blocks.map((block) => {
         if (block.kind === 'timer') {
@@ -117,7 +117,14 @@ export function mapPlanDtoToGeneratedGoal(
   }));
   const durationConfig = GOAL_DURATION_CONFIG[input.duration];
   const createdAt = now.toISOString();
-  const targetDate = goalDurationEndDate(createdAt, input.duration) ?? createdAt;
+  const remainingTargetCycles = Math.max(
+    1,
+    planDraft.targetCycleNumber - planDraft.cycleNumber + 1,
+  );
+  const targetDate = addLocalCalendarDays(
+    now,
+    remainingTargetCycles * 30 - 1,
+  ).toISOString();
   const targetTimeline = goalDurationLabel(input.duration);
   const goalId = id('goal');
   const completedCycles = input.programContext?.completedCycles ?? [];
@@ -147,13 +154,15 @@ export function mapPlanDtoToGeneratedGoal(
     },
     plan: {
       id: id('plan'),
-      version: 6,
+      version: 7,
       createdAt: now.toISOString(),
+      currentLevel: input.currentLevel,
       dailyMinutes: input.dailyMinutes,
       horizonDays: 30,
       cycleNumber: planDraft.cycleNumber,
       totalCycles: planDraft.totalCycles,
       cycleGoal: planDraft.cycleGoal,
+      targetCycleNumber: planDraft.targetCycleNumber,
       assessment: planDraft.assessment,
       summary: planDraft.summary,
       baseline: planDraft.baseline,
@@ -163,6 +172,7 @@ export function mapPlanDtoToGeneratedGoal(
       research: {
         method: meta.webSearchCount > 0 ? 'openai-web-research-v1' : 'openai-responses-v1',
         confidence: 'medium',
+        researchAnchor: meta.researchAnchor,
         safetyNotes: planDraft.safetyNotes,
         assumptions: planDraft.assumptions,
         sourceLabels: planDraft.sourceLabels,

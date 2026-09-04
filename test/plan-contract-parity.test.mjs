@@ -24,8 +24,8 @@ const DURATIONS = [
   ['year', 12],
 ];
 
-test('server plan-v6 schema, validator, and client DTO remain in lockstep', () => {
-  assert.equal(PLAN_CONTRACT_VERSION, 'plan-v6');
+test('server plan-v7 schema, validator, and client DTO remain in lockstep', () => {
+  assert.equal(PLAN_CONTRACT_VERSION, 'plan-v7');
 
   for (const dailyMinutes of DAILY_MINUTES) {
     for (const [duration, totalCycles] of DURATIONS) {
@@ -42,7 +42,7 @@ test('server plan-v6 schema, validator, and client DTO remain in lockstep', () =
       assert.deepEqual(
         clientSchema,
         serverSchema,
-        `plan-v6 schema drift for ${dailyMinutes} minutes / ${duration}`,
+        `plan-v7 schema drift for ${dailyMinutes} minutes / ${duration}`,
       );
 
       const plan = createValidatorFixture(dailyMinutes, duration, totalCycles, cycleNumber);
@@ -157,6 +157,7 @@ function createValidatorFixture(dailyMinutes, duration, totalCycles, cycleNumber
     duration,
     totalCycles,
     cycleNumber,
+    targetCycleNumber: totalCycles,
     target: {
       userStatement: 'Последовательно завершить выбранный материал',
       normalizedMetric: 'Завершённая доля материала',
@@ -215,7 +216,8 @@ function createValidatorFixture(dailyMinutes, duration, totalCycles, cycleNumber
       xp: 10,
       execution: {
         kind: 'in_app',
-        blocks: [structuredClone(blocks[index % blocks.length])],
+        blocks: [structuredClone(blocks[index % 2])],
+        primaryBlockIndex: 0,
         successCriterion: 'Назначенный блок выполнен полностью.',
       },
       warning: null,

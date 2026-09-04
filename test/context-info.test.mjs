@@ -208,6 +208,45 @@ test('plan context exposes rationale and provenance without traversing executabl
   );
 });
 
+test('plan-v7 context presents the estimated month separately from the retry limit', () => {
+  const plan = {
+    id: 'plan-v7',
+    version: 7,
+    createdAt: '2026-09-04T12:00:00.000Z',
+    dailyMinutes: 20,
+    horizonDays: 30,
+    cycleNumber: 1,
+    totalCycles: 6,
+    targetCycleNumber: 3,
+    cycleGoal: 'Выполнить первый измеримый месяц.',
+    summary: 'Цель достигается как можно раньше.',
+    targetTimeline: 'Полгода',
+    chapters: [],
+    missions: [],
+    research: {
+      method: 'openai-responses-v1',
+      confidence: 'medium',
+      safetyNotes: [],
+      assumptions: [],
+      sourceLabels: [],
+    },
+  };
+
+  const sections = planContextSections(plan);
+  assert.equal(
+    sections.find((section) => section.heading === 'Ориентир достижения')?.body,
+    'Месяц 3',
+  );
+  assert.equal(
+    sections.find((section) => section.heading === 'Лимит продолжения')?.body,
+    'Полгода',
+  );
+  assert.equal(
+    sections.some((section) => section.heading === 'Срок большой цели'),
+    false,
+  );
+});
+
 function deepFreeze(value) {
   if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
   Object.freeze(value);

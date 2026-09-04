@@ -110,6 +110,8 @@ export type MissionExecutionBlock =
 export type InAppMissionExecution = {
   kind: 'in_app';
   blocks: MissionExecutionBlock[];
+  /** Required by plan-v7; optional only for locally persisted plan-v5/v6 missions. */
+  primaryBlockIndex?: number;
   successCriterion: string;
 };
 
@@ -170,6 +172,13 @@ export type ProgramCycleResult = {
   unit: string | null;
 };
 
+export type ProgramAchievement = {
+  cycleNumber: number;
+  completedAt: string;
+  measuredValue: number;
+  unit: string;
+};
+
 export type GoalProgram = {
   duration: GoalDuration;
   totalDays: number;
@@ -178,12 +187,19 @@ export type GoalProgram = {
   target: GoalTarget;
   roadmap: ProgramMilestone[];
   completedCycles: ProgramCycleResult[];
+  /** A goal-reaching measurement recorded before the active cycle itself was complete. */
+  achievement?: ProgramAchievement;
 };
 
 export type GoalProgramContext = Pick<
   GoalProgram,
   'target' | 'roadmap' | 'completedCycles'
->;
+> & {
+  /** Opaque server cache identity; optional only for legacy plans. */
+  researchAnchor?: string;
+  /** Prior evidence-backed target cycle; optional only for legacy plans. */
+  targetCycleNumber?: number;
+};
 
 export type Goal = {
   id: string;
@@ -203,6 +219,8 @@ export type Goal = {
 export type ResearchDossier = {
   method: 'local-curated-v1' | 'openai-responses-v1' | 'openai-web-research-v1';
   confidence: 'high' | 'medium';
+  /** Opaque research-cache identity returned by the local AI gateway. */
+  researchAnchor?: string;
   safetyNotes: string[];
   assumptions: string[];
   sourceLabels: string[];
@@ -253,6 +271,8 @@ export type PlanVersion = {
   id: string;
   version: number;
   createdAt: string;
+  /** Required by newly generated plan-v7 data; optional for persisted legacy plans. */
+  currentLevel?: GoalInput['currentLevel'];
   dailyMinutes: number;
   horizonDays: number;
   summary: string;
@@ -263,6 +283,8 @@ export type PlanVersion = {
   totalCycles?: number;
   /** Required by plan-v6; optional only for persisted plan-v1 through plan-v5 data. */
   cycleGoal?: string;
+  /** Required by plan-v7; optional only for persisted plan-v1 through plan-v6 data. */
+  targetCycleNumber?: number;
   /** Required by plan-v6; optional only for persisted plan-v1 through plan-v5 data. */
   assessment?: {
     dayNumber: number;
@@ -424,6 +446,7 @@ export type GoalInput = {
   prompt: string;
   currentLevel: 'starting' | 'some-experience' | 'returning';
   baseline: string;
+  /** Maximum number of monthly attempts, not a promise to stretch the goal to this term. */
   duration: GoalDuration;
   dailyMinutes: number;
   cycleNumber?: number;
