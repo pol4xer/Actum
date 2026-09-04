@@ -88,10 +88,13 @@ test('execution block context contains load provenance only', () => {
 test('plan context exposes rationale and provenance without traversing executable missions', () => {
   const plan = deepFreeze({
     id: 'plan-1',
-    version: 5,
+    version: 6,
     createdAt: '2026-08-04T12:00:00.000Z',
     dailyMinutes: 20,
     horizonDays: 7,
+    cycleNumber: 1,
+    totalCycles: 6,
+    cycleGoal: 'Увеличить устойчивый результат первого месяца.',
     summary: 'Первый блок связан с долгосрочной целью.',
     baseline: {
       userStatement: 'Сейчас удерживаю 80 секунд.',
@@ -159,6 +162,7 @@ test('plan context exposes rationale and provenance without traversing executabl
     [
       'Версия и метод',
       'Логика плана',
+      'Текущий цикл',
       'Исходная точка и расчёт',
       'Срок большой цели',
       'Допущения',
@@ -169,7 +173,11 @@ test('plan context exposes rationale and provenance without traversing executabl
   );
   assert.match(
     sections.find((section) => section.heading === 'Версия и метод')?.body ?? '',
-    /План v5[\s\S]*Web research[\s\S]*средняя/u,
+    /План v6[\s\S]*Web research[\s\S]*средняя/u,
+  );
+  assert.match(
+    sections.find((section) => section.heading === 'Текущий цикл')?.body ?? '',
+    /Цикл 1 из 6[\s\S]*Увеличить устойчивый результат/u,
   );
   assert.equal(JSON.stringify(sections).includes('Не выполнять под водой'), false);
   assert.equal(JSON.stringify(sections).includes('безопасном месте'), false);

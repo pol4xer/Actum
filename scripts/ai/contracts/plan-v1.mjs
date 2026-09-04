@@ -1,4 +1,6 @@
-export const PLAN_CONTRACT_VERSION = 'plan-v5';
+import { CYCLE_DAYS, programDurationConfig } from './program-duration.mjs';
+
+export const PLAN_CONTRACT_VERSION = 'plan-v6';
 
 const LOAD_BASIS_SCHEMA = {
   anyOf: [
@@ -198,6 +200,74 @@ const DAY_SCHEMA = {
   },
 };
 
+const TARGET_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['userStatement', 'normalizedMetric', 'value', 'unit'],
+  properties: {
+    userStatement: { type: 'string', minLength: 5, maxLength: 1000 },
+    normalizedMetric: { type: 'string', minLength: 2, maxLength: 180 },
+    value: {
+      anyOf: [
+        { type: 'number', minimum: 0 },
+        { type: 'null' },
+      ],
+    },
+    unit: {
+      anyOf: [
+        { type: 'string', minLength: 1, maxLength: 40 },
+        { type: 'null' },
+      ],
+    },
+  },
+};
+
+const ROADMAP_ENTRY_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['cycleNumber', 'title', 'focus', 'targetValue', 'targetUnit'],
+  properties: {
+    cycleNumber: { type: 'integer', minimum: 1, maximum: 12 },
+    title: { type: 'string', minLength: 2, maxLength: 100 },
+    focus: { type: 'string', minLength: 5, maxLength: 240 },
+    targetValue: {
+      anyOf: [
+        { type: 'number', minimum: 0 },
+        { type: 'null' },
+      ],
+    },
+    targetUnit: {
+      anyOf: [
+        { type: 'string', minLength: 1, maxLength: 40 },
+        { type: 'null' },
+      ],
+    },
+  },
+};
+
+const ASSESSMENT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['dayNumber', 'blockIndex', 'metric', 'targetValue', 'targetUnit'],
+  properties: {
+    dayNumber: { type: 'number', enum: [CYCLE_DAYS] },
+    blockIndex: { type: 'integer', minimum: 0, maximum: 11 },
+    metric: { type: 'string', minLength: 2, maxLength: 180 },
+    targetValue: {
+      anyOf: [
+        { type: 'number', minimum: 0 },
+        { type: 'null' },
+      ],
+    },
+    targetUnit: {
+      anyOf: [
+        { type: 'string', minLength: 1, maxLength: 40 },
+        { type: 'null' },
+      ],
+    },
+  },
+};
+
 export const PLAN_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -205,7 +275,13 @@ export const PLAN_SCHEMA = {
     'title',
     'domain',
     'targetMetric',
-    'targetTimeline',
+    'duration',
+    'totalCycles',
+    'cycleNumber',
+    'target',
+    'cycleGoal',
+    'roadmap',
+    'assessment',
     'summary',
     'baseline',
     'safetyNotes',
@@ -221,7 +297,18 @@ export const PLAN_SCHEMA = {
       enum: ['read', 'learn', 'practice', 'organize', 'move', 'habit'],
     },
     targetMetric: { type: 'string', minLength: 3, maxLength: 220 },
-    targetTimeline: { type: 'string', minLength: 2, maxLength: 80 },
+    duration: { type: 'string', enum: ['month', 'half-year', 'year'] },
+    totalCycles: { type: 'number', enum: [1, 6, 12] },
+    cycleNumber: { type: 'integer', minimum: 1, maximum: 12 },
+    target: TARGET_SCHEMA,
+    cycleGoal: { type: 'string', minLength: 5, maxLength: 300 },
+    roadmap: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 12,
+      items: ROADMAP_ENTRY_SCHEMA,
+    },
+    assessment: ASSESSMENT_SCHEMA,
     summary: { type: 'string', minLength: 10, maxLength: 600 },
     baseline: {
       type: 'object',
@@ -280,22 +367,34 @@ export const PLAN_SCHEMA = {
     },
     days: {
       type: 'array',
-      minItems: 7,
-      maxItems: 30,
+      minItems: CYCLE_DAYS,
+      maxItems: CYCLE_DAYS,
       items: DAY_SCHEMA,
     },
   },
 };
 
-export function createPlanSchema(dailyMinutes, horizonDays) {
+export function createPlanSchema(dailyMinutes, duration, cycleNumber = 1) {
   const maximumMinutes = Math.max(1, Math.min(120, Math.round(dailyMinutes)));
-  const calendarDays = Math.max(1, Math.min(30, Math.round(horizonDays)));
+  const durationConfig = programDurationConfig(duration);
+  if (!durationConfig) throw new TypeError('Unsupported program duration');
+  if (
+    !Number.isInteger(cycleNumber) ||
+    cycleNumber < 1 ||
+    cycleNumber > durationConfig.totalCycles
+  ) {
+    throw new TypeError('Unsupported program cycle');
+  }
+  const calendarDays = CYCLE_DAYS;
   const maximumSeconds = maximumMinutes * 60;
   const schema = structuredClone(PLAN_SCHEMA);
   const dayProperties = schema.properties.days.items.properties;
 
-  schema.properties.days.minItems = calendarDays;
-  schema.properties.days.maxItems = calendarDays;
+  schema.properties.duration.enum = [duration];
+  schema.properties.totalCycles.enum = [durationConfig.totalCycles];
+  schema.properties.cycleNumber = { type: 'number', enum: [cycleNumber] };
+  schema.properties.roadmap.minItems = durationConfig.totalCycles;
+  schema.properties.roadmap.maxItems = durationConfig.totalCycles;
   dayProperties.dayNumber.maximum = calendarDays;
   dayProperties.estimatedMinutes.maximum = maximumMinutes;
 

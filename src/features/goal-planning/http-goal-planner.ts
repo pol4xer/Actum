@@ -153,7 +153,7 @@ export class HttpGoalPlanner implements GoalPlanner {
       if (!envelope.success) throw new Error('Сохранённый план имеет несовместимый формат.');
       const { input, plan, meta } = envelope.data;
       const parsed = createPlanResponseDtoSchema(input).safeParse({ plan, meta });
-      if (!parsed.success) throw new Error('Сохранённый plan-v5 не прошёл клиентскую проверку.');
+      if (!parsed.success) throw new Error('Сохранённый plan-v6 не прошёл клиентскую проверку.');
       return this.mapper(input, parsed.data.plan, parsed.data.meta);
     } finally {
       clearTimeout(timeout);

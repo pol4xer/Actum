@@ -1,4 +1,4 @@
-export const BASELINE_PARSER_VERSION = 'baseline-v1';
+export const BASELINE_PARSER_VERSION = 'numeric-metric-v2';
 
 const MAXIMUM_PREFIX =
   /(?:рекорд|максимум|максимальн|лучший|personal\s+best|record|maximum|max\b|(?:^|\W)m\s*=?)/iu;
@@ -10,6 +10,14 @@ const NON_DURATION_COLON_CONTEXT =
   /(?:сч[её]т|матч|игр|соотношен|масштаб|score|match|game|ratio|scale)/iu;
 
 export function parseTrustedBaseline(statement) {
+  return parseTrustedMetric(statement, { preferMaximum: true });
+}
+
+export function parseTrustedTarget(statement) {
+  return parseTrustedMetric(statement, { preferMaximum: false });
+}
+
+function parseTrustedMetric(statement, { preferMaximum }) {
   if (typeof statement !== 'string') return null;
   const text = statement.trim();
   if (!text) return null;
@@ -37,7 +45,7 @@ export function parseTrustedBaseline(statement) {
       unit,
       start,
       end,
-      score: MAXIMUM_PREFIX.test(prefix) ? 100 : 0,
+      score: preferMaximum && MAXIMUM_PREFIX.test(prefix) ? 100 : 0,
     });
   };
 

@@ -146,6 +146,45 @@ export type PlanBaseline = {
   calculationRule: string;
 };
 
+export type GoalDuration = 'month' | 'half-year' | 'year';
+
+export type GoalTarget = {
+  userStatement: string;
+  normalizedMetric: string;
+  value: number | null;
+  unit: string | null;
+};
+
+export type ProgramMilestone = {
+  cycleNumber: number;
+  title: string;
+  focus: string;
+  targetValue: number | null;
+  targetUnit: string | null;
+};
+
+export type ProgramCycleResult = {
+  cycleNumber: number;
+  completedAt: string;
+  measuredValue: number | null;
+  unit: string | null;
+};
+
+export type GoalProgram = {
+  duration: GoalDuration;
+  totalDays: number;
+  totalCycles: number;
+  activeCycle: number;
+  target: GoalTarget;
+  roadmap: ProgramMilestone[];
+  completedCycles: ProgramCycleResult[];
+};
+
+export type GoalProgramContext = Pick<
+  GoalProgram,
+  'target' | 'roadmap' | 'completedCycles'
+>;
+
 export type Goal = {
   id: string;
   rawPrompt: string;
@@ -154,6 +193,8 @@ export type Goal = {
   targetDate: string;
   targetMetric: string;
   baseline?: PlanBaseline;
+  program: GoalProgram;
+  /** Persisted plan-v1 through plan-v5 label. */
   targetTimeline?: string;
   status: 'active' | 'completed' | 'paused';
   createdAt: string;
@@ -216,6 +257,22 @@ export type PlanVersion = {
   horizonDays: number;
   summary: string;
   baseline?: PlanBaseline;
+  /** Required by plan-v6; optional only for persisted plan-v1 through plan-v5 data. */
+  cycleNumber?: number;
+  /** Required by plan-v6; optional only for persisted plan-v1 through plan-v5 data. */
+  totalCycles?: number;
+  /** Required by plan-v6; optional only for persisted plan-v1 through plan-v5 data. */
+  cycleGoal?: string;
+  /** Required by plan-v6; optional only for persisted plan-v1 through plan-v5 data. */
+  assessment?: {
+    dayNumber: number;
+    /** Zero-based index in the assessment mission's in-app execution blocks. */
+    blockIndex: number;
+    metric: string;
+    targetValue: number | null;
+    targetUnit: string | null;
+  };
+  /** Persisted plan-v1 through plan-v5 label. */
   targetTimeline?: string;
   chapters: QuestChapter[];
   missions: Mission[];
@@ -230,6 +287,8 @@ export type CheckIn = {
   /** Mission-level reflection; note is retained as its legacy UI alias. */
   comment?: string;
   note?: string;
+  /** Optional only for check-ins persisted before explicit provenance existed. */
+  provenance?: 'user' | 'dev-skip';
   xpDelta: number;
   energyDelta: number;
   createdAt: string;
@@ -348,7 +407,7 @@ export type MissionRunMutation =
   | { kind: 'set-final-comment'; value: string };
 
 export type AppState = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   onboardingCompleted: boolean;
   profile?: Profile;
   character: CharacterState;
@@ -365,9 +424,10 @@ export type GoalInput = {
   prompt: string;
   currentLevel: 'starting' | 'some-experience' | 'returning';
   baseline: string;
-  targetTimeline: string;
+  duration: GoalDuration;
   dailyMinutes: number;
-  horizonDays: number;
+  cycleNumber?: number;
+  programContext?: GoalProgramContext;
   researchMode?: 'quick' | 'web';
 };
 

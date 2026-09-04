@@ -39,6 +39,31 @@ export function formatBaselineMetric(baseline: PlanBaseline): string {
   return `${baseline.normalizedMetric} · ${value} ${baseline.unit}`;
 }
 
+export function formatMetricValue(
+  value: number | null | undefined,
+  unit: string | null | undefined,
+): string | undefined {
+  if (value == null || !unit) return undefined;
+  if (unit === 'seconds') {
+    const rounded = Math.max(0, Math.round(value));
+    const minutes = Math.floor(rounded / 60);
+    const seconds = rounded % 60;
+    if (!minutes) return `${seconds} сек`;
+    if (!seconds) return `${minutes} мин`;
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
+  }
+  const formatted = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(value);
+  const labels: Record<string, string> = {
+    reps: 'повт.',
+    pages: 'стр.',
+    items: 'шт.',
+    words: 'слов',
+    meters: 'м',
+    attempts: 'попыток',
+  };
+  return `${formatted} ${labels[unit] ?? unit}`;
+}
+
 export function formatSourceDomain(url: string): string {
   try {
     return new URL(url).hostname.replace(/^www\./u, '');

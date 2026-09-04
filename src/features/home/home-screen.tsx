@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { CheckInModal } from '@/features/check-in';
-import { GoalBuilder } from '@/features/goal-planning';
+import { GoalBuilder, NextCycleBuilder } from '@/features/goal-planning';
 import { MissionRunner } from '@/features/mission-session';
 import { ThemedText } from '@/components/themed-text';
 import { InfoPopover } from '@/components/ui/info-popover';
@@ -16,9 +16,13 @@ import {
   ScreenHeader,
 } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
+import { goalMetricProgress } from '@/domain/goal-program';
 import { calendarDateRelation, formatCalendarDate } from '@/lib/calendar-date';
 import { missionContextSections } from '@/shared/presentation/context-info';
-import { formatMissionDuration } from '@/shared/presentation/plan-formatters';
+import {
+  formatMetricValue,
+  formatMissionDuration,
+} from '@/shared/presentation/plan-formatters';
 import { useApp } from '@/state';
 
 export default function HomeScreen() {
@@ -27,6 +31,8 @@ export default function HomeScreen() {
     currentMission,
     mutateMissionRun,
     reportMission,
+    advanceGoalCycle,
+    cycleComplete,
     startNewGoal,
   } = useApp();
   const [runnerVisible, setRunnerVisible] = useState(false);
@@ -38,6 +44,25 @@ export default function HomeScreen() {
   const total = state.activePlan.missions.length;
   const reported = state.activePlan.missions.filter((mission) => mission.outcome !== 'pending').length;
   const planProgress = reported / total;
+  const hasNextCycle =
+    cycleComplete &&
+    state.activeGoal.status === 'active' &&
+    state.activeGoal.program.activeCycle < state.activeGoal.program.totalCycles;
+  const latestMeasured = [...state.activeGoal.program.completedCycles]
+    .reverse()
+    .find((cycle) => cycle.measuredValue != null && cycle.unit);
+  const currentValue = latestMeasured?.measuredValue ?? state.activeGoal.baseline?.value;
+  const currentUnit = latestMeasured?.unit ?? state.activeGoal.baseline?.unit;
+  const targetValue = state.activeGoal.program.target.value;
+  const targetUnit = state.activeGoal.program.target.unit;
+  const goalProgress = goalMetricProgress(
+    {
+      value: state.activeGoal.baseline?.value,
+      unit: state.activeGoal.baseline?.unit,
+    },
+    { value: currentValue, unit: currentUnit },
+    { value: targetValue, unit: targetUnit },
+  );
   const xpInLevel = state.character.xp % 100;
   const missionDate = formatCalendarDate(currentMission?.scheduledDate);
   const missionTiming = calendarDateRelation(currentMission?.scheduledDate);
@@ -114,14 +139,24 @@ export default function HomeScreen() {
               icon="→"
             />
           </Card>
+        ) : hasNextCycle ? (
+          <NextCycleBuilder
+            goal={state.activeGoal}
+            plan={state.activePlan}
+            onAccept={advanceGoalCycle}
+          />
         ) : (
           <Card accent style={styles.completedCard}>
             <View style={styles.victoryIcon}>
               <ThemedText style={styles.victoryGlyph}>✦</ThemedText>
             </View>
-            <Pill tone="success">глава завершена</Pill>
+            <Pill tone={state.activeGoal.status === 'completed' ? 'success' : 'warning'}>
+              {state.activeGoal.status === 'completed' ? 'цель достигнута' : 'срок завершён'}
+            </Pill>
             <ThemedText type="title" style={styles.center}>
-              Маршрут пройден
+              {state.activeGoal.status === 'completed'
+                ? 'Маршрут пройден'
+                : 'Нужен новый срок'}
             </ThemedText>
             <View style={styles.buttonRow}>
               <AppButton
@@ -142,13 +177,22 @@ export default function HomeScreen() {
           <View style={styles.progressCopy}>
             <View style={styles.sectionTop}>
               <ThemedText type="smallBold" numberOfLines={1} style={styles.goalTitle}>
-                {state.activeGoal.title}
+                {state.activeGoal.rawPrompt}
               </ThemedText>
               <ThemedText type="small" style={styles.muted}>
-                {reported}/{total}
+                цикл {state.activePlan.cycleNumber}/{state.activePlan.totalCycles} · {reported}/{total}
               </ThemedText>
             </View>
             <ProgressBar value={planProgress} />
+            {goalProgress !== undefined ? (
+              <View style={styles.goalProgress}>
+                <ThemedText type="small" style={styles.muted}>
+                  {formatMetricValue(currentValue, currentUnit)} →{' '}
+                  {formatMetricValue(targetValue, targetUnit)}
+                </ThemedText>
+                <ProgressBar value={goalProgress} color={Palette.accent} height={5} />
+              </View>
+            ) : null}
           </View>
           <ThemedText style={styles.chevron}>›</ThemedText>
         </Pressable>
@@ -247,6 +291,7 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   progressCopy: { flex: 1, gap: Spacing.two },
+  goalProgress: { gap: Spacing.one },
   goalTitle: { flex: 1 },
   chevron: { color: Palette.textDim, fontSize: 34 },
 });

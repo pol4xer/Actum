@@ -13,7 +13,8 @@ import { ThemedText } from '@/components/themed-text';
 import { InfoPopover } from '@/components/ui/info-popover';
 import { AppButton, Card, Pill, Screen, ScreenHeader } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
-import type { GeneratedGoal, Mission } from '@/domain/types';
+import { goalDurationLabel } from '@/domain/goal-program';
+import type { GeneratedGoal, GoalDuration, Mission } from '@/domain/types';
 import { formatCalendarDate } from '@/lib/calendar-date';
 import { actionableExecutionBlocks } from '@/shared/presentation/execution-visibility';
 import { presentMissionDay, type MissionActionPresentation } from '@/shared/presentation/mission-actions';
@@ -29,6 +30,7 @@ import {
 import { useApp } from '@/state';
 
 import type { GoalPlanner } from './goal-planner';
+import { ProgramRoadmap } from './program-roadmap';
 import type { AIPlannerErrorCode } from './errors';
 import {
   useGoalBuilderController,
@@ -36,10 +38,10 @@ import {
 } from './use-goal-builder-controller';
 
 const MINUTES = [10, 20, 30, 45, 60];
-const HORIZONS = [
-  { value: 7, label: '7 дней' },
-  { value: 14, label: '2 недели' },
-  { value: 30, label: '30 дней' },
+const DURATIONS: ReadonlyArray<{ value: GoalDuration; label: string }> = [
+  { value: 'month', label: '1 месяц' },
+  { value: 'half-year', label: '6 месяцев' },
+  { value: 'year', label: '1 год' },
 ];
 
 export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
@@ -50,16 +52,13 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
     setPrompt,
     baseline,
     setBaseline,
-    targetTimeline,
-    setTargetTimeline,
+    duration,
+    setDuration,
     dailyMinutes,
     setDailyMinutes,
-    horizonDays,
-    setHorizonDays,
     currentLevel,
     setCurrentLevel,
     researchMode,
-    setResearchMode,
     preview,
     savedPreview,
     generationError,
@@ -150,7 +149,7 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
                     title="Почему это бесплатно?"
                     sections={[
                       {
-                        body: `${savedPreview.goal.title} · ${savedPreview.plan.horizonDays} дней. План уже сохранён на устройстве и откроется без повторного web-поиска или GPT-запроса.`,
+                        body: `${savedPreview.goal.title} · ${goalDurationLabel(savedPreview.goal.program.duration)}. План уже сохранён на устройстве и откроется без повторного web-поиска или GPT-запроса.`,
                       },
                     ]}
                   />
@@ -189,21 +188,22 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
             </Question>
 
             <Question
-              title="Когда хочешь достичь цели? · обязательно"
+              title="Срок достижения"
               help={[
                 {
-                  body: 'Подробный календарь покроет первый выбранный горизонт, а этот срок останется направлением всей цели.',
+                  body: 'Actum построит маршрут на весь срок и подробно распишет ближайшие 30 дней. Следующий месяц адаптируется по записанному результату.',
                 },
               ]}>
-              <TextInput
-                accessibilityLabel="Срок большой цели"
-                maxLength={80}
-                onChangeText={setTargetTimeline}
-                placeholder="Например: 6 месяцев или к 1 июня"
-                placeholderTextColor={Palette.textDim}
-                style={styles.detailInput}
-                value={targetTimeline}
-              />
+              <ChoiceRow>
+                {DURATIONS.map((option) => (
+                  <Choice
+                    key={option.value}
+                    label={option.label}
+                    selected={duration === option.value}
+                    onPress={() => setDuration(option.value)}
+                  />
+                ))}
+              </ChoiceRow>
             </Question>
 
             <Question title="Сколько минут в день?">
@@ -214,19 +214,6 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
                     label={`${value} мин`}
                     selected={dailyMinutes === value}
                     onPress={() => setDailyMinutes(value)}
-                  />
-                ))}
-              </ChoiceRow>
-            </Question>
-
-            <Question title="На сколько дней расписать?">
-              <ChoiceRow>
-                {HORIZONS.map((option) => (
-                  <Choice
-                    key={option.value}
-                    label={option.label}
-                    selected={horizonDays === option.value}
-                    onPress={() => setHorizonDays(option.value)}
                   />
                 ))}
               </ChoiceRow>
@@ -250,30 +237,6 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
                   onPress={() => setCurrentLevel('returning')}
                 />
               </View>
-            </Question>
-
-            <Question
-              title="Как собрать план?"
-              help={[
-                {
-                  body:
-                    researchMode === 'web'
-                      ? 'OpenAI сначала изучит web-источники, затем отдельным шагом соберёт структурированный маршрут. Это дольше и дороже одного запроса.'
-                      : 'Один запрос без web-поиска. Подходит для быстрой проверки идеи.',
-                },
-              ]}>
-              <ChoiceRow>
-                <Choice
-                  label="С исследованием"
-                  selected={researchMode === 'web'}
-                  onPress={() => setResearchMode('web')}
-                />
-                <Choice
-                  label="Быстро"
-                  selected={researchMode === 'quick'}
-                  onPress={() => setResearchMode('quick')}
-                />
-              </ChoiceRow>
             </Question>
 
             <View style={styles.buttonRow}>
@@ -348,6 +311,8 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
                 <InfoPopover title="О плане" sections={planInfoWithoutSafety(preview)} />
               </View>
 
+              <ProgramRoadmap program={preview.goal.program} />
+
               <View style={styles.dayList}>
                 {preview.plan.missions.map((mission, index) => {
                   const expanded = expandedPreviewMissionId === mission.id;
@@ -387,7 +352,8 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
                   <InfoPopover title="О плане" sections={planInfoWithoutSafety(preview)} />
                 </View>
                 <View style={styles.planMeta}>
-                  <Meta value={`${preview.plan.horizonDays}`} label="дней" />
+                  <Meta value={goalDurationLabel(preview.goal.program.duration)} label="вся цель" />
+                  <Meta value={`${preview.plan.cycleNumber}/${preview.plan.totalCycles}`} label="цикл" />
                   <Meta value={`${preview.plan.dailyMinutes} мин`} label="в день" />
                 </View>
               </Card>

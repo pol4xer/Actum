@@ -19,6 +19,9 @@ const { HttpGoalPlanner } = await import(
 const { shouldReuseSavedResponseForRetry } = await import(
   '@/features/goal-planning/use-goal-builder-controller'
 );
+const { createNextCycleInput } = await import(
+  '@/features/goal-planning/next-cycle-input'
+);
 
 test('test loader resolves public feature barrels and TSX modules like Expo', () => {
   assert.match(import.meta.resolve('@/features/goal-planning'), /\/goal-planning\/index\.ts$/u);
@@ -26,24 +29,23 @@ test('test loader resolves public feature barrels and TSX modules like Expo', ()
 });
 
 const input = {
-  prompt: '  Прочитать книгу  ',
+  prompt: '  Прочитать 120 страниц  ',
   currentLevel: 'some-experience',
   baseline: 'Сейчас читаю 8 страниц',
-  targetTimeline: 'За два месяца',
+  duration: 'half-year',
   dailyMinutes: 20,
-  horizonDays: 7,
   researchMode: 'web',
 };
 
-test('plan-v5 API DTO remains strict and trims contract text', () => {
+test('plan-v6 API DTO remains strict and trims contract text', () => {
   const raw = createResponseFixture();
-  raw.plan.title = '  Прочитать книгу  ';
+  raw.plan.title = '  Прочитать 120 страниц  ';
 
   const parsed = createPlanResponseDtoSchema(input).parse(raw);
-  assert.equal(parsed.plan.title, 'Прочитать книгу');
+  assert.equal(parsed.plan.title, 'Прочитать 120 страниц');
 
   const wrongContract = structuredClone(raw);
-  wrongContract.meta.contractVersion = 'plan-v4';
+  wrongContract.meta.contractVersion = 'plan-v5';
   assert.equal(createPlanResponseDtoSchema(input).safeParse(wrongContract).success, false);
 
   const fractionalDiscreteCounter = structuredClone(raw);
@@ -77,26 +79,31 @@ test('DTO mapper is deterministic with injected clock and ID factory', () => {
 
   assert.equal(clockCalls, 1);
   assert.equal(idFactoryCalls, 1);
-  assert.equal(generated.goal.id, 'goal-11');
-  assert.equal(generated.plan.id, 'plan-12');
+  assert.equal(generated.goal.id, 'goal-34');
+  assert.equal(generated.plan.id, 'plan-35');
   assert.deepEqual(
     generated.plan.chapters.map((chapter) => chapter.id),
     ['chapter-1', 'chapter-2', 'chapter-3'],
   );
-  assert.equal(generated.goal.rawPrompt, 'Прочитать книгу');
+  assert.equal(generated.goal.rawPrompt, 'Прочитать 120 страниц');
   assert.equal(generated.goal.createdAt, '2026-01-31T12:00:00.000Z');
-  assert.equal(generated.goal.targetDate, '2026-02-06T12:00:00.000Z');
+  assert.equal(generated.goal.targetDate, '2026-07-29T12:00:00.000Z');
   assert.equal(generated.plan.missions[0].scheduledDate, '2026-01-31');
   assert.equal(generated.plan.missions[1].scheduledDate, '2026-02-01');
-  assert.equal(generated.plan.missions[6].scheduledDate, '2026-02-06');
+  assert.equal(generated.plan.missions[29].scheduledDate, '2026-03-01');
   assert.equal(generated.plan.missions[0].chapterId, 'chapter-1');
-  assert.equal(generated.plan.missions[3].chapterId, 'chapter-2');
-  assert.equal(generated.plan.missions[6].chapterId, 'chapter-3');
+  assert.equal(generated.plan.missions[10].chapterId, 'chapter-2');
+  assert.equal(generated.plan.missions[29].chapterId, 'chapter-3');
   assert.equal(generated.plan.missions[0].execution.blocks[0].loadBasis, undefined);
-  assert.equal(generated.plan.missions[1].execution.blocks[0].unitLabel, undefined);
+  assert.equal(generated.plan.missions[29].execution.blocks[0].unitLabel, undefined);
   assert.equal(generated.plan.research.method, 'openai-web-research-v1');
   assert.equal(generated.plan.research.request.requestId, 'request-123');
-  assert.equal(generated.plan.version, 5);
+  assert.equal(generated.plan.version, 6);
+  assert.equal(generated.goal.program.duration, 'half-year');
+  assert.equal(generated.goal.program.totalCycles, 6);
+  assert.equal(generated.goal.program.target.value, 120);
+  assert.equal(generated.plan.cycleNumber, 1);
+  assert.equal(generated.plan.assessment.dayNumber, 30);
 });
 
 test('server error mapping preserves free reuse-only and retry semantics', () => {
@@ -115,6 +122,50 @@ test('server error mapping preserves free reuse-only and retry semantics', () =>
   assert.equal(shouldReuseSavedResponseForRetry('INVALID_RESPONSE'), true);
   assert.equal(shouldReuseSavedResponseForRetry('UPSTREAM_TIMEOUT'), false);
   assert.equal(shouldReuseSavedResponseForRetry('SAVED_RESPONSE_UNAVAILABLE'), false);
+});
+
+test('next cycle input reuses program research context but keeps the execution journal local', () => {
+  const parsed = createPlanResponseDtoSchema(input).parse(createResponseFixture());
+  const generated = mapPlanDtoToGeneratedGoal(input, parsed.plan, parsed.meta, {
+    clock: () => new Date('2026-01-31T12:00:00.000Z'),
+    idFactory: () => {
+      let sequence = 0;
+      return (prefix) => `${prefix}-${++sequence}`;
+    },
+  });
+  generated.goal.program.completedCycles = [
+    {
+      cycleNumber: 1,
+      completedAt: '2026-03-01T12:00:00.000Z',
+      measuredValue: 24,
+      unit: 'pages',
+    },
+  ];
+
+  const next = createNextCycleInput(generated.goal, generated.plan, '  24 страницы  ');
+  assert.equal(next.cycleNumber, 2);
+  assert.equal(next.baseline, '24 страницы');
+  assert.equal(next.duration, 'half-year');
+  assert.equal(next.researchMode, 'web');
+  assert.deepEqual(next.programContext.target, generated.goal.program.target);
+  assert.deepEqual(next.programContext.roadmap, generated.goal.program.roadmap);
+  assert.deepEqual(
+    next.programContext.completedCycles,
+    generated.goal.program.completedCycles,
+  );
+  assert.equal('missionRuns' in next, false);
+
+  generated.plan.version = 5;
+  assert.equal(
+    createNextCycleInput(generated.goal, generated.plan, '24 страницы').researchMode,
+    'quick',
+  );
+
+  generated.goal.program.activeCycle = generated.goal.program.totalCycles;
+  assert.throws(
+    () => createNextCycleInput(generated.goal, generated.plan, '24 страницы'),
+    /no next cycle/u,
+  );
 });
 
 test('HTTP adapter marks reuse-only validation and never rebills saved-plan recovery', async () => {
@@ -202,11 +253,20 @@ function createResponseFixture() {
 
   return {
     plan: {
-      title: 'Прочитать книгу',
+      title: 'Прочитать 120 страниц',
       domain: 'read',
-      targetMetric: 'Закончить одну книгу',
-      targetTimeline: 'За два месяца',
-      summary: 'Семь дней последовательного чтения и заметок.',
+      duration: 'half-year',
+      totalCycles: 6,
+      cycleNumber: 1,
+      target: {
+        userStatement: 'Прочитать 120 страниц',
+        normalizedMetric: 'Прочитанные страницы',
+        value: 120,
+        unit: 'pages',
+      },
+      targetMetric: 'Прочитать 120 страниц',
+      cycleGoal: 'Дойти до устойчивого чтения 24 страниц за контрольную сессию.',
+      summary: 'Полугодовой маршрут с подробным первым циклом на тридцать дней.',
       baseline: {
         userStatement: 'Сейчас читаю 8 страниц',
         normalizedMetric: 'Страниц за сессию',
@@ -217,14 +277,28 @@ function createResponseFixture() {
       safetyNotes: [],
       assumptions: ['Книга уже выбрана пользователем.'],
       sourceLabels: ['Метод последовательного чтения'],
+      roadmap: Array.from({ length: 6 }, (_, index) => ({
+        cycleNumber: index + 1,
+        title: `Месяц ${index + 1}`,
+        focus: `Последовательный этап чтения ${index + 1}.`,
+        targetValue: index === 5 ? 120 : 24 + index * 20,
+        targetUnit: 'pages',
+      })),
+      assessment: {
+        dayNumber: 30,
+        blockIndex: 0,
+        metric: 'Прочитанные страницы за контрольную сессию',
+        targetValue: 24,
+        targetUnit: 'pages',
+      },
       phases: [
-        { title: 'Старт', subtitle: 'Дни один и два', startDay: 1, endDay: 2 },
-        { title: 'Ритм', subtitle: 'Дни три — пять', startDay: 3, endDay: 5 },
-        { title: 'Итог', subtitle: 'Дни шесть и семь', startDay: 6, endDay: 7 },
+        { title: 'Старт', subtitle: 'Дни один — десять', startDay: 1, endDay: 10 },
+        { title: 'Ритм', subtitle: 'Дни одиннадцать — двадцать', startDay: 11, endDay: 20 },
+        { title: 'Итог', subtitle: 'Дни двадцать один — тридцать', startDay: 21, endDay: 30 },
       ],
-      days: Array.from({ length: 7 }, (_, index) => ({
+      days: Array.from({ length: 30 }, (_, index) => ({
         dayNumber: index + 1,
-        phaseIndex: index < 2 ? 1 : index < 5 ? 2 : 3,
+        phaseIndex: index < 10 ? 1 : index < 20 ? 2 : 3,
         title: `День чтения ${index + 1}`,
         description: 'Выполните назначенный блок чтения внутри Actum.',
         type: 'read',
@@ -232,7 +306,13 @@ function createResponseFixture() {
         xp: 10,
         execution: {
           kind: 'in_app',
-          blocks: [structuredClone(blocks[index % blocks.length])],
+          blocks: [
+            structuredClone(index === 29 ? {
+              ...blocks[1],
+              targetPerSet: 24,
+              successCriterion: 'Фактическое число страниц записано.',
+            } : blocks[index % blocks.length]),
+          ],
           successCriterion: 'Назначенный блок выполнен полностью.',
         },
         warning: null,
@@ -243,8 +323,8 @@ function createResponseFixture() {
       providerResponseId: 'response-123',
       researchResponseId: 'research-123',
       model: 'gpt-test',
-      promptVersion: 'prompt-v5',
-      contractVersion: 'plan-v5',
+      promptVersion: 'prompt-v6',
+      contractVersion: 'plan-v6',
       durationMs: 1234,
       webSearchCount: 2,
       inputTokens: 100,

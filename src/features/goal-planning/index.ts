@@ -36,3 +36,6 @@ export type {
   UseGoalBuilderControllerOptions,
 } from './use-goal-builder-controller';
 export { GoalBuilder } from './goal-builder';
+export { NextCycleBuilder } from './next-cycle-builder';
+export { createNextCycleInput } from './next-cycle-input';
+export { ProgramRoadmap } from './program-roadmap';

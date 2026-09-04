@@ -16,7 +16,9 @@ import { createPlanSchema, PLAN_CONTRACT_VERSION } from './ai/contracts/plan-v1.
 import {
   BASELINE_PARSER_VERSION,
   parseTrustedBaseline,
+  parseTrustedTarget,
 } from './ai/contracts/parse-baseline.mjs';
+import { programDurationConfig } from './ai/contracts/program-duration.mjs';
 import {
   PLAN_VALIDATOR_VERSION,
   validatePlanActionability,
@@ -110,7 +112,7 @@ export async function handleRequest(request, response) {
     try {
       const saved = readLatestSavedPlan();
       if (!saved) {
-        sendJson(response, 404, { error: 'Сохранённый plan-v5 не найден.' });
+        sendJson(response, 404, { error: 'Сохранённый plan-v6 не найден.' });
         return;
       }
       sendJson(response, 200, saved);
@@ -271,6 +273,8 @@ if (isDirectRun()) {
 async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKey, reuseOnly) {
   const researchMode = input.researchMode === 'quick' ? 'quick' : 'web';
   const trustedBaseline = parseTrustedBaseline(input.baseline);
+  const normalizedGoal = input.prompt.trim();
+  const trustedTarget = parseTrustedTarget(normalizedGoal);
   let research = {
     brief: '',
     sources: [],
@@ -304,9 +308,11 @@ async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKe
   const planResponse = await requestStructuredPlan(
     input,
     trustedBaseline,
+    trustedTarget,
     research,
     requestId,
     providerStageKey(cacheKey, 'planning'),
+    researchCacheKey,
     reuseOnly,
   );
   const outputText = extractOutputText(planResponse);
@@ -332,14 +338,16 @@ async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKe
     );
   }
   try {
-    validatePlanActionability(
-      plan,
-      input.dailyMinutes,
-      input.horizonDays,
-      input.baseline,
-      input.targetTimeline,
+    validatePlanActionability(plan, {
+      dailyMinutes: input.dailyMinutes,
+      duration: input.duration,
+      cycleNumber: input.cycleNumber ?? 1,
+      expectedBaselineStatement: input.baseline,
+      expectedTargetStatement: normalizedGoal,
       trustedBaseline,
-    );
+      trustedTarget,
+      programContext: input.programContext,
+    });
   } catch (cause) {
     throw invalidProviderOutput(
       cause instanceof Error ? cause.message : 'План не прошёл локальную проверку.',
@@ -379,6 +387,8 @@ async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKe
 }
 
 async function requestResearch(input, trustedBaseline, requestId, stageKey, reuseOnly) {
+  const durationConfig = programDurationConfig(input.duration);
+  const trustedTarget = parseTrustedTarget(input.prompt.trim());
   const payload = await executeProviderStage({
     stageKey,
     stage: 'research',
@@ -396,9 +406,10 @@ async function requestResearch(input, trustedBaseline, requestId, stageKey, reus
         startingPoint: input.currentLevel,
         userBaseline: input.baseline.trim(),
         trustedBaseline,
-        targetTimeline: input.targetTimeline.trim(),
-        minutesPerMission: input.dailyMinutes,
-        horizonDays: input.horizonDays,
+        trustedTarget,
+        duration: input.duration,
+        totalCycles: durationConfig.totalCycles,
+        totalDays: durationConfig.totalDays,
       }),
       tools: [{ type: 'web_search', search_context_size: 'high' }],
       tool_choice: 'required',
@@ -446,9 +457,11 @@ async function requestResearch(input, trustedBaseline, requestId, stageKey, reus
 async function requestStructuredPlan(
   input,
   trustedBaseline,
+  trustedTarget,
   research,
   requestId,
   stageKey,
+  researchCacheKey,
   reuseOnly,
 ) {
   return executeProviderStage({
@@ -468,9 +481,14 @@ async function requestStructuredPlan(
         startingPoint: input.currentLevel,
         userBaseline: input.baseline.trim(),
         trustedBaseline,
-        targetTimeline: input.targetTimeline.trim(),
+        trustedTarget,
+        duration: input.duration,
+        totalCycles: programDurationConfig(input.duration).totalCycles,
+        cycleNumber: input.cycleNumber ?? 1,
         minutesPerMission: input.dailyMinutes,
-        horizonDays: input.horizonDays,
+        cycleDays: 30,
+        programContext: input.programContext ?? null,
+        researchCacheKey,
         researchBrief: research.brief || null,
         verifiedSources: research.sources,
       }),
@@ -481,7 +499,11 @@ async function requestStructuredPlan(
           type: 'json_schema',
           name: 'actum_goal_plan',
           strict: true,
-          schema: createPlanSchema(input.dailyMinutes, input.horizonDays),
+          schema: createPlanSchema(
+            input.dailyMinutes,
+            input.duration,
+            input.cycleNumber ?? 1,
+          ),
         },
       },
     },
@@ -582,52 +604,68 @@ function readLatestSavedPlan() {
   const outputText = extractOutputText(planning.payload);
   if (!outputText) return undefined;
   const plan = JSON.parse(outputText);
-  const research = durableState.latestCompletedStage(
-    'research',
-    Number(planning.payload?.created_at || planning.payload?.completed_at || Number.POSITIVE_INFINITY),
-  );
-  const input = inferSavedPlanInput(plan, Boolean(research), planning.inputSnapshot);
+  // `/saved-plan/latest` is a recovery path, not a legacy migration layer.
+  // A completed plan-v5 response stays on disk but must never masquerade as v6.
+  if (
+    !plan ||
+    !programDurationConfig(plan.duration) ||
+    !Object.hasOwn(plan, 'target') ||
+    !Object.hasOwn(plan, 'roadmap') ||
+    !Object.hasOwn(plan, 'assessment')
+  ) {
+    return undefined;
+  }
+  const input = inferSavedPlanInput(plan, planning.inputSnapshot);
+  const linkedResearchKey =
+    planning.inputSnapshot?.researchCacheKey ?? createResearchCacheKey(input);
+  const research =
+    input.researchMode === 'web'
+      ? durableState.readResearch(linkedResearchKey)
+      : undefined;
   const trustedBaseline = parseTrustedBaseline(input.baseline);
-  validatePlanActionability(
-    plan,
-    input.dailyMinutes,
-    input.horizonDays,
-    input.baseline,
-    input.targetTimeline,
+  const trustedTarget = parseTrustedTarget(input.prompt);
+  validatePlanActionability(plan, {
+    dailyMinutes: input.dailyMinutes,
+    duration: input.duration,
+    cycleNumber: input.cycleNumber ?? 1,
+    expectedBaselineStatement: input.baseline,
+    expectedTargetStatement: input.prompt,
     trustedBaseline,
-  );
+    trustedTarget,
+    programContext: input.programContext,
+  });
 
   const planMeta = responseMeta(planning.payload);
-  const researchMeta = research ? responseMeta(research.payload) : {};
   return {
     input,
     plan,
     meta: {
       requestId: planning.requestId || 'actum_saved_plan',
       providerResponseId: planMeta.providerResponseId,
-      researchResponseId: researchMeta.providerResponseId,
+      researchResponseId: research?.meta?.providerResponseId,
       model: MODEL,
       promptVersion: PROMPT_VERSION,
       contractVersion: PLAN_CONTRACT_VERSION,
       durationMs: 0,
-      webSearchCount: researchMeta.webSearchCount || 0,
-      inputTokens: sumNumbers(researchMeta.inputTokens, planMeta.inputTokens),
-      outputTokens: sumNumbers(researchMeta.outputTokens, planMeta.outputTokens),
-      sources: research ? extractWebSources(research.payload).slice(0, 8) : [],
+      webSearchCount: research?.meta?.webSearchCount || 0,
+      inputTokens: sumNumbers(research?.meta?.inputTokens, planMeta.inputTokens),
+      outputTokens: sumNumbers(research?.meta?.outputTokens, planMeta.outputTokens),
+      sources: research?.sources?.slice(0, 8) ?? [],
     },
   };
 }
 
-function inferSavedPlanInput(plan, hasResearch, inputSnapshot) {
+function inferSavedPlanInput(plan, inputSnapshot) {
   if (inputSnapshot && typeof inputSnapshot === 'object') {
     const recovered = {
       prompt: inputSnapshot.prompt,
       currentLevel: inputSnapshot.currentLevel,
       baseline: inputSnapshot.baseline,
-      targetTimeline: inputSnapshot.targetTimeline,
+      duration: inputSnapshot.duration,
+      cycleNumber: inputSnapshot.cycleNumber,
       dailyMinutes: inputSnapshot.dailyMinutes,
-      horizonDays: inputSnapshot.horizonDays,
       researchMode: inputSnapshot.researchMode,
+      programContext: inputSnapshot.programContext,
     };
     validateInput(recovered);
     return recovered;
@@ -635,8 +673,7 @@ function inferSavedPlanInput(plan, hasResearch, inputSnapshot) {
   if (!plan || typeof plan !== 'object' || !Array.isArray(plan.days)) {
     throw new Error('saved plan has no calendar');
   }
-  const horizonDays = plan.days.length;
-  if (![7, 14, 30].includes(horizonDays)) throw new Error('unsupported saved horizon');
+  if (plan.days.length !== 30) throw new Error('unsupported saved cycle');
   const maximumDayMinutes = Math.max(
     1,
     ...plan.days.map((day) => Number(day?.estimatedMinutes) || 0),
@@ -644,25 +681,23 @@ function inferSavedPlanInput(plan, hasResearch, inputSnapshot) {
   const dailyMinutes = [10, 20, 30, 45, 60].find((value) => value >= maximumDayMinutes);
   if (!dailyMinutes) throw new Error('saved plan exceeds supported daily limit');
   const baseline = plan.baseline?.userStatement;
-  const targetTimeline = plan.targetTimeline;
-  if (typeof baseline !== 'string' || typeof targetTimeline !== 'string') {
-    throw new Error('saved plan has no baseline or target timeline');
+  const prompt = plan.target?.userStatement;
+  if (typeof baseline !== 'string' || typeof prompt !== 'string') {
+    throw new Error('saved plan has no baseline or target');
   }
-  const narrative = `${plan.title || ''} ${plan.targetMetric || ''} ${plan.summary || ''}`;
-  const prompt =
-    /задержк[\p{L}\p{M}]*\s+дыхан/iu.test(narrative) && /10\s*мин/iu.test(narrative)
-      ? 'Научиться задерживать дыхание на 10 минут'
-      : String(plan.title || plan.targetMetric || 'Восстановленная цель Actum');
   const trustedBaseline = parseTrustedBaseline(baseline);
-  return {
+  const recovered = {
     prompt,
     currentLevel: trustedBaseline ? 'some-experience' : 'starting',
     baseline,
-    targetTimeline,
+    duration: plan.duration,
+    cycleNumber: plan.cycleNumber,
     dailyMinutes,
-    horizonDays,
-    researchMode: hasResearch ? 'web' : 'quick',
+    researchMode: 'web',
   };
+  return durableState.readResearch(createResearchCacheKey(recovered))
+    ? recovered
+    : { ...recovered, researchMode: 'quick' };
 }
 
 function createStageInputSnapshot(serializedInput) {
@@ -673,10 +708,12 @@ function createStageInputSnapshot(serializedInput) {
       prompt: input.goal,
       currentLevel: input.startingPoint,
       baseline: input.userBaseline,
-      targetTimeline: input.targetTimeline,
+      duration: input.duration,
+      cycleNumber: input.cycleNumber,
       dailyMinutes: input.minutesPerMission,
-      horizonDays: input.horizonDays,
       researchMode: input.researchBrief ? 'web' : 'quick',
+      programContext: input.programContext ?? undefined,
+      researchCacheKey: input.researchCacheKey,
     };
   } catch {
     return undefined;

@@ -9,10 +9,21 @@ import {
   missionReward,
   REWARD_POLICY,
 } from '../domain/reward-policy';
+import {
+  assessmentActualFromMissionRun,
+  canonicalMetricUnit,
+  createGoalProgram,
+  goalDurationEndDate,
+  inferGoalDuration,
+  isGoalProgramCycleComplete,
+  parseLegacyGoalTarget,
+  programTargetReached,
+} from '../domain/goal-program';
 import { addCalendarDaysToKey } from '../lib/calendar-date';
 import type {
   AppState,
   GeneratedGoal,
+  GoalProgram,
   MissionOutcome,
   MissionRun,
   MissionRunFinishReason,
@@ -25,11 +36,12 @@ export {
   createInitialAppState,
 } from './app-state-defaults';
 export { APP_STATE_STORAGE_KEY, restoreAppState } from './app-state-codec';
-export type { AppStateV1, RestoreAppStateResult } from './app-state-codec';
+export type { AppStateV1, AppStateV2, RestoreAppStateResult } from './app-state-codec';
 
 export type AppStateAction =
   | { type: 'finish-onboarding'; profile: Profile; now: string }
   | { type: 'create-goal'; generated: GeneratedGoal; now: string }
+  | { type: 'advance-goal-cycle'; generated: GeneratedGoal; now: string }
   | { type: 'begin-mission-run'; run: MissionRun; now: string }
   | { type: 'restart-mission-run'; run: MissionRun; now: string }
   | { type: 'save-mission-run'; run: MissionRun; now: string }
@@ -76,6 +88,130 @@ function hasPendingMission(state: AppState, missionId: string): boolean {
       (mission) => mission.id === missionId && mission.outcome === 'pending',
     ),
   );
+}
+
+function ensureGeneratedProgram(generated: GeneratedGoal): GeneratedGoal {
+  const supplied = generated.goal.program;
+  const duration = supplied?.duration ?? inferGoalDuration(
+    generated.goal.targetTimeline ?? generated.plan.targetTimeline,
+  );
+  const target = supplied?.target ?? parseLegacyGoalTarget(generated.goal);
+  const base = createGoalProgram({
+    duration,
+    target,
+    activeCycle: generated.plan.cycleNumber ?? supplied?.activeCycle ?? 1,
+    roadmap: supplied?.roadmap,
+  });
+  const program: GoalProgram = {
+    ...base,
+    completedCycles: supplied?.completedCycles ?? [],
+  };
+  const cycleNumber = generated.plan.cycleNumber ?? program.activeCycle;
+  const targetDate = goalDurationEndDate(generated.goal.createdAt, duration)
+    ?? generated.goal.targetDate;
+  const cycleGoal = generated.plan.cycleGoal?.trim()
+    || generated.plan.missions[0]?.title?.trim()
+    || generated.plan.chapters?.[0]?.title?.trim()
+    || generated.goal.title.trim()
+    || `Цикл ${cycleNumber}`;
+  return {
+    goal: {
+      ...generated.goal,
+      baseline: generated.goal.baseline ?? generated.plan.baseline,
+      targetDate,
+      program,
+    },
+    plan: {
+      ...generated.plan,
+      cycleNumber,
+      totalCycles: program.totalCycles,
+      cycleGoal,
+    },
+  };
+}
+
+function sameProgramTarget(left: GoalProgram['target'], right: GoalProgram['target']): boolean {
+  return (
+    left.userStatement.trim() === right.userStatement.trim() &&
+    left.normalizedMetric.trim() === right.normalizedMetric.trim() &&
+    left.value === right.value &&
+    canonicalMetricUnit(left.unit) === canonicalMetricUnit(right.unit)
+  );
+}
+
+function withExplicitCycleBaseline(
+  program: GoalProgram,
+  cycleNumber: number,
+  baseline: GeneratedGoal['plan']['baseline'],
+): GoalProgram['completedCycles'] {
+  if (
+    !baseline ||
+    baseline.value === null ||
+    !Number.isFinite(baseline.value) ||
+    baseline.value < 0 ||
+    typeof baseline.unit !== 'string' ||
+    !baseline.unit.trim()
+  ) {
+    return program.completedCycles;
+  }
+
+  let changed = false;
+  const completedCycles = program.completedCycles.map((result) => {
+    if (result.cycleNumber !== cycleNumber || result.measuredValue !== null) return result;
+    changed = true;
+    return {
+      ...result,
+      measuredValue: baseline.value,
+      unit: baseline.unit,
+    };
+  });
+  return changed ? completedCycles : program.completedCycles;
+}
+
+function completeActiveCycle(input: {
+  goal: NonNullable<AppState['activeGoal']>;
+  plan: NonNullable<AppState['activePlan']>;
+  missionRuns: AppState['missionRuns'];
+  completedAt: string;
+  hasDevSkip: boolean;
+}): NonNullable<AppState['activeGoal']> {
+  const { goal, plan, missionRuns, completedAt, hasDevSkip } = input;
+  const program = goal.program;
+  if (!program || !isGoalProgramCycleComplete(plan)) {
+    return { ...goal, status: 'active' };
+  }
+
+  const cycleNumber = plan.cycleNumber ?? program.activeCycle;
+  const actual = assessmentActualFromMissionRun(plan, missionRuns);
+  const existingResult = program.completedCycles.find(
+    (result) => result.cycleNumber === cycleNumber,
+  );
+  const completedCycles = existingResult
+    ? program.completedCycles
+    : [
+        ...program.completedCycles,
+        {
+          cycleNumber,
+          completedAt,
+          measuredValue: actual.measuredValue,
+          unit: actual.unit,
+        },
+      ].sort((left, right) => left.cycleNumber - right.cycleNumber);
+  const reached =
+    !hasDevSkip && programTargetReached(program.target, actual, goal.baseline);
+  const isFinalCycle = cycleNumber >= program.totalCycles;
+  const status = reached
+    ? 'completed'
+    : !isFinalCycle
+      ? 'active'
+      : program.target.value === null && !hasDevSkip
+        ? 'completed'
+        : 'paused';
+  return {
+    ...goal,
+    status,
+    program: { ...program, completedCycles },
+  };
 }
 
 function mutateMissionRun(
@@ -170,11 +306,12 @@ export function appStateReducer(state: AppState, action: AppStateAction): AppSta
   }
 
   if (action.type === 'create-goal') {
+    const generated = ensureGeneratedProgram(action.generated);
     return withTimestamp(
       {
         ...state,
-        activeGoal: action.generated.goal,
-        activePlan: action.generated.plan,
+        activeGoal: generated.goal,
+        activePlan: generated.plan,
         checkIns: [],
         missionRuns: {},
         recovery: undefined,
@@ -184,6 +321,65 @@ export function appStateReducer(state: AppState, action: AppStateAction): AppSta
           buffs: ['Ясное намерение'],
           debuffs: [],
         },
+      },
+      action.now,
+    );
+  }
+
+  if (action.type === 'advance-goal-cycle') {
+    if (
+      !state.activeGoal?.program ||
+      state.activeGoal.status !== 'active' ||
+      !state.activePlan
+    ) {
+      return state;
+    }
+    const currentProgram = state.activeGoal.program;
+    const currentCycle = state.activePlan.cycleNumber ?? currentProgram.activeCycle;
+    const nextCycle = currentCycle + 1;
+    const generated = ensureGeneratedProgram(action.generated);
+    const nextProgram = generated.goal.program;
+    if (
+      !isGoalProgramCycleComplete(state.activePlan) ||
+      !currentProgram.completedCycles.some((result) => result.cycleNumber === currentCycle) ||
+      nextCycle > currentProgram.totalCycles ||
+      generated.plan.cycleNumber !== nextCycle ||
+      generated.plan.totalCycles !== currentProgram.totalCycles ||
+      !nextProgram ||
+      nextProgram.activeCycle !== nextCycle ||
+      nextProgram.duration !== currentProgram.duration ||
+      nextProgram.totalDays !== currentProgram.totalDays ||
+      nextProgram.totalCycles !== currentProgram.totalCycles ||
+      nextProgram.roadmap.length !== currentProgram.totalCycles ||
+      !sameProgramTarget(currentProgram.target, nextProgram.target) ||
+      generated.plan.missions.length === 0 ||
+      generated.plan.missions.some((mission) => mission.outcome !== 'pending')
+    ) {
+      return state;
+    }
+    const completedCycles = withExplicitCycleBaseline(
+      currentProgram,
+      currentCycle,
+      generated.plan.baseline,
+    );
+
+    return withTimestamp(
+      {
+        ...state,
+        activeGoal: {
+          ...state.activeGoal,
+          status: 'active',
+          program: {
+            ...currentProgram,
+            activeCycle: nextCycle,
+            roadmap: nextProgram.roadmap,
+            completedCycles,
+          },
+        },
+        activePlan: generated.plan,
+        checkIns: [],
+        missionRuns: {},
+        recovery: undefined,
       },
       action.now,
     );
@@ -305,7 +501,6 @@ export function appStateReducer(state: AppState, action: AppStateAction): AppSta
     const missions = state.activePlan.missions.map((item) =>
       item.id === action.missionId ? { ...item, outcome: action.outcome } : item,
     );
-    const allReported = missions.every((item) => item.outcome !== 'pending');
     const debuffs =
       action.outcome === 'skipped'
         ? Array.from(new Set([...state.character.debuffs, 'Туман сомнений']))
@@ -314,31 +509,40 @@ export function appStateReducer(state: AppState, action: AppStateAction): AppSta
       ? { ...run, status: 'reported', updatedAt: action.now }
       : undefined;
     const comment = action.note?.trim() || undefined;
+    const missionRuns = reportedRun
+      ? { ...state.missionRuns, [action.missionId]: reportedRun }
+      : state.missionRuns;
+    const checkIn = {
+      id: action.checkInId,
+      missionId: action.missionId,
+      runId: run?.id,
+      outcome: action.outcome,
+      comment,
+      note: comment,
+      provenance: 'user' as const,
+      xpDelta,
+      energyDelta,
+      createdAt: action.now,
+    };
+    const checkIns = [checkIn, ...state.checkIns];
+    const activePlan = { ...state.activePlan, missions };
+    const activeGoal = state.activeGoal
+      ? completeActiveCycle({
+          goal: state.activeGoal,
+          plan: activePlan,
+          missionRuns,
+          completedAt: action.now,
+          hasDevSkip: checkIns.some((item) => item.provenance === 'dev-skip'),
+        })
+      : undefined;
 
     return withTimestamp(
       {
         ...state,
-        activeGoal: state.activeGoal
-          ? { ...state.activeGoal, status: allReported ? 'completed' : 'active' }
-          : undefined,
-        activePlan: { ...state.activePlan, missions },
-        missionRuns: reportedRun
-          ? { ...state.missionRuns, [action.missionId]: reportedRun }
-          : state.missionRuns,
-        checkIns: [
-          {
-            id: action.checkInId,
-            missionId: action.missionId,
-            runId: run?.id,
-            outcome: action.outcome,
-            comment,
-            note: comment,
-            xpDelta,
-            energyDelta,
-            createdAt: action.now,
-          },
-          ...state.checkIns,
-        ],
+        activeGoal,
+        activePlan,
+        missionRuns,
+        checkIns,
         character: {
           ...state.character,
           xp,
@@ -371,32 +575,39 @@ export function appStateReducer(state: AppState, action: AppStateAction): AppSta
     const missions = state.activePlan.missions.map((mission) =>
       mission.id === action.missionId ? { ...mission, outcome: 'skipped' as const } : mission,
     );
-    const allReported = missions.every((mission) => mission.outcome !== 'pending');
     const missionRuns = { ...state.missionRuns };
     delete missionRuns[action.missionId];
     const note = 'Пропущено в DEV-режиме.';
+    const checkIn = {
+      id: action.checkInId,
+      missionId: action.missionId,
+      outcome: 'skipped' as const,
+      comment: note,
+      note,
+      provenance: 'dev-skip' as const,
+      xpDelta: 0,
+      energyDelta: 0,
+      createdAt: action.now,
+    };
+    const checkIns = [checkIn, ...state.checkIns];
+    const activePlan = { ...state.activePlan, missions };
+    const activeGoal = state.activeGoal
+      ? completeActiveCycle({
+          goal: state.activeGoal,
+          plan: activePlan,
+          missionRuns,
+          completedAt: action.now,
+          hasDevSkip: true,
+        })
+      : undefined;
 
     return withTimestamp(
       {
         ...state,
-        activeGoal: state.activeGoal
-          ? { ...state.activeGoal, status: allReported ? 'completed' : 'active' }
-          : undefined,
-        activePlan: { ...state.activePlan, missions },
+        activeGoal,
+        activePlan,
         missionRuns,
-        checkIns: [
-          {
-            id: action.checkInId,
-            missionId: action.missionId,
-            outcome: 'skipped',
-            comment: note,
-            note,
-            xpDelta: 0,
-            energyDelta: 0,
-            createdAt: action.now,
-          },
-          ...state.checkIns,
-        ],
+        checkIns,
         recovery: undefined,
       },
       action.now,
@@ -426,11 +637,17 @@ export function appStateReducer(state: AppState, action: AppStateAction): AppSta
       if (!Number.isInteger(dayNumber) || dayNumber < 1) return undefined;
       return addCalendarDaysToKey(action.startDate, dayNumber - 1);
     });
-    const targetDate = addCalendarDaysToKey(
-      action.startDate,
-      Math.max(0, state.activePlan.horizonDays - 1),
-    );
-    if (scheduledDates.some((date) => date === undefined) || !targetDate) return state;
+    if (scheduledDates.some((date) => date === undefined)) return state;
+
+    const activeCycle = state.activePlan.cycleNumber ?? state.activeGoal.program?.activeCycle;
+    const program = state.activeGoal.program && activeCycle
+      ? {
+          ...state.activeGoal.program,
+          completedCycles: state.activeGoal.program.completedCycles.filter(
+            (result) => result.cycleNumber !== activeCycle,
+          ),
+        }
+      : state.activeGoal.program;
 
     return withTimestamp(
       {
@@ -438,7 +655,7 @@ export function appStateReducer(state: AppState, action: AppStateAction): AppSta
         activeGoal: {
           ...state.activeGoal,
           status: 'active',
-          targetDate: `${targetDate}T00:00:00.000Z`,
+          program,
         },
         activePlan: {
           ...state.activePlan,

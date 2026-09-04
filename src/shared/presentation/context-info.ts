@@ -91,6 +91,17 @@ export function planContextSections(
 
   appendSection(sections, 'Логика плана', withoutExecutionSafetyCopy(plan.summary));
 
+  if (plan.cycleNumber && plan.totalCycles) {
+    appendSection(
+      sections,
+      'Текущий цикл',
+      joinLines([
+        `Цикл ${plan.cycleNumber} из ${plan.totalCycles}`,
+        withoutExecutionSafetyCopy(plan.cycleGoal),
+      ]),
+    );
+  }
+
   if (baseline) {
     appendSection(
       sections,

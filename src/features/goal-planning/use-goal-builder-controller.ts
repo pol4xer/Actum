@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import type { GeneratedGoal, GoalInput } from '@/domain/types';
+import type { GeneratedGoal, GoalDuration, GoalInput } from '@/domain/types';
 
 import { AIPlannerError, type AIPlannerErrorCode } from './errors';
 import { defaultGoalPlanner } from './http-goal-planner';
@@ -26,9 +26,8 @@ export function useGoalBuilderController({
   const [stage, setStage] = useState<GoalBuilderStage>('intent');
   const [prompt, setPrompt] = useState('');
   const [baseline, setBaseline] = useState('');
-  const [targetTimeline, setTargetTimeline] = useState('');
+  const [duration, setDuration] = useState<GoalDuration>();
   const [dailyMinutes, setDailyMinutes] = useState(20);
-  const [horizonDays, setHorizonDays] = useState(30);
   const [currentLevel, setCurrentLevel] =
     useState<GoalInput['currentLevel']>('starting');
   const [researchMode, setResearchMode] =
@@ -38,19 +37,21 @@ export function useGoalBuilderController({
   const [generationErrorCode, setGenerationErrorCode] = useState<AIPlannerErrorCode>();
   const [savedPreview, setSavedPreview] = useState<GeneratedGoal>();
 
-  const input = useMemo<GoalInput>(
-    () => ({
-      prompt,
-      baseline,
-      targetTimeline,
-      dailyMinutes,
-      horizonDays,
-      currentLevel,
-      researchMode,
-    }),
-    [baseline, currentLevel, dailyMinutes, horizonDays, prompt, researchMode, targetTimeline],
+  const input = useMemo<GoalInput | undefined>(
+    () =>
+      duration
+        ? {
+            prompt,
+            baseline,
+            duration,
+            dailyMinutes,
+            currentLevel,
+            researchMode,
+          }
+        : undefined,
+    [baseline, currentLevel, dailyMinutes, duration, prompt, researchMode],
   );
-  const detailsComplete = baseline.trim().length >= 2 && targetTimeline.trim().length >= 2;
+  const detailsComplete = baseline.trim().length >= 2 && duration !== undefined;
 
   useEffect(() => {
     let active = true;
@@ -62,9 +63,8 @@ export function useGoalBuilderController({
         setPreview(saved);
         setPrompt(saved.goal.rawPrompt);
         setBaseline(saved.plan.baseline?.userStatement ?? 'Сохранённая исходная точка');
-        setTargetTimeline(saved.plan.targetTimeline ?? 'Сохранённый срок');
+        setDuration(saved.goal.program.duration);
         setDailyMinutes(saved.plan.dailyMinutes);
-        setHorizonDays(saved.plan.horizonDays);
         setCurrentLevel(saved.plan.baseline?.value != null ? 'some-experience' : 'starting');
         setResearchMode(
           saved.plan.research.method === 'openai-web-research-v1' ? 'web' : 'quick',
@@ -84,7 +84,7 @@ export function useGoalBuilderController({
 
   const generateGoal = useCallback(
     async (reuseOnly = false) => {
-      if (!detailsComplete) return;
+      if (!detailsComplete || !input) return;
       setGenerationError('');
       setGenerationErrorCode(undefined);
       setStage('generating');
@@ -124,12 +124,10 @@ export function useGoalBuilderController({
     setPrompt,
     baseline,
     setBaseline,
-    targetTimeline,
-    setTargetTimeline,
+    duration,
+    setDuration,
     dailyMinutes,
     setDailyMinutes,
-    horizonDays,
-    setHorizonDays,
     currentLevel,
     setCurrentLevel,
     researchMode,
@@ -141,7 +139,10 @@ export function useGoalBuilderController({
     detailsComplete,
     continueFromIntent: () => setStage('details'),
     backToIntent: () => setStage('intent'),
-    editDetails: () => setStage('details'),
+    editDetails: () => {
+      setResearchMode('web');
+      setStage('details');
+    },
     generateGoal: () => generateGoal(false),
     retryGeneration,
     openSavedPlan,

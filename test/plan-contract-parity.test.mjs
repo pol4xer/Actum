@@ -18,39 +18,48 @@ const { validatePlanActionability } = await import(
 );
 
 const DAILY_MINUTES = [10, 20, 30, 45, 60];
-const HORIZONS = [7, 14, 30];
+const DURATIONS = [
+  ['month', 1],
+  ['half-year', 6],
+  ['year', 12],
+];
 
-test('server plan-v5 schema, validator, and client DTO remain in lockstep', () => {
-  assert.equal(PLAN_CONTRACT_VERSION, 'plan-v5');
+test('server plan-v6 schema, validator, and client DTO remain in lockstep', () => {
+  assert.equal(PLAN_CONTRACT_VERSION, 'plan-v6');
 
   for (const dailyMinutes of DAILY_MINUTES) {
-    for (const horizonDays of HORIZONS) {
+    for (const [duration, totalCycles] of DURATIONS) {
+      const cycleNumber = Math.min(2, totalCycles);
       const clientSchema = canonicalizeJsonSchema(
-        toJSONSchema(createPlanDtoSchema(dailyMinutes, horizonDays), {
+        toJSONSchema(createPlanDtoSchema(dailyMinutes, duration, cycleNumber), {
           io: 'input',
           unrepresentable: 'any',
         }),
       );
       const serverSchema = canonicalizeJsonSchema(
-        createPlanSchema(dailyMinutes, horizonDays),
+        createPlanSchema(dailyMinutes, duration, cycleNumber),
       );
       assert.deepEqual(
         clientSchema,
         serverSchema,
-        `plan-v5 schema drift for ${dailyMinutes} minutes / ${horizonDays} days`,
+        `plan-v6 schema drift for ${dailyMinutes} minutes / ${duration}`,
       );
 
-      const plan = createValidatorFixture(dailyMinutes, horizonDays);
-      assert.equal(createPlanDtoSchema(dailyMinutes, horizonDays).safeParse(plan).success, true);
+      const plan = createValidatorFixture(dailyMinutes, duration, totalCycles, cycleNumber);
       assert.equal(
-        validatePlanActionability(
-          plan,
+        createPlanDtoSchema(dailyMinutes, duration, cycleNumber).safeParse(plan).success,
+        true,
+      );
+      assert.equal(
+        validatePlanActionability(plan, {
           dailyMinutes,
-          horizonDays,
-          plan.baseline.userStatement,
-          plan.targetTimeline,
-          undefined,
-        ),
+          duration,
+          cycleNumber,
+          expectedBaselineStatement: plan.baseline.userStatement,
+          expectedTargetStatement: plan.target.userStatement,
+          trustedBaseline: undefined,
+          trustedTarget: undefined,
+        }),
         plan,
       );
     }
@@ -94,7 +103,8 @@ function canonicalizeJsonSchema(value, parentKey = '') {
   );
 }
 
-function createValidatorFixture(dailyMinutes, horizonDays) {
+function createValidatorFixture(dailyMinutes, duration, totalCycles, cycleNumber) {
+  const horizonDays = 30;
   const firstPhaseEnd = Math.floor(horizonDays / 3);
   const secondPhaseEnd = Math.floor(horizonDays * 2 / 3);
   const blocks = [
@@ -144,7 +154,30 @@ function createValidatorFixture(dailyMinutes, horizonDays) {
     title: 'Последовательное чтение',
     domain: 'read',
     targetMetric: 'Завершить выбранный материал',
-    targetTimeline: 'За выбранный период',
+    duration,
+    totalCycles,
+    cycleNumber,
+    target: {
+      userStatement: 'Последовательно завершить выбранный материал',
+      normalizedMetric: 'Завершённая доля материала',
+      value: null,
+      unit: null,
+    },
+    cycleGoal: 'Завершить назначенный измеримый этап материала.',
+    roadmap: Array.from({ length: totalCycles }, (_, index) => ({
+      cycleNumber: index + 1,
+      title: `Этап ${index + 1}`,
+      focus: 'Последовательно продвигаться по назначенному материалу.',
+      targetValue: null,
+      targetUnit: null,
+    })),
+    assessment: {
+      dayNumber: 30,
+      blockIndex: 0,
+      metric: 'Завершённая доля материала',
+      targetValue: null,
+      targetUnit: null,
+    },
     summary: 'Ежедневный маршрут чтения с фиксацией результата внутри Actum.',
     baseline: {
       userStatement: 'Начинаю с текущего уровня',

@@ -1,7 +1,7 @@
 import { REWARD_POLICY } from '../domain/reward-policy';
 import type { AppState } from '../domain/types';
 
-export const APP_STATE_SCHEMA_VERSION = 2 as const;
+export const APP_STATE_SCHEMA_VERSION = 3 as const;
 
 function toTimestamp(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : value;

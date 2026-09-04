@@ -71,10 +71,42 @@ test('preflight wording is hidden only when it contains safety copy', () => {
   );
 });
 
-test('legacy safety chapter titles become neutral without exposing their context', () => {
-  assert.deepEqual(presentExecutionSection('Безопасный старт'), {
+test('safety-themed universal work is never treated as a disposable warning gate', () => {
+  const accountSecurity = {
+    kind: 'checklist',
+    title: 'Проверка безопасности аккаунта',
+    items: ['Включи двухфакторную аутентификацию', 'Сохрани резервные коды'],
+    estimatedSeconds: 120,
+    successCriterion: 'Оба действия выполнены.',
+  };
+  const safeTechnique = {
+    kind: 'checklist',
+    title: 'Безопасная техника планки',
+    items: ['Поставь локти под плечами', 'Сохрани прямую линию корпуса'],
+    estimatedSeconds: 60,
+    successCriterion: 'Оба действия выполнены.',
+  };
+
+  assert.equal(isSafetyOnlyExecutionBlock(accountSecurity), false);
+  assert.equal(isSafetyOnlyExecutionBlock(safeTechnique), false);
+  assert.deepEqual(actionableExecutionBlocks([accountSecurity, safeTechnique]), [
+    accountSecurity,
+    safeTechnique,
+  ]);
+  assert.equal(
+    withoutExecutionSafetyCopy('Создай безопасный пароль. Изучи медицинскую терминологию.'),
+    'Создай безопасный пароль. Изучи медицинскую терминологию.',
+  );
+});
+
+test('legacy safety-only chapters become neutral without hiding universal safety work', () => {
+  assert.deepEqual(presentExecutionSection('Безопасный старт', 'Проверь самочувствие до начала.'), {
     title: 'старт',
     showContext: false,
+  });
+  assert.deepEqual(presentExecutionSection('Безопасность аккаунта', 'Включи двухфакторную защиту.'), {
+    title: 'Безопасность аккаунта',
+    showContext: true,
   });
   assert.deepEqual(presentExecutionSection('Консолидация'), {
     title: 'Консолидация',

@@ -1,4 +1,6 @@
-export const PLAN_VALIDATOR_VERSION = 'plan-validator-v5';
+import { CYCLE_DAYS, programDurationConfig } from './program-duration.mjs';
+
+export const PLAN_VALIDATOR_VERSION = 'plan-validator-v6';
 
 const COUNTER_UNITS = new Set([
   'reps',
@@ -26,7 +28,6 @@ const MISSION_TYPES = new Set([
   'submit',
   'check',
 ]);
-const ALLOWED_HORIZONS = new Set([7, 14, 30]);
 const UNIT_ALIASES = new Map([
   ['reps', 'reps'],
   ['rep', 'reps'],
@@ -87,7 +88,13 @@ const PLAN_KEYS = [
   'title',
   'domain',
   'targetMetric',
-  'targetTimeline',
+  'duration',
+  'totalCycles',
+  'cycleNumber',
+  'target',
+  'cycleGoal',
+  'roadmap',
+  'assessment',
   'summary',
   'baseline',
   'safetyNotes',
@@ -97,6 +104,9 @@ const PLAN_KEYS = [
   'days',
 ];
 const BASELINE_KEYS = ['userStatement', 'normalizedMetric', 'value', 'unit', 'calculationRule'];
+const TARGET_KEYS = ['userStatement', 'normalizedMetric', 'value', 'unit'];
+const ROADMAP_KEYS = ['cycleNumber', 'title', 'focus', 'targetValue', 'targetUnit'];
+const ASSESSMENT_KEYS = ['dayNumber', 'blockIndex', 'metric', 'targetValue', 'targetUnit'];
 const PHASE_KEYS = ['title', 'subtitle', 'startDay', 'endDay'];
 const DAY_KEYS = [
   'dayNumber',
@@ -213,32 +223,55 @@ const EMBEDDED_SUBDAY_TIME_QUANTITY_PATTERN =
 
 export function validatePlanActionability(
   plan,
-  dailyMinutes,
-  horizonDays,
-  expectedBaselineStatement,
-  expectedTargetTimeline,
-  trustedBaseline,
+  {
+    dailyMinutes,
+    duration,
+    cycleNumber = 1,
+    expectedBaselineStatement,
+    expectedTargetStatement,
+    trustedBaseline,
+    trustedTarget,
+    programContext,
+  },
 ) {
   assertExactObject(plan, 'plan', PLAN_KEYS);
   if (!Number.isInteger(dailyMinutes) || dailyMinutes < 1) {
     fail('dailyMinutes', 'дневной лимит должен быть целым числом минут');
   }
-  if (!ALLOWED_HORIZONS.has(horizonDays)) {
-    fail('horizonDays', 'горизонт должен быть равен 7, 14 или 30 дням');
+  const durationConfig = programDurationConfig(duration);
+  if (!durationConfig) {
+    fail('duration', 'ожидается month, half-year или year');
   }
+  assertInteger(cycleNumber, 'cycleNumber', 1, durationConfig.totalCycles);
 
   assertString(plan.title, 'title', 3, 120);
   assertGeneratedText(plan.title, 'title');
   if (!GOAL_DOMAINS.has(plan.domain)) fail('domain', 'неизвестный домен цели');
   assertString(plan.targetMetric, 'targetMetric', 3, 220);
   assertGeneratedText(plan.targetMetric, 'targetMetric');
-  assertString(plan.targetTimeline, 'targetTimeline', 2, 80);
-  if (
-    expectedTargetTimeline &&
-    plan.targetTimeline.trim() !== expectedTargetTimeline.trim()
-  ) {
-    fail('targetTimeline', 'срок большой цели пользователя был изменён');
+  if (plan.duration !== duration) fail('duration', 'выбранный срок программы был изменён');
+  if (plan.totalCycles !== durationConfig.totalCycles) {
+    fail('totalCycles', `для срока ${duration} ожидается ${durationConfig.totalCycles}`);
   }
+  if (plan.cycleNumber !== cycleNumber) {
+    fail('cycleNumber', `ожидается цикл ${cycleNumber}`);
+  }
+  validateTarget(
+    plan.target,
+    expectedTargetStatement,
+    trustedTarget,
+    cycleNumber > 1 ? programContext?.target : undefined,
+  );
+  assertString(plan.cycleGoal, 'cycleGoal', 5, 300);
+  assertGeneratedText(plan.cycleGoal, 'cycleGoal');
+  validateRoadmap(
+    plan.roadmap,
+    durationConfig.totalCycles,
+    cycleNumber,
+    trustedBaseline,
+    trustedTarget,
+    programContext,
+  );
   assertString(plan.summary, 'summary', 10, 600);
   assertGeneratedText(plan.summary, 'summary');
   validateBaseline(plan.baseline, expectedBaselineStatement, trustedBaseline);
@@ -251,17 +284,17 @@ export function validatePlanActionability(
     assertGeneratedText(assumption, `assumptions.${index}`),
   );
   assertStringArray(plan.sourceLabels, 'sourceLabels', 1, 8, 2, 180);
-  validatePhases(plan.phases, horizonDays);
+  validatePhases(plan.phases, CYCLE_DAYS);
 
-  if (!Array.isArray(plan.days) || plan.days.length !== horizonDays) {
-    fail('days', `план должен содержать ровно ${horizonDays} календарных дней`);
+  if (!Array.isArray(plan.days) || plan.days.length !== CYCLE_DAYS) {
+    fail('days', `цикл должен содержать ровно ${CYCLE_DAYS} календарных дней`);
   }
 
   let loadLinkedBlockCount = 0;
   plan.days.forEach((day, index) => {
     const path = `days.${index}`;
     assertExactObject(day, path, DAY_KEYS);
-    assertInteger(day.dayNumber, `${path}.dayNumber`, 1, horizonDays);
+    assertInteger(day.dayNumber, `${path}.dayNumber`, 1, CYCLE_DAYS);
     if (day.dayNumber !== index + 1) {
       fail(`${path}.dayNumber`, `ожидается последовательный день ${index + 1}`);
     }
@@ -281,7 +314,231 @@ export function validatePlanActionability(
     fail('days', 'измеримая двигательная цель не использует baseline ни в одном расчёте');
   }
 
+  validateAssessment(plan.assessment, plan, cycleNumber);
+
   return plan;
+}
+
+function validateTarget(target, expectedStatement, trustedTarget, previousTarget) {
+  assertExactObject(target, 'target', TARGET_KEYS);
+  assertString(target.userStatement, 'target.userStatement', 5, 1000);
+  if (typeof expectedStatement === 'string' && target.userStatement !== expectedStatement) {
+    fail('target.userStatement', 'цель пользователя должна быть сохранена дословно');
+  }
+  assertString(target.normalizedMetric, 'target.normalizedMetric', 2, 180);
+  assertGeneratedText(target.normalizedMetric, 'target.normalizedMetric');
+
+  if (!trustedTarget) {
+    if (target.value !== null || target.unit !== null) {
+      fail('target.value', 'нераспознанная числовая цель должна быть null');
+    }
+    validateFrozenProgramTarget(target, previousTarget);
+    return;
+  }
+
+  assertFiniteNumber(target.value, 'target.value', 0, 1_000_000_000);
+  assertString(target.unit, 'target.unit', 1, 40);
+  if (target.value !== trustedTarget.value) {
+    fail('target.value', `ожидается локально распознанное значение ${trustedTarget.value}`);
+  }
+  if (canonicalUnit(target.unit) !== canonicalUnit(trustedTarget.unit)) {
+    fail('target.unit', `ожидается локально распознанная единица ${trustedTarget.unit}`);
+  }
+
+  validateFrozenProgramTarget(target, previousTarget);
+}
+
+function validateFrozenProgramTarget(target, previousTarget) {
+  if (!previousTarget) return;
+  const sameClientIdentity =
+    typeof previousTarget.userStatement === 'string' &&
+    target.userStatement.trim() === previousTarget.userStatement.trim() &&
+    typeof previousTarget.normalizedMetric === 'string' &&
+    target.normalizedMetric.trim() === previousTarget.normalizedMetric.trim() &&
+    Object.is(target.value, previousTarget.value) &&
+    normalizedIdentityUnit(target.unit) === normalizedIdentityUnit(previousTarget.unit);
+  if (!sameClientIdentity) {
+    fail('target', 'цель программы нельзя изменять между циклами');
+  }
+}
+
+function normalizedIdentityUnit(value) {
+  return typeof value === 'string' ? value.trim().toLocaleLowerCase('ru-RU') : value;
+}
+
+function validateRoadmap(
+  roadmap,
+  totalCycles,
+  currentCycleNumber,
+  trustedBaseline,
+  trustedTarget,
+  programContext,
+) {
+  if (!Array.isArray(roadmap) || roadmap.length !== totalCycles) {
+    fail('roadmap', `ожидается ровно ${totalCycles} этапов программы`);
+  }
+
+  roadmap.forEach((entry, index) => {
+    const path = `roadmap.${index}`;
+    assertExactObject(entry, path, ROADMAP_KEYS);
+    assertInteger(entry.cycleNumber, `${path}.cycleNumber`, 1, totalCycles);
+    if (entry.cycleNumber !== index + 1) {
+      fail(`${path}.cycleNumber`, `ожидается последовательный цикл ${index + 1}`);
+    }
+    assertString(entry.title, `${path}.title`, 2, 100);
+    assertGeneratedText(entry.title, `${path}.title`);
+    assertString(entry.focus, `${path}.focus`, 5, 240);
+    assertGeneratedText(entry.focus, `${path}.focus`);
+    validateNullableMetricPair(entry.targetValue, entry.targetUnit, path);
+  });
+
+  const previousRoadmap = programContext?.roadmap;
+  if (currentCycleNumber > 1 && Array.isArray(previousRoadmap)) {
+    for (let index = 0; index < currentCycleNumber - 1; index += 1) {
+      if (!isSameRoadmapEntry(roadmap[index], previousRoadmap[index])) {
+        fail(`roadmap.${index}`, 'завершённый этап программы нельзя изменять');
+      }
+    }
+  }
+
+  const trustedUnitsMatch =
+    trustedBaseline &&
+    trustedTarget &&
+    canonicalUnit(trustedBaseline.unit) === canonicalUnit(trustedTarget.unit);
+  if (trustedUnitsMatch) {
+    const currentDirection = Math.sign(
+      trustedTarget.value - trustedBaseline.value,
+    );
+    const numericEntries = [];
+    roadmap.forEach((entry, index) => {
+      const path = `roadmap.${index}`;
+      const frozenLegacyNull =
+        index < currentCycleNumber - 1 &&
+        Array.isArray(previousRoadmap) &&
+        entry.targetValue === null &&
+        entry.targetUnit === null &&
+        previousRoadmap[index]?.targetValue === null &&
+        previousRoadmap[index]?.targetUnit === null;
+      if (frozenLegacyNull) return;
+
+      assertFiniteNumber(entry.targetValue, `${path}.targetValue`, 0, 1_000_000_000);
+      assertString(entry.targetUnit, `${path}.targetUnit`, 1, 40);
+      if (canonicalUnit(entry.targetUnit) !== canonicalUnit(trustedTarget.unit)) {
+        fail(`${path}.targetUnit`, `ожидается единица ${trustedTarget.unit}`);
+      }
+      numericEntries.push({ entry, index, path });
+    });
+
+    const firstNumericValue = numericEntries[0]?.entry.targetValue;
+    const programDirection = Math.sign(
+      trustedTarget.value - (firstNumericValue ?? trustedBaseline.value),
+    );
+    let previousValue;
+    numericEntries.forEach(({ entry, index, path }) => {
+      if (programDirection > 0 && previousValue != null && entry.targetValue < previousValue) {
+        fail(`${path}.targetValue`, 'этапы должны монотонно приближаться к цели');
+      }
+      if (programDirection < 0 && previousValue != null && entry.targetValue > previousValue) {
+        fail(`${path}.targetValue`, 'этапы должны монотонно приближаться к цели');
+      }
+      if (
+        programDirection === 0 &&
+        previousValue != null &&
+        !nearlyEqual(entry.targetValue, trustedTarget.value)
+      ) {
+        fail(`${path}.targetValue`, 'этапы должны монотонно приближаться к цели');
+      }
+      if (
+        currentDirection > 0 &&
+        index >= currentCycleNumber - 1 &&
+        (entry.targetValue < trustedBaseline.value || entry.targetValue > trustedTarget.value)
+      ) {
+        fail(`${path}.targetValue`, 'текущий и будущие этапы должны приближаться к цели');
+      }
+      if (
+        currentDirection < 0 &&
+        index >= currentCycleNumber - 1 &&
+        (entry.targetValue > trustedBaseline.value || entry.targetValue < trustedTarget.value)
+      ) {
+        fail(`${path}.targetValue`, 'текущий и будущие этапы должны приближаться к цели');
+      }
+      if (
+        currentDirection === 0 &&
+        index >= currentCycleNumber - 1 &&
+        !nearlyEqual(entry.targetValue, trustedTarget.value)
+      ) {
+        fail(`${path}.targetValue`, 'достигнутая цель не должна удаляться от исходной точки');
+      }
+      previousValue = entry.targetValue;
+    });
+    const finalEntry = roadmap.at(-1);
+    if (finalEntry.targetValue !== trustedTarget.value) {
+      fail('roadmap', 'последний этап должен точно совпадать с конечной целью');
+    }
+  }
+}
+
+function validateAssessment(assessment, plan, currentCycleNumber) {
+  assertExactObject(assessment, 'assessment', ASSESSMENT_KEYS);
+  if (assessment.dayNumber !== CYCLE_DAYS) {
+    fail('assessment.dayNumber', `контрольный замер должен быть назначен на день ${CYCLE_DAYS}`);
+  }
+  assertInteger(assessment.blockIndex, 'assessment.blockIndex', 0, 11);
+  assertString(assessment.metric, 'assessment.metric', 2, 180);
+  assertGeneratedText(assessment.metric, 'assessment.metric');
+  validateNullableMetricPair(
+    assessment.targetValue,
+    assessment.targetUnit,
+    'assessment',
+  );
+
+  const currentMilestone = plan.roadmap[currentCycleNumber - 1];
+  if (
+    !Object.is(assessment.targetValue, currentMilestone.targetValue) ||
+    assessment.targetUnit !== currentMilestone.targetUnit
+  ) {
+    fail('assessment', 'контрольный замер должен совпадать с целью текущего цикла');
+  }
+
+  const finalDay = plan.days[CYCLE_DAYS - 1];
+  const block = finalDay.execution.blocks[assessment.blockIndex];
+  if (!block) fail('assessment.blockIndex', 'указанный блок отсутствует в дне 30');
+  if (block.kind !== 'timer' && block.kind !== 'counter') {
+    fail('assessment.blockIndex', 'контрольный замер должен указывать на timer или counter');
+  }
+  if (assessment.targetValue === null) return;
+
+  if (block.kind === 'timer') {
+    if (canonicalUnit(assessment.targetUnit) !== 'seconds') {
+      fail('assessment.targetUnit', 'для timer ожидается seconds');
+    }
+    if (block.durationSecondsPerSet !== assessment.targetValue) {
+      fail('assessment.targetValue', 'длительность timer не совпадает с целью замера');
+    }
+    return;
+  }
+
+  const blockUnit = block.unit === 'custom' ? block.unitLabel : block.unit;
+  if (canonicalUnit(blockUnit) !== canonicalUnit(assessment.targetUnit)) {
+    fail('assessment.targetUnit', 'единица counter не совпадает с целью замера');
+  }
+  if (block.targetPerSet !== assessment.targetValue) {
+    fail('assessment.targetValue', 'targetPerSet не совпадает с целью замера');
+  }
+}
+
+function validateNullableMetricPair(value, unit, path) {
+  if (value === null && unit === null) return;
+  if (value === null || unit === null) {
+    fail(`${path}.targetValue`, 'значение и единица должны быть одновременно null или заполнены');
+  }
+  assertFiniteNumber(value, `${path}.targetValue`, 0, 1_000_000_000);
+  assertString(unit, `${path}.targetUnit`, 1, 40);
+}
+
+function isSameRoadmapEntry(left, right) {
+  if (!left || !right) return false;
+  return ROADMAP_KEYS.every((key) => Object.is(left[key], right[key]));
 }
 
 function validateBaseline(baseline, expectedBaselineStatement, trustedBaseline) {
@@ -372,7 +629,7 @@ function validateDay(day, dailyMinutes, trustedBaseline, path) {
   const execution = day.execution;
   assertExactObject(execution, `${path}.execution`, EXECUTION_KEYS);
   if (execution.kind !== 'in_app') {
-    fail(`${path}.execution.kind`, 'для plan-v5 ожидается только in_app');
+    fail(`${path}.execution.kind`, 'для plan-v6 ожидается только in_app');
   }
   assertString(execution.successCriterion, `${path}.execution.successCriterion`, 5, 320);
   assertGeneratedText(execution.successCriterion, `${path}.execution.successCriterion`);
@@ -678,7 +935,7 @@ function assertExactObject(value, path, expectedKeys) {
     if (!Object.hasOwn(value, key)) fail(`${path}.${key}`, 'обязательное поле отсутствует');
   }
   for (const key of Object.keys(value)) {
-    if (!expected.has(key)) fail(`${path}.${key}`, 'поле не поддерживается контрактом plan-v5');
+    if (!expected.has(key)) fail(`${path}.${key}`, 'поле не поддерживается контрактом plan-v6');
   }
 }
 

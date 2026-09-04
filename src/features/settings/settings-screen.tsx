@@ -85,8 +85,8 @@ export default function SettingsScreen() {
     if (!state.activeGoal || !plan) return;
     const firstMissionTitle = plan.missions[0]?.title;
     Alert.alert(
-      'Начать текущий план заново?',
-      'Прогресс очистится, а план останется. Новый запрос к GPT не отправится.',
+      'Начать текущий месяц заново?',
+      'Прогресс этого цикла очистится, а большая цель и маршрут останутся. Новый запрос к GPT не отправится.',
       [
         { text: 'Отмена', style: 'cancel' },
         {
@@ -175,7 +175,7 @@ export default function SettingsScreen() {
         </ThemedText>
         {state.activeGoal && state.activePlan ? (
           <AppButton
-            label="Начать план заново"
+            label="Начать текущий месяц заново"
             variant="secondary"
             onPress={confirmRestartPlan}
           />

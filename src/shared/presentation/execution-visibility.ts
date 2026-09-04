@@ -5,8 +5,10 @@ const PREFLIGHT_TITLE =
   /(?:провер(?:ка|ь)|чек|готовност|перед\s+(?:началом|стартом)|самочувств|preflight|readiness)/iu;
 const SAFETY_COPY =
   /(?:безопасн|медицин|врач|доктор|инструктор|противопоказ|головокруж|тошнот|боль|судорог|потер[\p{L}]*\s+сознани|одышк|симптом|самочувств|гипервентил|без\s+(?:воды|ванн)|только\s+на\s+суше|устойчив[\p{L}]*\s+положени|dizz|nause|pain|seiz|symptom|hypervent|underwater|dry\s+only)/iu;
+const SAFETY_ONLY_ITEM_COPY =
+  /(?:головокруж|тошнот|боль|судорог|потер[\p{L}]*\s+сознани|одышк|симптом|самочувств|гипервентил|без\s+(?:воды|ванн)|только\s+на\s+суше|устойчив[\p{L}]*\s+положени|(?:обычн|спокойн)[\p{L}]*\s+дыхани|глубок[\p{L}]*\s+вдох|dizz|nause|pain|seiz|symptom|hypervent|underwater|dry\s+only)/iu;
 const SAFETY_CLAUSE =
-  /(?:^|[,;]\s*|\s+и\s+|\s+)(?:(?:при|если)\s+(?:головокруж|тошнот|бол|судорог|одышк|потер[\p{L}]*\s+сознани|спутанност|резк[\p{L}]*\s+ухудш)|без\s+(?:гипервентил|тревожн[\p{L}]*\s+симптом|головокруж|тошнот|бол|судорог|воды|ванн)|только\s+на\s+суше|не\s+гипервентил|немедленно\s+прекрат|прекрат[\p{L}]*\s+(?:блок|упражн|практик)|проконсульт|обрат[\p{L}]*\s+к\s+(?:врач|доктор)|найд[\p{L}]*\s+(?:сертифицированн[\p{L}]*\s+)?инструктор|медицинск[\p{L}]*|безопасн[\p{L}]*|противопоказ[\p{L}]*|dizz|nause|seiz|hypervent)/iu;
+  /(?:^|[,;]\s*|\s+и\s+|\s+)(?:(?:при|если)\s+(?:головокруж|тошнот|бол|судорог|одышк|потер[\p{L}]*\s+сознани|спутанност|резк[\p{L}]*\s+ухудш)|без\s+(?:гипервентил|тревожн[\p{L}]*\s+симптом|головокруж|тошнот|бол|судорог|воды|ванн)|только\s+на\s+суше|не\s+гипервентил|немедленно\s+прекрат|прекрат[\p{L}]*\s+(?:блок|упражн|практик)|проконсульт|обрат[\p{L}]*\s+к\s+(?:врач|доктор)|найд[\p{L}]*\s+(?:сертифицированн[\p{L}]*\s+)?инструктор|(?:практик|упражн)[\p{L}]*\s+(?:проход|выполня)[\p{L}]*\s+(?:только\s+)?(?:в|на)\s+безопасн[\p{L}]*|dizz|nause|seiz|hypervent)/iu;
 
 /**
  * Detects legacy checklist gates whose only purpose is repeating legal/safety copy.
@@ -17,10 +19,13 @@ const SAFETY_CLAUSE =
  */
 export function isSafetyOnlyExecutionBlock(block: MissionExecutionBlock): boolean {
   if (block.kind !== 'checklist') return false;
-  if (EXPLICIT_SAFETY_TITLE.test(block.title)) return true;
-
-  const copy = [block.title, ...block.items, block.successCriterion].join(' ');
-  return PREFLIGHT_TITLE.test(block.title) && SAFETY_COPY.test(copy);
+  const safetyTitled =
+    EXPLICIT_SAFETY_TITLE.test(block.title) || PREFLIGHT_TITLE.test(block.title);
+  return (
+    safetyTitled &&
+    block.items.length > 0 &&
+    block.items.every((item) => SAFETY_ONLY_ITEM_COPY.test(item))
+  );
 }
 
 export function actionableExecutionBlocks(
@@ -34,12 +39,12 @@ export function containsExecutionSafetyCopy(value: string | undefined): boolean 
 }
 
 /** Neutralizes safety-led phase labels in already paid plans at display time. */
-export function presentExecutionSection(title: string): {
+export function presentExecutionSection(title: string, context?: string): {
   title: string;
   showContext: boolean;
 } {
   const normalized = title.trim();
-  if (!EXPLICIT_SAFETY_TITLE.test(normalized)) {
+  if (!EXPLICIT_SAFETY_TITLE.test(normalized) || !SAFETY_COPY.test(context ?? '')) {
     return { title: normalized, showContext: true };
   }
 

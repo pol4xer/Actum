@@ -6,6 +6,7 @@ import {
 } from 'react';
 
 import { featureFlags } from '@/config/feature-flags';
+import { isGoalProgramCycleComplete } from '@/domain/goal-program';
 import type {
   AppState,
   Archetype,
@@ -39,12 +40,14 @@ export type AppContextValue = {
   retryPersistence(): Promise<boolean>;
   currentMission: ReturnType<typeof getCurrentMission>;
   completedCount: number;
+  cycleComplete: boolean;
   finishOnboarding(input: {
     name: string;
     archetype: Archetype;
     strictness: StrictnessMode;
   }): void;
   createGoal(generated: GeneratedGoal): void;
+  advanceGoalCycle(generated: GeneratedGoal): void;
   beginMissionRun(missionId: string): MissionRun | undefined;
   restartMissionRun(missionId: string): MissionRun | undefined;
   saveMissionRun(run: MissionRun): void;
@@ -102,6 +105,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       currentMission: getCurrentMission(state),
       completedCount:
         state.activePlan?.missions.filter((mission) => mission.outcome === 'completed').length ?? 0,
+      cycleComplete: isGoalProgramCycleComplete(state.activePlan),
       ...commands,
       resetProgress,
     };

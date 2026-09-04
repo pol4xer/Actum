@@ -35,6 +35,7 @@ await import('node:fs/promises').then(({ mkdir }) => mkdir(compiledDirectory));
 compileModule('src/domain/mission-run.ts', 'mission-run.mjs');
 compileModule('src/domain/mission-run-machine.ts', 'mission-run-machine.mjs');
 compileModule('src/domain/reward-policy.ts', 'reward-policy.mjs');
+compileModule('src/domain/goal-program.ts', 'goal-program.mjs');
 compileModule('src/lib/calendar-date.ts', 'calendar-date.mjs');
 compileModule('src/state/app-state-defaults.ts', 'app-state-defaults.mjs', (source) =>
   source.replace("from '../domain/reward-policy';", "from './reward-policy.mjs';"),
@@ -42,12 +43,14 @@ compileModule('src/state/app-state-defaults.ts', 'app-state-defaults.mjs', (sour
 compileModule('src/state/app-state-codec.ts', 'app-state-codec.mjs', (source) =>
   source
     .replace("from '../domain/mission-run';", "from './mission-run.mjs';")
+    .replace("from '../domain/goal-program';", "from './goal-program.mjs';")
     .replace("from './app-state-defaults';", "from './app-state-defaults.mjs';"),
 );
 compileModule('src/state/app-state.ts', 'app-state.mjs', (source) =>
   source
     .replace("from '../domain/mission-run';", "from './mission-run.mjs';")
     .replace("from '../domain/reward-policy';", "from './reward-policy.mjs';")
+    .replace("from '../domain/goal-program';", "from './goal-program.mjs';")
     .replace("from '../lib/calendar-date';", "from './calendar-date.mjs';")
     .replace("from './app-state-defaults';", "from './app-state-defaults.mjs';")
     .replace("from './app-state-codec';", "from './app-state-codec.mjs';"),
@@ -87,6 +90,18 @@ const {
   selectTwinProjection,
 } = await import(pathToFileURL(join(compiledDirectory, 'reward-policy.mjs')).href);
 const {
+  GOAL_DURATION_CONFIG,
+  assessmentActualFromMissionRun,
+  canonicalMetricUnit,
+  createGoalProgram,
+  goalDurationEndDate,
+  goalDurationLabel,
+  goalMetricProgress,
+  inferGoalDuration,
+  parseLegacyGoalTarget,
+  programTargetReached,
+} = await import(pathToFileURL(join(compiledDirectory, 'goal-program.mjs')).href);
+const {
   APP_STATE_STORAGE_KEY,
   appStateReducer,
   createInitialAppState,
@@ -106,6 +121,12 @@ const T1 = '2026-08-01T09:01:00.000Z';
 const T2 = '2026-08-01T09:02:00.000Z';
 
 function generatedGoal() {
+  const target = {
+    userStatement: 'Read ten pages',
+    normalizedMetric: 'pages read',
+    value: 10,
+    unit: 'pages',
+  };
   return {
     goal: {
       id: 'goal-1',
@@ -114,16 +135,27 @@ function generatedGoal() {
       domain: 'read',
       targetDate: '2026-09-01T00:00:00.000Z',
       targetMetric: '10 pages',
+      program: createGoalProgram({ duration: 'month', target }),
       status: 'active',
       createdAt: T0,
     },
     plan: {
       id: 'plan-1',
-      version: 5,
+      version: 6,
       createdAt: T0,
       dailyMinutes: 15,
       horizonDays: 1,
       summary: 'Concrete session',
+      cycleNumber: 1,
+      totalCycles: 1,
+      cycleGoal: 'Read and measure ten pages.',
+      assessment: {
+        dayNumber: 1,
+        blockIndex: 0,
+        metric: 'pages read',
+        targetValue: 10,
+        targetUnit: 'pages',
+      },
       chapters: [{ id: 'chapter-1', title: 'Start', subtitle: 'Start', order: 1 }],
       missions: [
         {
@@ -342,9 +374,489 @@ function completedCheckpoint(run, targetMet = true) {
   return checkpoint;
 }
 
+function generatedProgramGoal({
+  duration = 'half-year',
+  cycleNumber = 1,
+  targetValue = 100,
+  targetUnit = 'pages',
+  targetStatement = 'Read one hundred pages',
+} = {}) {
+  const generated = generatedGoal();
+  const target = {
+    userStatement: targetStatement,
+    normalizedMetric: targetUnit ? `${targetUnit} result` : 'qualitative result',
+    value: targetValue,
+    unit: targetUnit,
+  };
+  generated.goal.rawPrompt = targetStatement;
+  generated.goal.targetMetric = target.normalizedMetric;
+  generated.goal.program = createGoalProgram({ duration, target, activeCycle: cycleNumber });
+  generated.plan.id = `plan-cycle-${cycleNumber}`;
+  generated.plan.cycleNumber = cycleNumber;
+  generated.plan.totalCycles = GOAL_DURATION_CONFIG[duration].totalCycles;
+  generated.plan.cycleGoal = `Cycle ${cycleNumber} assessment`;
+  generated.plan.assessment = {
+    dayNumber: 1,
+    blockIndex: 0,
+    metric: target.normalizedMetric,
+    targetValue,
+    targetUnit,
+  };
+  return generated;
+}
+
+function finishProgramMission(
+  state,
+  { actual = 10, outcome = 'completed', now = T2, note } = {},
+) {
+  const mission = state.activePlan.missions[0];
+  const run = createMissionRun(mission, T0);
+  let next = appStateReducer(state, { type: 'begin-mission-run', run, now: T0 });
+  const checkpoint = completedCheckpoint(run, actual >= 10);
+  checkpoint.blockResults[0].sets[0].actualQuantity = actual;
+  checkpoint.blockResults[0].sets[0].targetMet = actual >= 10;
+  next = appStateReducer(next, {
+    type: 'finish-mission-run',
+    run: checkpoint,
+    finishReason: 'completed',
+    now: T1,
+  });
+  return appStateReducer(next, {
+    type: 'report-mission',
+    missionId: mission.id,
+    runId: run.id,
+    outcome,
+    note,
+    checkInId: `checkin-${outcome}-${actual}`,
+    now,
+  });
+}
+
+test('goal duration domain keeps the three fixed product choices and inclusive end dates', () => {
+  assert.deepEqual(GOAL_DURATION_CONFIG, {
+    month: { totalDays: 30, totalCycles: 1 },
+    'half-year': { totalDays: 180, totalCycles: 6 },
+    year: { totalDays: 365, totalCycles: 12 },
+  });
+  assert.equal(goalDurationLabel('month'), 'Месяц');
+  assert.equal(goalDurationLabel('half-year'), 'Полгода');
+  assert.equal(goalDurationLabel('year'), 'Год');
+  assert.equal(goalDurationEndDate(T0, 'month'), '2026-08-30T09:00:00.000Z');
+  assert.equal(goalDurationEndDate(T0, 'year'), '2027-07-31T09:00:00.000Z');
+  assert.equal(goalDurationEndDate('invalid', 'year'), undefined);
+  assert.equal(inferGoalDuration('Шесть месяцев'), 'half-year');
+  assert.equal(inferGoalDuration('пол года'), 'half-year');
+  assert.equal(inferGoalDuration('half year'), 'half-year');
+  assert.equal(inferGoalDuration('half a year'), 'half-year');
+  assert.equal(inferGoalDuration('six months'), 'half-year');
+  assert.equal(inferGoalDuration('twelve months'), 'year');
+  assert.deepEqual(parseLegacyGoalTarget({
+    rawPrompt: 'Хочу задерживать дыхание под водой на 10 минут',
+    targetMetric: 'Статическая задержка дыхания',
+  }), {
+    userStatement: 'Хочу задерживать дыхание под водой на 10 минут',
+    normalizedMetric: 'Статическая задержка дыхания',
+    value: 600,
+    unit: 'seconds',
+  });
+});
+
+test('program dates use Europe/Istanbul calendar days around local midnight', () => {
+  const previousTimezone = process.env.TZ;
+  process.env.TZ = 'Europe/Istanbul';
+  try {
+    // 22:30Z is already the next local day in Istanbul. The helper preserves
+    // that local wall-clock date instead of truncating the input to UTC midnight.
+    assert.equal(
+      goalDurationEndDate('2026-09-03T22:30:00.000Z', 'month'),
+      '2026-10-02T22:30:00.000Z',
+    );
+  } finally {
+    if (previousTimezone === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTimezone;
+  }
+});
+
+test('metric direction and canonical units support increasing and decreasing goals', () => {
+  assert.equal(canonicalMetricUnit('секунд'), 'seconds');
+  assert.equal(canonicalMetricUnit('Повторения'), 'reps');
+  assert.equal(canonicalMetricUnit('custom score'), 'custom score');
+
+  const decreasingBaseline = { value: 10, unit: 'страниц' };
+  const decreasingTarget = {
+    userStatement: 'Reduce the backlog to five pages',
+    normalizedMetric: 'remaining pages',
+    value: 5,
+    unit: 'pages',
+  };
+  assert.equal(programTargetReached(
+    decreasingTarget,
+    { measuredValue: 7, unit: 'страницы' },
+    decreasingBaseline,
+  ), false);
+  assert.equal(programTargetReached(
+    decreasingTarget,
+    { measuredValue: 5, unit: 'страниц' },
+    decreasingBaseline,
+  ), true);
+  assert.equal(programTargetReached(
+    decreasingTarget,
+    { measuredValue: 4, unit: 'seconds' },
+    decreasingBaseline,
+  ), false);
+
+  assert.equal(goalMetricProgress(
+    decreasingBaseline,
+    { value: 10, unit: 'pages' },
+    decreasingTarget,
+  ), 0);
+  assert.equal(goalMetricProgress(
+    decreasingBaseline,
+    { value: 8, unit: 'страницы' },
+    decreasingTarget,
+  ), 0.4);
+  assert.equal(goalMetricProgress(
+    decreasingBaseline,
+    { value: 5, unit: 'pages' },
+    decreasingTarget,
+  ), 1);
+  assert.equal(goalMetricProgress(
+    decreasingBaseline,
+    { value: 2, unit: 'pages' },
+    decreasingTarget,
+  ), 1);
+  assert.equal(goalMetricProgress(
+    decreasingBaseline,
+    { value: 8, unit: 'seconds' },
+    decreasingTarget,
+  ), undefined);
+
+  assert.equal(goalMetricProgress(
+    { value: 80, unit: 'секунд' },
+    { value: 340, unit: 'seconds' },
+    { value: 600, unit: 'секунды' },
+  ), 0.5);
+});
+
+test('assessment reads the maximum recorded timer or counter set from the explicit block only', () => {
+  const counterGoal = generatedGoal();
+  const counterRun = createMissionRun(counterGoal.plan.missions[0], T0);
+  assert.deepEqual(
+    assessmentActualFromMissionRun(counterGoal.plan, { [counterRun.missionId]: counterRun }),
+    { measuredValue: null, unit: null },
+  );
+  counterRun.blockResults[0].sets[0].actualQuantity = 17;
+  counterRun.blockResults[0].sets[0].completedAt = T1;
+  assert.deepEqual(
+    assessmentActualFromMissionRun(counterGoal.plan, { [counterRun.missionId]: counterRun }),
+    { measuredValue: 17, unit: 'pages' },
+  );
+
+  const timerGoal = generatedGoal();
+  timerGoal.plan.missions[0].execution = {
+    kind: 'in_app',
+    successCriterion: 'Record both holds.',
+    blocks: [{
+      kind: 'timer',
+      title: 'Hold',
+      instruction: 'Hold.',
+      sets: 2,
+      durationSecondsPerSet: 30,
+      restSeconds: 30,
+      successCriterion: 'Both holds recorded.',
+    }],
+  };
+  timerGoal.plan.assessment = {
+    dayNumber: 1,
+    blockIndex: 0,
+    metric: 'hold duration',
+    targetValue: 2,
+    targetUnit: 'minutes',
+  };
+  const timerRun = createMissionRun(timerGoal.plan.missions[0], T0);
+  timerRun.blockResults[0].sets[0].actualDurationSeconds = 45;
+  timerRun.blockResults[0].sets[1].actualDurationSeconds = 90;
+  timerRun.blockResults[0].sets[0].completedAt = T1;
+  timerRun.blockResults[0].sets[1].completedAt = T2;
+  assert.deepEqual(
+    assessmentActualFromMissionRun(timerGoal.plan, { [timerRun.missionId]: timerRun }),
+    { measuredValue: 1.5, unit: 'minutes' },
+  );
+  timerGoal.plan.assessment.blockIndex = 1;
+  assert.deepEqual(
+    assessmentActualFromMissionRun(timerGoal.plan, { [timerRun.missionId]: timerRun }),
+    { measuredValue: null, unit: null },
+  );
+});
+
+test('assessment ignores unfinished sets and chooses the best value in a decreasing program', () => {
+  const generated = generatedGoal();
+  generated.goal.baseline = {
+    userStatement: 'Ten pages remain',
+    normalizedMetric: 'remaining pages',
+    value: 10,
+    unit: 'pages',
+    calculationRule: 'Count remaining pages.',
+  };
+  generated.plan.baseline = structuredClone(generated.goal.baseline);
+  generated.plan.assessment = {
+    dayNumber: 1,
+    blockIndex: 0,
+    metric: 'remaining pages',
+    targetValue: 5,
+    targetUnit: 'pages',
+  };
+  generated.plan.missions[0].execution.blocks[0].sets = 3;
+  generated.plan.missions[0].execution.blocks[0].targetPerSet = 5;
+
+  const run = createMissionRun(generated.plan.missions[0], T0);
+  run.blockResults[0].sets[0].actualQuantity = 7;
+  run.blockResults[0].sets[0].completedAt = T1;
+  run.blockResults[0].sets[1].actualQuantity = 5;
+  run.blockResults[0].sets[1].completedAt = T2;
+  // The initialized third set remains zero but was never performed.
+
+  assert.deepEqual(
+    assessmentActualFromMissionRun(generated.plan, { [run.missionId]: run }),
+    { measuredValue: 5, unit: 'pages' },
+  );
+});
+
+test('cycle completion records partial assessment once without completing a longer goal', () => {
+  let state = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: generatedProgramGoal(),
+    now: T0,
+  });
+  state = finishProgramMission(state, { actual: 8, outcome: 'partial' });
+
+  assert.equal(state.activeGoal.status, 'active');
+  assert.deepEqual(state.activeGoal.program.completedCycles, [{
+    cycleNumber: 1,
+    completedAt: T2,
+    measuredValue: 8,
+    unit: 'pages',
+  }]);
+  const duplicate = appStateReducer(state, {
+    type: 'report-mission',
+    missionId: 'mission-1',
+    runId: state.missionRuns['mission-1'].id,
+    outcome: 'partial',
+    checkInId: 'duplicate',
+    now: T2,
+  });
+  assert.equal(duplicate, state);
+  assert.equal(duplicate.activeGoal.program.completedCycles.length, 1);
+});
+
+test('numeric assessment may finish early, while a missed final numeric target pauses the goal', () => {
+  let early = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: generatedProgramGoal({ targetValue: 10 }),
+    now: T0,
+  });
+  early = finishProgramMission(early, { actual: 10 });
+  assert.equal(early.activeGoal.status, 'completed');
+  assert.equal(early.checkIns[0].provenance, 'user');
+  assert.equal(appStateReducer(early, {
+    type: 'advance-goal-cycle',
+    generated: generatedProgramGoal({ cycleNumber: 2, targetValue: 10 }),
+    now: T2,
+  }), early);
+
+  let missed = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: generatedProgramGoal({ duration: 'month', targetValue: 20 }),
+    now: T0,
+  });
+  missed = finishProgramMission(missed, { actual: 10 });
+  assert.equal(missed.activeGoal.status, 'paused');
+
+  let qualitative = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: generatedProgramGoal({
+      duration: 'month',
+      targetValue: null,
+      targetUnit: null,
+      targetStatement: 'Build a stable reading habit',
+    }),
+    now: T0,
+  });
+  qualitative = finishProgramMission(qualitative, { actual: 10 });
+  assert.equal(qualitative.activeGoal.status, 'completed');
+
+  const decreasingGenerated = generatedProgramGoal({ duration: 'month', targetValue: 5 });
+  decreasingGenerated.goal.baseline = {
+    userStatement: 'Ten pages remain',
+    normalizedMetric: 'remaining pages',
+    value: 10,
+    unit: 'страниц',
+    calculationRule: 'Count the remaining pages.',
+  };
+  let decreasingMiss = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: structuredClone(decreasingGenerated),
+    now: T0,
+  });
+  decreasingMiss = finishProgramMission(decreasingMiss, { actual: 7, outcome: 'partial' });
+  assert.equal(decreasingMiss.activeGoal.status, 'paused');
+
+  let decreasingHit = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: decreasingGenerated,
+    now: T0,
+  });
+  decreasingHit = finishProgramMission(decreasingHit, { actual: 5, outcome: 'partial' });
+  assert.equal(decreasingHit.activeGoal.status, 'completed');
+});
+
+test('a user comment cannot impersonate immutable DEV-skip provenance', () => {
+  let state = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: generatedProgramGoal({ targetValue: 10 }),
+    now: T0,
+  });
+  state = finishProgramMission(state, {
+    actual: 10,
+    note: 'Пропущено в DEV-режиме.',
+  });
+
+  assert.equal(state.checkIns[0].note, 'Пропущено в DEV-режиме.');
+  assert.equal(state.checkIns[0].provenance, 'user');
+  assert.equal(state.activeGoal.status, 'completed');
+});
+
+test('advanceGoalCycle accepts only the exact next compatible cycle and preserves the program identity', () => {
+  const firstGenerated = generatedProgramGoal();
+  let state = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: firstGenerated,
+    now: T0,
+  });
+  state = finishProgramMission(state, { actual: 10 });
+  const character = structuredClone(state.character);
+  const identity = {
+    id: state.activeGoal.id,
+    createdAt: state.activeGoal.createdAt,
+    targetDate: state.activeGoal.targetDate,
+  };
+
+  const skippedCycle = generatedProgramGoal({ cycleNumber: 3 });
+  assert.equal(appStateReducer(state, {
+    type: 'advance-goal-cycle',
+    generated: skippedCycle,
+    now: T2,
+  }), state);
+
+  const metricDrift = generatedProgramGoal({ cycleNumber: 2 });
+  metricDrift.goal.program.target.normalizedMetric = 'different pages metric';
+  assert.equal(appStateReducer(state, {
+    type: 'advance-goal-cycle',
+    generated: metricDrift,
+    now: T2,
+  }), state);
+
+  const second = generatedProgramGoal({ cycleNumber: 2 });
+  second.goal.program.target.unit = 'страниц';
+  second.plan.baseline = {
+    userStatement: 'A newer reading check measured twelve pages',
+    normalizedMetric: 'pages result',
+    value: 12,
+    unit: 'pages',
+    calculationRule: 'Count pages in the explicit cycle baseline check.',
+  };
+  second.goal.id = 'replacement-id-that-must-not-win';
+  const actions = [];
+  createAppCommands({
+    state,
+    dispatch: (action) => actions.push(action),
+    now: () => new Date(T2),
+    canSkipMissionDays: true,
+  }).advanceGoalCycle(second);
+  assert.deepEqual(actions, [{ type: 'advance-goal-cycle', generated: second, now: T2 }]);
+
+  state = appStateReducer(state, actions[0]);
+  assert.equal(state.activePlan.id, 'plan-cycle-2');
+  assert.equal(state.activeGoal.program.activeCycle, 2);
+  assert.deepEqual(state.activeGoal.program.completedCycles, [{
+    cycleNumber: 1,
+    completedAt: T2,
+    measuredValue: 10,
+    unit: 'pages',
+  }]);
+  assert.deepEqual({
+    id: state.activeGoal.id,
+    createdAt: state.activeGoal.createdAt,
+    targetDate: state.activeGoal.targetDate,
+  }, identity);
+  assert.deepEqual(state.character, character);
+  assert.deepEqual(state.checkIns, []);
+  assert.deepEqual(state.missionRuns, {});
+});
+
+test('next-cycle explicit baseline fills a missing cycle result without replacing the program baseline', () => {
+  const first = generatedProgramGoal({ targetValue: 5 });
+  first.goal.baseline = {
+    userStatement: 'Ten pages remain at program start',
+    normalizedMetric: 'pages result',
+    value: 10,
+    unit: 'pages',
+    calculationRule: 'Count remaining pages.',
+  };
+  // A migrated legacy cycle has no trustworthy machine-readable assessment.
+  first.plan.assessment = undefined;
+
+  let state = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated: first,
+    now: T0,
+  });
+  state = finishProgramMission(state, { actual: 7, outcome: 'partial' });
+  assert.deepEqual(state.activeGoal.program.completedCycles, [{
+    cycleNumber: 1,
+    completedAt: T2,
+    measuredValue: null,
+    unit: null,
+  }]);
+
+  const second = generatedProgramGoal({ cycleNumber: 2, targetValue: 5 });
+  second.goal.program.target.unit = 'страниц';
+  second.plan.baseline = {
+    userStatement: 'Eight pages remain now',
+    normalizedMetric: 'pages result',
+    value: 8,
+    unit: 'страниц',
+    calculationRule: 'Count remaining pages.',
+  };
+  state = appStateReducer(state, {
+    type: 'advance-goal-cycle',
+    generated: second,
+    now: T2,
+  });
+
+  // Keep the original baseline: it determines that reaching five is a decrease.
+  assert.equal(state.activeGoal.baseline.value, 10);
+  assert.equal(state.activeGoal.baseline.unit, 'pages');
+  // The explicit next-cycle input is now the latest current metric shown by UI.
+  assert.deepEqual(state.activeGoal.program.completedCycles, [{
+    cycleNumber: 1,
+    completedAt: T2,
+    measuredValue: 8,
+    unit: 'страниц',
+  }]);
+  assert.equal(goalMetricProgress(
+    state.activeGoal.baseline,
+    {
+      value: state.activeGoal.program.completedCycles[0].measuredValue,
+      unit: state.activeGoal.program.completedCycles[0].unit,
+    },
+    state.activeGoal.program.target,
+  ), 0.4);
+});
+
 test('schema v1 migrates additively under the stable storage key', () => {
   const original = stateWithGoal();
-  const legacy = {
+  const legacy = structuredClone({
     ...original,
     schemaVersion: 1,
     missionRuns: undefined,
@@ -359,18 +871,98 @@ test('schema v1 migrates additively under the stable storage key', () => {
         createdAt: T0,
       },
     ],
-  };
+  });
   delete legacy.missionRuns;
+  delete legacy.activeGoal.program;
+  delete legacy.activePlan.cycleNumber;
+  delete legacy.activePlan.totalCycles;
+  delete legacy.activePlan.cycleGoal;
+  delete legacy.activePlan.assessment;
 
   const restored = restoreAppState(JSON.stringify(legacy));
   assert.equal(APP_STATE_STORAGE_KEY, 'actum.app-state.v1');
   assert.equal(restored.status, 'ready');
   if (restored.status !== 'ready') return;
   assert.equal(restored.migrated, true);
-  assert.equal(restored.state.schemaVersion, 2);
-  assert.deepEqual(restored.state.activePlan, original.activePlan);
+  assert.equal(restored.state.schemaVersion, 3);
+  assert.equal(restored.state.activePlan.id, original.activePlan.id);
   assert.deepEqual(restored.state.checkIns, legacy.checkIns);
   assert.deepEqual(restored.state.missionRuns, {});
+});
+
+test('schema v2 migrates the saved one-year ten-minute goal without inventing progress', () => {
+  const current = stateWithGoal();
+  const legacy = structuredClone(current);
+  legacy.schemaVersion = 2;
+  legacy.activeGoal.rawPrompt = 'Хочу задерживать дыхание под водой на 10 минут';
+  legacy.activeGoal.title = 'Задержка дыхания';
+  legacy.activeGoal.targetMetric = 'Статическая задержка дыхания';
+  legacy.activeGoal.targetTimeline = 'Год';
+  legacy.activeGoal.status = 'completed';
+  delete legacy.activeGoal.program;
+  legacy.activePlan.version = 5;
+  legacy.activePlan.horizonDays = 30;
+  legacy.activePlan.targetTimeline = 'Год';
+  legacy.activePlan.summary = 'Очень длинный legacy-summary, который остаётся только в info.';
+  legacy.activePlan.chapters[0].title = 'Краткий стартовый цикл';
+  delete legacy.activePlan.cycleNumber;
+  delete legacy.activePlan.totalCycles;
+  delete legacy.activePlan.cycleGoal;
+  delete legacy.activePlan.assessment;
+  legacy.activePlan.missions = Array.from({ length: 30 }, (_, index) => ({
+    ...structuredClone(current.activePlan.missions[0]),
+    id: `legacy-day-${index + 1}`,
+    sequence: index + 1,
+    dayNumber: index + 1,
+    outcome: 'completed',
+  }));
+  legacy.checkIns = [];
+  legacy.missionRuns = {};
+  legacy.lastUpdatedAt = T2;
+
+  const restored = restoreAppState(JSON.stringify(legacy));
+  assert.equal(restored.status, 'ready');
+  if (restored.status !== 'ready') return;
+  assert.equal(restored.migrated, true);
+  assert.equal(restored.state.schemaVersion, 3);
+  assert.equal(restored.state.activeGoal.status, 'active');
+  assert.equal(restored.state.activeGoal.targetDate, '2027-07-31T09:00:00.000Z');
+  assert.deepEqual(restored.state.activeGoal.program.target, {
+    userStatement: 'Хочу задерживать дыхание под водой на 10 минут',
+    normalizedMetric: 'Статическая задержка дыхания',
+    value: 600,
+    unit: 'seconds',
+  });
+  assert.equal(restored.state.activeGoal.program.duration, 'year');
+  assert.equal(restored.state.activeGoal.program.totalDays, 365);
+  assert.equal(restored.state.activeGoal.program.totalCycles, 12);
+  assert.equal(restored.state.activeGoal.program.activeCycle, 1);
+  assert.deepEqual(
+    restored.state.activeGoal.program.roadmap.slice(0, -1).map((item) => item.targetValue),
+    Array.from({ length: 11 }, () => null),
+  );
+  assert.deepEqual(restored.state.activeGoal.program.roadmap.at(-1), {
+    cycleNumber: 12,
+    title: 'Цикл 12',
+    focus: 'Итоговый цикл и контрольный замер',
+    targetValue: 600,
+    targetUnit: 'seconds',
+  });
+  assert.deepEqual(restored.state.activeGoal.program.completedCycles, [{
+    cycleNumber: 1,
+    completedAt: T2,
+    measuredValue: null,
+    unit: null,
+  }]);
+  assert.equal(restored.state.activePlan.cycleNumber, 1);
+  assert.equal(restored.state.activePlan.totalCycles, 12);
+  assert.equal(restored.state.activePlan.cycleGoal, 'Read');
+  assert.equal(
+    restored.state.activePlan.summary,
+    'Очень длинный legacy-summary, который остаётся только в info.',
+  );
+  assert.equal(restored.state.activePlan.assessment, undefined);
+  assert.equal(restored.state.activePlan.missions.length, 30);
 });
 
 test('corrupt and unknown future state block restoration instead of falling back for persistence', () => {
@@ -385,6 +977,62 @@ test('corrupt and unknown future state block restoration instead of falling back
     reason: 'corrupt',
     schemaVersion: 2,
   });
+
+  const corruptV3 = stateWithGoal();
+  corruptV3.activeGoal.program.totalCycles = 99;
+  assert.deepEqual(restoreAppState(JSON.stringify(corruptV3)), {
+    status: 'blocked',
+    reason: 'corrupt',
+    schemaVersion: 3,
+  });
+});
+
+test('stored DEV skips gain explicit provenance without reclassifying ordinary check-ins', () => {
+  const legacy = stateWithGoal();
+  legacy.checkIns = [
+    {
+      id: 'legacy-dev-skip',
+      missionId: 'mission-1',
+      outcome: 'skipped',
+      comment: 'Пропущено в DEV-режиме.',
+      note: 'Пропущено в DEV-режиме.',
+      xpDelta: 0,
+      energyDelta: 0,
+      createdAt: T1,
+    },
+    {
+      id: 'ordinary',
+      missionId: 'mission-1',
+      outcome: 'partial',
+      comment: 'Обычная запись',
+      note: 'Обычная запись',
+      xpDelta: 5,
+      energyDelta: 0,
+      createdAt: T1,
+    },
+  ];
+
+  const restored = restoreAppState(JSON.stringify(legacy));
+  assert.equal(restored.status, 'ready');
+  if (restored.status !== 'ready') return;
+  assert.equal(restored.migrated, true);
+  assert.equal(restored.state.checkIns[0].provenance, 'dev-skip');
+  assert.equal(restored.state.checkIns[1].provenance, undefined);
+});
+
+test('an interim schema-v3 migration moves a legacy summary back behind the info control', () => {
+  const interim = stateWithGoal();
+  interim.activePlan.version = 5;
+  interim.activePlan.summary = 'A long legacy explanation that must not remain in the main journey card.';
+  interim.activePlan.cycleGoal = interim.activePlan.summary;
+  interim.activePlan.chapters[0].title = 'Краткий стартовый цикл';
+
+  const restored = restoreAppState(JSON.stringify(interim));
+  assert.equal(restored.status, 'ready');
+  if (restored.status !== 'ready') return;
+  assert.equal(restored.migrated, true);
+  assert.equal(restored.state.activePlan.cycleGoal, 'Read');
+  assert.equal(restored.state.activePlan.summary, interim.activePlan.summary);
 });
 
 test('run initialization captures immutable targets and resumable cursor timestamps', () => {
@@ -793,6 +1441,7 @@ test('DEV skip advances only the current day without changing RPG metrics', () =
     outcome: 'skipped',
     comment: 'Пропущено в DEV-режиме.',
     note: 'Пропущено в DEV-режиме.',
+    provenance: 'dev-skip',
     xpDelta: 0,
     energyDelta: 0,
     createdAt: T1,
@@ -805,7 +1454,15 @@ test('DEV skip advances only the current day without changing RPG metrics', () =
     now: T2,
   });
   assert.equal(state.activePlan.missions[1].outcome, 'skipped');
-  assert.equal(state.activeGoal.status, 'completed');
+  assert.equal(state.activeGoal.status, 'paused');
+  assert.deepEqual(state.activeGoal.program.completedCycles, [
+    {
+      cycleNumber: 1,
+      completedAt: T2,
+      measuredValue: null,
+      unit: null,
+    },
+  ]);
   assert.deepEqual(state.character, characterBefore);
 
   state = appStateReducer(state, {
@@ -900,7 +1557,10 @@ test('restarting the active plan preserves paid plan data and resets only its lo
   assert.equal(restarted.activeGoal.id, originalGoal.id);
   assert.equal(restarted.activeGoal.rawPrompt, originalGoal.rawPrompt);
   assert.equal(restarted.activeGoal.status, 'active');
-  assert.equal(restarted.activeGoal.targetDate, '2026-08-11T00:00:00.000Z');
+  assert.equal(restarted.activeGoal.targetDate, originalGoal.targetDate);
+  assert.equal(restarted.activeGoal.program.activeCycle, originalGoal.program.activeCycle);
+  assert.deepEqual(restarted.activeGoal.program.completedCycles, []);
+  assert.deepEqual(restarted.activeGoal.program.roadmap, originalGoal.program.roadmap);
   assert.equal(restarted.activePlan.id, originalPlanMetadata.id);
   assert.equal(restarted.activePlan.version, originalPlanMetadata.version);
   assert.equal(restarted.activePlan.createdAt, originalPlanMetadata.createdAt);

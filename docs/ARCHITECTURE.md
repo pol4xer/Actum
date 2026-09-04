@@ -63,6 +63,7 @@ feature используются относительные импорты. Ес
 
 - `mission-run.ts` — создание, проверка и сводка сохранённой сессии;
 - `mission-run-machine.ts` — детерминированные переходы preparing/work/rest/review/finish;
+- `goal-program.ts` — сроки 30/180/365 дней, roadmap, assessment и lifecycle циклов;
 - `types.ts` — канонические TypeScript-типы доменной модели.
 
 State machine принимает время аргументом. Поэтому таймеры можно тестировать без React,
@@ -132,6 +133,11 @@ validator остаётся второй линией проверки резул
 Рефакторинг модулей не имеет права менять этот порядок или формат `.actum/ai-state.json`
 без отдельной миграции и fault-injection tests.
 
+Research cache принадлежит всей программе, а не одному циклу: его ключ не зависит от
+нового baseline, номера цикла или дневного лимита, и бриф хранится 400 дней. Plan cache
+остаётся 30-минутным и включает baseline, cycleNumber и programContext. Поэтому новый
+месяц требует явного planning-запроса, но не повторяет web-search.
+
 ## Где менять отдельные аспекты
 
 | Что меняется | Основной владелец | Что не должно меняться |
@@ -144,6 +150,7 @@ validator остаётся второй линией проверки резул
 | Навигационный путь | `src/app` | реализация feature |
 | Переходы runner | `src/domain/mission-run-machine.ts` | React view, persistence adapter |
 | Награды и проекция героя | domain policy/selectors | reducer и Twin не дублируют числа |
+| Срок, roadmap и завершение большой цели | `src/domain/goal-program.ts` | UI, AI transport |
 | Формат хранения | `src/state/app-state-codec.ts` + repository migration | feature UI |
 | iOS/web storage | `src/lib/storage.*` | reducer, commands |
 | DEV-инструменты и режим приложения | `src/config/feature-flags.ts`, `src/features/dev-tools` | production UI, domain rules |
@@ -155,16 +162,19 @@ validator остаётся второй линией проверки резул
 ## Инварианты совместимости
 
 1. `APP_STATE_STORAGE_KEY` остаётся стабильным; schema меняется только с миграцией.
-2. Сохранённые plan-v1–plan-v4 продолжают открываться через legacy runner.
-3. `plan-v5` содержит только исполняемые in-app blocks.
+2. Сохранённые plan-v1–plan-v5 продолжают открываться через legacy runner и миграцию v3.
+3. `plan-v6` содержит roadmap выбранного срока и ровно один 30-дневный цикл из исполняемых in-app blocks.
 4. Изменение prompt/contract/validator/parser/model меняет соответствующий cache key.
 5. `reuseOnly` никогда не открывает путь создания нового OpenAI response.
 6. Route-файлы кроме `_layout.tsx` остаются тонкими.
 7. Межмодульный импорт идёт через публичный `index.ts`.
-8. Серверная JSON Schema и клиентская Zod-схема plan-v5 структурно совпадают для всех
-   поддерживаемых дневных лимитов и горизонтов.
+8. Серверная JSON Schema и клиентская Zod-схема plan-v6 структурно совпадают для всех
+   дневных лимитов, фиксированных сроков и номеров циклов.
 9. DEV-функции включаются только через `src/config` при `__DEV__` и точном
    `EXPO_PUBLIC_ACTUM_MODE=development`; неизвестные значения считаются production.
+10. Завершение 30 дней закрывает только текущий цикл. Большая числовая цель завершается
+    только измеренным assessment не ниже target; новый платный planning-запрос возможен
+    только после явного действия пользователя.
 
 ## Как добавить новый feature
 

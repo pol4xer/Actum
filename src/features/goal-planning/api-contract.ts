@@ -131,9 +131,50 @@ function createExecutionSchema(maximumTimerSeconds: number) {
     .strict();
 }
 
-export function createPlanDtoSchema(dailyMinutes: number, horizonDays: number) {
+const durationCycles = {
+  month: 1,
+  'half-year': 6,
+  year: 12,
+} as const;
+
+const goalDurationSchema = z.enum(['month', 'half-year', 'year']);
+
+const goalTargetSchema = z
+  .object({
+    userStatement: contractText(5, 1_000),
+    normalizedMetric: contractText(2, 180),
+    value: z.number().min(0).nullable(),
+    unit: contractText(1, 40).nullable(),
+  })
+  .strict();
+
+const programMilestoneSchema = z
+  .object({
+    cycleNumber: z.number().int().min(1).max(12),
+    title: contractText(2, 100),
+    focus: contractText(5, 240),
+    targetValue: z.number().min(0).nullable(),
+    targetUnit: contractText(1, 40).nullable(),
+  })
+  .strict();
+
+const programCycleResultSchema = z
+  .object({
+    cycleNumber: z.number().int().min(1).max(12),
+    completedAt: z.string().min(10).max(40),
+    measuredValue: z.number().min(0).nullable(),
+    unit: contractText(1, 40).nullable(),
+  })
+  .strict();
+
+export function createPlanDtoSchema(
+  dailyMinutes: number,
+  duration: keyof typeof durationCycles,
+  cycleNumber = 1,
+) {
   const maximumMinutes = Math.max(1, Math.min(120, Math.round(dailyMinutes)));
-  const calendarDays = Math.max(1, Math.min(30, Math.round(horizonDays)));
+  const calendarDays = 30;
+  const totalCycles = durationCycles[duration];
   const daySchema = z
     .object({
       dayNumber: z.number().int().min(1).max(calendarDays),
@@ -152,8 +193,12 @@ export function createPlanDtoSchema(dailyMinutes: number, horizonDays: number) {
     .object({
       title: contractText(3, 120),
       domain: z.enum(['read', 'learn', 'practice', 'organize', 'move', 'habit']),
+      duration: z.literal(duration),
+      totalCycles: z.literal(totalCycles),
+      cycleNumber: z.literal(cycleNumber),
+      target: goalTargetSchema,
       targetMetric: contractText(3, 220),
-      targetTimeline: contractText(2, 80),
+      cycleGoal: contractText(5, 300),
       summary: contractText(10, 600),
       baseline: z
         .object({
@@ -167,6 +212,16 @@ export function createPlanDtoSchema(dailyMinutes: number, horizonDays: number) {
       safetyNotes: z.array(contractText(3, 300)).max(4),
       assumptions: z.array(contractText(3, 300)).min(1).max(6),
       sourceLabels: z.array(contractText(2, 180)).min(1).max(8),
+      roadmap: z.array(programMilestoneSchema).length(totalCycles),
+      assessment: z
+        .object({
+          dayNumber: z.literal(30),
+          blockIndex: z.number().int().min(0).max(11),
+          metric: contractText(2, 180),
+          targetValue: z.number().min(0).nullable(),
+          targetUnit: contractText(1, 40).nullable(),
+        })
+        .strict(),
       phases: z
         .array(
           z
@@ -193,7 +248,7 @@ export const planMetaDtoSchema = z
     researchResponseId: z.string().min(4).max(180).optional(),
     model: z.string().min(2).max(100),
     promptVersion: z.string().min(2).max(120),
-    contractVersion: z.literal('plan-v5'),
+    contractVersion: z.literal('plan-v6'),
     durationMs: z.number().int().nonnegative(),
     webSearchCount: z.number().int().nonnegative(),
     inputTokens: z.number().int().nonnegative().optional(),
@@ -214,7 +269,11 @@ export type PlanMetaDto = z.infer<typeof planMetaDtoSchema>;
 export function createPlanResponseDtoSchema(input: GoalInput) {
   return z
     .object({
-      plan: createPlanDtoSchema(input.dailyMinutes, input.horizonDays),
+      plan: createPlanDtoSchema(
+        input.dailyMinutes,
+        input.duration,
+        input.cycleNumber ?? 1,
+      ),
       meta: planMetaDtoSchema,
     })
     .strict();
@@ -225,7 +284,7 @@ const recoveredInputDtoSchema = z
     prompt: z.string().min(5).max(1000),
     currentLevel: z.enum(['starting', 'some-experience', 'returning']),
     baseline: z.string().min(2).max(500),
-    targetTimeline: z.string().min(2).max(80),
+    duration: goalDurationSchema,
     dailyMinutes: z.union([
       z.literal(10),
       z.literal(20),
@@ -233,7 +292,15 @@ const recoveredInputDtoSchema = z
       z.literal(45),
       z.literal(60),
     ]),
-    horizonDays: z.union([z.literal(7), z.literal(14), z.literal(30)]),
+    cycleNumber: z.number().int().min(1).max(12).optional(),
+    programContext: z
+      .object({
+        target: goalTargetSchema,
+        roadmap: z.array(programMilestoneSchema).min(1).max(12),
+        completedCycles: z.array(programCycleResultSchema).max(12),
+      })
+      .strict()
+      .optional(),
     researchMode: z.enum(['quick', 'web']).optional(),
   })
   .strict();

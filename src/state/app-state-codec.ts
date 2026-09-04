@@ -1,5 +1,23 @@
 import { isMissionRun } from '../domain/mission-run';
-import type { AppState, MissionRun } from '../domain/types';
+import {
+  assessmentActualFromMissionRun,
+  createGoalProgram,
+  goalDurationEndDate,
+  inferGoalDuration,
+  isGoalProgramCycleComplete,
+  parseLegacyGoalTarget,
+  programTargetReached,
+} from '../domain/goal-program';
+import type {
+  AppState,
+  CheckIn,
+  Goal,
+  GoalDuration,
+  GoalProgram,
+  MissionRun,
+  PlanVersion,
+  ProgramCycleResult,
+} from '../domain/types';
 import {
   APP_STATE_SCHEMA_VERSION,
   createInitialAppState,
@@ -12,6 +30,10 @@ export { APP_STATE_SCHEMA_VERSION };
 
 export type AppStateV1 = Omit<AppState, 'schemaVersion' | 'missionRuns'> & {
   schemaVersion: 1;
+};
+
+export type AppStateV2 = Omit<AppState, 'schemaVersion'> & {
+  schemaVersion: 2;
 };
 
 export type RestoreAppStateResult =
@@ -70,10 +92,66 @@ function isCheckIn(value: unknown): boolean {
     ['completed', 'partial', 'skipped'].includes(String(value.outcome)) &&
     (value.comment === undefined || typeof value.comment === 'string') &&
     (value.note === undefined || typeof value.note === 'string') &&
+    (value.provenance === undefined ||
+      value.provenance === 'user' ||
+      value.provenance === 'dev-skip') &&
     isFiniteNumber(value.xpDelta) &&
     isFiniteNumber(value.energyDelta) &&
     typeof value.createdAt === 'string'
   );
+}
+
+const LEGACY_DEV_SKIP_NOTE = 'Пропущено в DEV-режиме.';
+
+function withLegacyDevSkipProvenance(checkIns: CheckIn[]): {
+  checkIns: CheckIn[];
+  migrated: boolean;
+} {
+  let migrated = false;
+  const normalized = checkIns.map((checkIn) => {
+    if (
+      checkIn.provenance === undefined &&
+      checkIn.outcome === 'skipped' &&
+      checkIn.runId === undefined &&
+      checkIn.xpDelta === 0 &&
+      checkIn.energyDelta === 0 &&
+      checkIn.comment === LEGACY_DEV_SKIP_NOTE &&
+      checkIn.note === LEGACY_DEV_SKIP_NOTE
+    ) {
+      migrated = true;
+      return { ...checkIn, provenance: 'dev-skip' as const };
+    }
+    return checkIn;
+  });
+  return { checkIns: migrated ? normalized : checkIns, migrated };
+}
+
+function withConciseLegacyCycleGoal(state: AppState): {
+  state: AppState;
+  migrated: boolean;
+} {
+  const goal = state.activeGoal;
+  const plan = state.activePlan;
+  const cycleGoal = plan?.cycleGoal?.trim();
+  const legacyChapterTitle = plan?.chapters[0]?.title?.trim();
+  if (
+    !goal ||
+    !plan ||
+    plan.version >= 6 ||
+    (cycleGoal && cycleGoal !== plan.summary.trim() && cycleGoal !== legacyChapterTitle)
+  ) {
+    return { state, migrated: false };
+  }
+
+  const conciseCycleGoal = plan.missions[0]?.title?.trim()
+    || legacyChapterTitle
+    || goal.title.trim()
+    || `Цикл ${plan.cycleNumber ?? goal.program.activeCycle}`;
+  if (conciseCycleGoal === cycleGoal) return { state, migrated: false };
+  return {
+    state: { ...state, activePlan: { ...plan, cycleGoal: conciseCycleGoal } },
+    migrated: true,
+  };
 }
 
 function hasValidOptionalPlan(value: Record<string, unknown>): boolean {
@@ -93,7 +171,10 @@ function hasValidOptionalGoal(value: Record<string, unknown>): boolean {
 }
 
 function hasValidBaseState(value: Record<string, unknown>): boolean {
+  const hasGoal = value.activeGoal !== undefined;
+  const hasPlan = value.activePlan !== undefined;
   return (
+    hasGoal === hasPlan &&
     typeof value.onboardingCompleted === 'boolean' &&
     isCharacter(value.character) &&
     Array.isArray(value.checkIns) &&
@@ -110,6 +191,194 @@ function hasValidMissionRuns(value: unknown): value is Record<string, MissionRun
   return Object.entries(value).every(
     ([missionId, run]) => isMissionRun(run) && run.missionId === missionId,
   );
+}
+
+function isNullableFiniteNumber(value: unknown): boolean {
+  return value === null || isFiniteNumber(value);
+}
+
+function isNullableString(value: unknown): boolean {
+  return value === null || typeof value === 'string';
+}
+
+function isGoalTarget(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.userStatement === 'string' &&
+    typeof value.normalizedMetric === 'string' &&
+    isNullableFiniteNumber(value.value) &&
+    (value.value === null || (value.value as number) >= 0) &&
+    isNullableString(value.unit)
+  );
+}
+
+function isProgramMilestone(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    Number.isInteger(value.cycleNumber) &&
+    typeof value.title === 'string' &&
+    typeof value.focus === 'string' &&
+    isNullableFiniteNumber(value.targetValue) &&
+    (value.targetValue === null || (value.targetValue as number) >= 0) &&
+    isNullableString(value.targetUnit)
+  );
+}
+
+function isProgramCycleResult(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    Number.isInteger(value.cycleNumber) &&
+    typeof value.completedAt === 'string' &&
+    Number.isFinite(Date.parse(value.completedAt)) &&
+    isNullableFiniteNumber(value.measuredValue) &&
+    (value.measuredValue === null || (value.measuredValue as number) >= 0) &&
+    isNullableString(value.unit)
+  );
+}
+
+function isGoalProgram(value: unknown): value is GoalProgram {
+  if (!isRecord(value) || !['month', 'half-year', 'year'].includes(String(value.duration))) {
+    return false;
+  }
+  if (
+    !Number.isInteger(value.totalDays) ||
+    !Number.isInteger(value.totalCycles) ||
+    !Number.isInteger(value.activeCycle) ||
+    !isGoalTarget(value.target) ||
+    !Array.isArray(value.roadmap) ||
+    !value.roadmap.every(isProgramMilestone) ||
+    !Array.isArray(value.completedCycles) ||
+    !value.completedCycles.every(isProgramCycleResult)
+  ) {
+    return false;
+  }
+  const duration = value.duration as GoalDuration;
+  const expected = createGoalProgram({ duration, target: value.target as GoalProgram['target'] });
+  const roadmap = value.roadmap as GoalProgram['roadmap'];
+  const completedCycles = value.completedCycles as GoalProgram['completedCycles'];
+  return (
+    value.totalDays === expected.totalDays &&
+    value.totalCycles === expected.totalCycles &&
+    (value.activeCycle as number) >= 1 &&
+    (value.activeCycle as number) <= expected.totalCycles &&
+    roadmap.length === expected.totalCycles &&
+    roadmap.every((milestone, index) => milestone.cycleNumber === index + 1) &&
+    completedCycles.every(
+      (result, index) =>
+        result.cycleNumber === index + 1 && result.cycleNumber <= (value.activeCycle as number),
+    )
+  );
+}
+
+function hasValidV3ProgramState(value: Record<string, unknown>): boolean {
+  if (value.activeGoal === undefined) return value.activePlan === undefined;
+  if (!isRecord(value.activeGoal) || !isGoalProgram(value.activeGoal.program)) return false;
+  if (!isRecord(value.activePlan)) return value.activePlan === undefined;
+  const planCycleComplete = (value.activePlan.missions as Array<{ outcome?: unknown }>).length > 0 &&
+    (value.activePlan.missions as Array<{ outcome?: unknown }>).every(
+      (mission) => mission.outcome !== 'pending',
+    );
+  const program = value.activeGoal.program;
+  const hasActiveResult = program.completedCycles.some(
+    (result) => result.cycleNumber === program.activeCycle,
+  );
+  return (
+    Number.isInteger(value.activePlan.cycleNumber) &&
+    value.activePlan.cycleNumber === program.activeCycle &&
+    value.activePlan.totalCycles === program.totalCycles &&
+    typeof value.activePlan.cycleGoal === 'string' &&
+    planCycleComplete === hasActiveResult
+  );
+}
+
+function migrateLegacyGoalAndPlan(
+  goal: Goal,
+  plan: PlanVersion,
+  missionRuns: Record<string, MissionRun>,
+  completedAt: string,
+): { goal: Goal; plan: PlanVersion } {
+  const duration = inferGoalDuration(goal.targetTimeline ?? plan.targetTimeline);
+  const target = parseLegacyGoalTarget(goal);
+  const baseProgram = createGoalProgram({ duration, target });
+  // Old contracts had no machine-readable assessment pointer. Choosing an
+  // arbitrary timer/counter would turn ordinary practice into a fake record.
+  const assessment = plan.assessment;
+  const cycleGoal = plan.cycleGoal?.trim()
+    || plan.missions[0]?.title?.trim()
+    || plan.chapters?.[0]?.title?.trim()
+    || goal.title.trim()
+    || 'Первый цикл';
+  const migratedPlan: PlanVersion = {
+    ...plan,
+    cycleNumber: 1,
+    totalCycles: baseProgram.totalCycles,
+    cycleGoal,
+    assessment,
+  };
+  const cycleComplete = isGoalProgramCycleComplete(migratedPlan);
+  const actual = assessmentActualFromMissionRun(migratedPlan, missionRuns);
+  const cycleResult: ProgramCycleResult | undefined = cycleComplete
+    ? {
+        cycleNumber: 1,
+        completedAt,
+        measuredValue: actual.measuredValue,
+        unit: actual.unit,
+      }
+    : undefined;
+  const program: GoalProgram = {
+    ...baseProgram,
+    completedCycles: cycleResult ? [cycleResult] : [],
+  };
+  const targetReached = programTargetReached(
+    target,
+    actual,
+    goal.baseline ?? plan.baseline,
+  );
+  const targetDate = goalDurationEndDate(goal.createdAt, duration) ?? goal.targetDate;
+  const status = targetReached
+    ? 'completed'
+    : cycleComplete && program.totalCycles === 1
+      ? target.value === null
+        ? goal.status
+        : 'paused'
+      : goal.status === 'completed'
+        ? 'active'
+        : goal.status;
+
+  return {
+    goal: {
+      ...goal,
+      baseline: goal.baseline ?? plan.baseline,
+      targetDate,
+      status,
+      program,
+    },
+    plan: migratedPlan,
+  };
+}
+
+function migrateLegacyState(
+  value: AppStateV1 | AppStateV2,
+  missionRuns: Record<string, MissionRun>,
+): AppState {
+  const normalizedCheckIns = withLegacyDevSkipProvenance(value.checkIns);
+  const pair =
+    value.activeGoal && value.activePlan
+      ? migrateLegacyGoalAndPlan(
+          value.activeGoal,
+          value.activePlan,
+          missionRuns,
+          value.lastUpdatedAt,
+        )
+      : undefined;
+  return {
+    ...value,
+    schemaVersion: APP_STATE_SCHEMA_VERSION,
+    activeGoal: pair?.goal ?? value.activeGoal,
+    activePlan: pair?.plan ?? value.activePlan,
+    checkIns: normalizedCheckIns.checkIns,
+    missionRuns,
+  };
 }
 
 /**
@@ -138,7 +407,7 @@ export function restoreAppState(raw: string | null): RestoreAppStateResult {
   }
 
   const schemaVersion = value.schemaVersion as number;
-  if (schemaVersion !== 1 && schemaVersion !== APP_STATE_SCHEMA_VERSION) {
+  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== APP_STATE_SCHEMA_VERSION) {
     return { status: 'blocked', reason: 'unsupported-schema', schemaVersion };
   }
 
@@ -152,11 +421,7 @@ export function restoreAppState(raw: string | null): RestoreAppStateResult {
       status: 'ready',
       source: 'stored',
       migrated: true,
-      state: {
-        ...previous,
-        schemaVersion: APP_STATE_SCHEMA_VERSION,
-        missionRuns: {},
-      },
+      state: migrateLegacyState(previous, {}),
     };
   }
 
@@ -164,10 +429,29 @@ export function restoreAppState(raw: string | null): RestoreAppStateResult {
     return { status: 'blocked', reason: 'corrupt', schemaVersion };
   }
 
+  if (schemaVersion === 2) {
+    return {
+      status: 'ready',
+      source: 'stored',
+      migrated: true,
+      state: migrateLegacyState(value as unknown as AppStateV2, value.missionRuns),
+    };
+  }
+
+  if (!hasValidV3ProgramState(value)) {
+    return { status: 'blocked', reason: 'corrupt', schemaVersion };
+  }
+
+  const state = value as unknown as AppState;
+  const normalizedCheckIns = withLegacyDevSkipProvenance(state.checkIns);
+  const normalizedState = normalizedCheckIns.migrated
+    ? { ...state, checkIns: normalizedCheckIns.checkIns }
+    : state;
+  const conciseCycleGoal = withConciseLegacyCycleGoal(normalizedState);
   return {
     status: 'ready',
     source: 'stored',
-    state: value as unknown as AppState,
-    migrated: false,
+    state: conciseCycleGoal.state,
+    migrated: normalizedCheckIns.migrated || conciseCycleGoal.migrated,
   };
 }

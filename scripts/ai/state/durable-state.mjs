@@ -4,7 +4,10 @@ import { dirname } from 'node:path';
 export const STATE_VERSION = 1;
 export const DURABLE_STATE_TTLS = Object.freeze({
   planCacheMs: 30 * 60_000,
-  researchCacheMs: 2 * 60 * 60_000,
+  // One research brief belongs to the whole program, including a 12-cycle year.
+  // Keep it beyond the longest selectable duration so later monthly cycles do
+  // not create another paid web-search request.
+  researchCacheMs: 400 * 24 * 60 * 60_000,
   backgroundJobMs: 2 * 60 * 60_000,
   ambiguousCreateMs: 2 * 60 * 60_000,
   // Completed responses are the paid artifact. Keep them long enough for a

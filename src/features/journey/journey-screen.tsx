@@ -3,11 +3,13 @@ import { router } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { CheckInModal } from '@/features/check-in';
+import { ProgramRoadmap } from '@/features/goal-planning';
 import { MissionRunner, RunSummary } from '@/features/mission-session';
 import { ThemedText } from '@/components/themed-text';
 import { InfoPopover } from '@/components/ui/info-popover';
 import { AppButton, Card, Pill, ProgressBar, Screen, ScreenHeader } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
+import { goalMetricProgress } from '@/domain/goal-program';
 import type { GeneratedGoal, Mission, MissionOutcome } from '@/domain/types';
 import { formatCalendarDate } from '@/lib/calendar-date';
 import {
@@ -24,7 +26,10 @@ import {
   presentMissionDay,
   type MissionActionPresentation,
 } from '@/shared/presentation/mission-actions';
-import { formatMissionDuration } from '@/shared/presentation/plan-formatters';
+import {
+  formatMetricValue,
+  formatMissionDuration,
+} from '@/shared/presentation/plan-formatters';
 import { useApp } from '@/state';
 
 const OUTCOME_META: Record<MissionOutcome, { icon: string; color: string; label: string }> = {
@@ -65,6 +70,22 @@ export default function JourneyScreen() {
     goal: state.activeGoal,
     plan: state.activePlan,
   };
+  const program = state.activeGoal.program;
+  const latestMeasured = [...program.completedCycles]
+    .reverse()
+    .find((cycle) => cycle.measuredValue != null && cycle.unit);
+  const currentValue = latestMeasured?.measuredValue ?? state.activeGoal.baseline?.value;
+  const currentUnit = latestMeasured?.unit ?? state.activeGoal.baseline?.unit;
+  const targetValue = program.target.value;
+  const targetUnit = program.target.unit;
+  const metricProgress = goalMetricProgress(
+    {
+      value: state.activeGoal.baseline?.value,
+      unit: state.activeGoal.baseline?.unit,
+    },
+    { value: currentValue, unit: currentUnit },
+    { value: targetValue, unit: targetUnit },
+  );
 
   return (
     <>
@@ -72,13 +93,13 @@ export default function JourneyScreen() {
         <ScreenHeader
           eyebrow="План"
           title="По дням"
-          subtitle={state.activeGoal.title}
+          subtitle={state.activeGoal.rawPrompt}
         />
 
         <Card style={styles.summaryCard}>
           <View style={styles.row}>
             <ThemedText type="smallBold" numberOfLines={2} style={styles.flex}>
-              {state.activeGoal.targetMetric}
+              {state.activePlan.cycleGoal}
             </ThemedText>
             <InfoPopover
               title="О плане"
@@ -89,13 +110,28 @@ export default function JourneyScreen() {
           <ProgressBar value={progress} />
           <View style={styles.row}>
             <ThemedText type="small" style={styles.muted}>
-              {reported} из {state.activePlan.missions.length}
+              Цикл {state.activePlan.cycleNumber} из {state.activePlan.totalCycles}
             </ThemedText>
             <ThemedText type="small" style={styles.muted}>
-              {state.activePlan.dailyMinutes} мин/день
+              {reported}/{state.activePlan.missions.length} дней
             </ThemedText>
           </View>
+          {metricProgress !== undefined ? (
+            <View style={styles.metricProgress}>
+              <View style={styles.row}>
+                <ThemedText type="small" style={styles.muted}>
+                  Сейчас {formatMetricValue(currentValue, currentUnit)}
+                </ThemedText>
+                <ThemedText type="smallBold">
+                  Цель {formatMetricValue(targetValue, targetUnit)}
+                </ThemedText>
+              </View>
+              <ProgressBar value={metricProgress} color={Palette.accent} />
+            </View>
+          ) : null}
         </Card>
+
+        <ProgramRoadmap program={program} />
 
         <View style={styles.daySections}>
           {state.activePlan.chapters.map((chapter) => {
@@ -103,7 +139,10 @@ export default function JourneyScreen() {
               (mission) => mission.chapterId === chapter.id,
             );
             if (!missions.length) return null;
-            const chapterPresentation = presentExecutionSection(chapter.title);
+            const chapterPresentation = presentExecutionSection(
+              chapter.title,
+              chapter.subtitle,
+            );
 
             return (
               <View key={chapter.id} style={styles.chapterSection}>
@@ -392,6 +431,7 @@ const styles = StyleSheet.create({
   dayLabel: { color: Palette.goldBright },
   pressed: { opacity: 0.7 },
   summaryCard: { gap: Spacing.two },
+  metricProgress: { gap: Spacing.one },
   daySections: { gap: Spacing.three },
   chapterSection: { gap: Spacing.two },
   chapterHeader: {

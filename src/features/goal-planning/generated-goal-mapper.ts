@@ -1,4 +1,9 @@
 import type { GeneratedGoal, GoalInput, Mission, QuestChapter } from '@/domain/types';
+import {
+  GOAL_DURATION_CONFIG,
+  goalDurationEndDate,
+  goalDurationLabel,
+} from '@/domain/goal-program';
 
 import type { PlanDto, PlanMetaDto } from './api-contract';
 
@@ -110,9 +115,13 @@ export function mapPlanDtoToGeneratedGoal(
     completionCriterion: day.execution.successCriterion,
     warning: day.warning ?? undefined,
   }));
-  const targetDate = addLocalCalendarDays(now, input.horizonDays - 1);
-  const targetTimeline = planDraft.targetTimeline;
+  const durationConfig = GOAL_DURATION_CONFIG[input.duration];
+  const createdAt = now.toISOString();
+  const targetDate = goalDurationEndDate(createdAt, input.duration) ?? createdAt;
+  const targetTimeline = goalDurationLabel(input.duration);
   const goalId = id('goal');
+  const completedCycles = input.programContext?.completedCycles ?? [];
+  const programTarget = input.programContext?.target ?? planDraft.target;
 
   return {
     goal: {
@@ -120,19 +129,32 @@ export function mapPlanDtoToGeneratedGoal(
       rawPrompt: input.prompt.trim(),
       title: planDraft.title,
       domain: planDraft.domain,
-      targetDate: targetDate.toISOString(),
+      targetDate,
       targetMetric: planDraft.targetMetric,
       baseline: planDraft.baseline,
       targetTimeline,
+      program: {
+        duration: input.duration,
+        totalDays: durationConfig.totalDays,
+        totalCycles: durationConfig.totalCycles,
+        activeCycle: planDraft.cycleNumber,
+        target: programTarget,
+        roadmap: planDraft.roadmap,
+        completedCycles,
+      },
       status: 'active',
-      createdAt: now.toISOString(),
+      createdAt,
     },
     plan: {
       id: id('plan'),
-      version: 5,
+      version: 6,
       createdAt: now.toISOString(),
       dailyMinutes: input.dailyMinutes,
-      horizonDays: input.horizonDays,
+      horizonDays: 30,
+      cycleNumber: planDraft.cycleNumber,
+      totalCycles: planDraft.totalCycles,
+      cycleGoal: planDraft.cycleGoal,
+      assessment: planDraft.assessment,
       summary: planDraft.summary,
       baseline: planDraft.baseline,
       targetTimeline,

@@ -21,6 +21,11 @@ import {
 } from '../scripts/ai/cache/keys.mjs';
 import { createRuntimeConfig } from '../scripts/ai/config/runtime.mjs';
 import {
+  CYCLE_DAYS,
+  PROGRAM_DURATIONS,
+  programDurationConfig,
+} from '../scripts/ai/contracts/program-duration.mjs';
+import {
   readJson,
   requestIdFromRequest,
   sendJson,
@@ -46,30 +51,60 @@ const webInput = Object.freeze({
   prompt: '  Learn a skill  ',
   currentLevel: 'starting',
   baseline: '  8 reps  ',
-  targetTimeline: ' 12 months ',
+  duration: 'year',
+  cycleNumber: 1,
   dailyMinutes: 20,
-  horizonDays: 14,
   researchMode: 'web',
 });
 
-test('extracted cache helpers preserve the original byte-for-byte keys', () => {
+test('fixed duration choices map to one, six, or twelve 30-day cycles', () => {
+  assert.equal(CYCLE_DAYS, 30);
+  assert.deepEqual(PROGRAM_DURATIONS, {
+    month: { totalCycles: 1, totalDays: 30 },
+    'half-year': { totalCycles: 6, totalDays: 180 },
+    year: { totalCycles: 12, totalDays: 365 },
+  });
+  assert.equal(programDurationConfig('custom'), undefined);
+});
+
+test('cache helpers separate cycle planning while reusing one program research result', () => {
   assert.equal(
     createPlanCacheKey(webInput, fixedIdentity),
-    '51fb006e009a3b83e1cc0516d9ab016c2457ebaafbf79aa54331f214e443bee5',
+    '8df61d7b559678bf3764ccea8b5bd17cd8821c43b17f1408a43fd4a45be08915',
   );
   assert.equal(
     createResearchCacheKey(webInput, fixedIdentity),
-    'cd836710c0f68143eb9ad1450aaadd6fb49c7da0ee98e8a59d6a3bffa685d116',
+    '0fb40534572a34483c21db991fc495b76bee7daaca923e2e862517a12a746237',
   );
   assert.equal(
     createPlanCacheKey({ ...webInput, researchMode: 'quick' }, fixedIdentity),
-    '22770f22c9a0f82c03bf88dd971b82704496e4e3e98f227e60f575c6739d3c64',
+    'be798da4ded5a07a1412586d21a5326384128c39ee6be4bfa3efa809150cd8ec',
   );
   assert.equal(
     createResearchCacheKey({ ...webInput, researchMode: 'quick' }, fixedIdentity),
-    '44486c584132ebb17dbfc0fd806edf754be382193cbbefb05a39ad4dfd472bf6',
+    'd008e6041a59da5d579300fcad53e1b3105bff221b3088484d3632d02f0cc14c',
   );
   assert.equal(providerStageKey('abc', 'planning'), 'planning\u0000abc');
+
+  const nextCycle = {
+    ...webInput,
+    currentLevel: 'some-experience',
+    baseline: 'Current result: 12 reps',
+    dailyMinutes: 45,
+    cycleNumber: 2,
+    programContext: {
+      roadmap: [{ cycleNumber: 1, title: 'Done' }],
+    },
+  };
+  assert.equal(
+    createResearchCacheKey(nextCycle, fixedIdentity),
+    createResearchCacheKey(webInput, fixedIdentity),
+    'later cycles must reuse the paid research despite a new baseline, level, and time budget',
+  );
+  assert.notEqual(
+    createPlanCacheKey(nextCycle, fixedIdentity),
+    createPlanCacheKey(webInput, fixedIdentity),
+  );
 });
 
 test('runtime config is rebuilt from each server import environment', () => {
@@ -132,6 +167,64 @@ test('HTTP helpers retain validation, request-size, CORS, JSON, and request-ID c
   assert.throws(
     () => validateInput({ ...webInput, dailyMinutes: 15 }),
     /Некорректный лимит времени\./,
+  );
+  assert.throws(
+    () => validateInput({ ...webInput, duration: 'two-years' }),
+    /Некорректный срок программы\./,
+  );
+  assert.throws(
+    () => validateInput({ ...webInput, cycleNumber: 13 }),
+    /Некорректный номер цикла\./,
+  );
+  assert.throws(
+    () => validateInput({ ...webInput, horizonDays: 30 }),
+    /Устаревший формат запроса\./,
+  );
+  assert.throws(
+    () => validateInput({ ...webInput, programContext: { roadmap: [] } }),
+    /Контекст программы неполный\./,
+  );
+  assert.throws(
+    () =>
+      validateInput({
+        ...webInput,
+        prompt: 'Hold a plank for 15 minutes',
+        duration: 'month',
+        dailyMinutes: 10,
+      }),
+    /Контрольный замер 900 сек\. не помещается в дневной лимит 600 сек\./,
+  );
+  assert.throws(
+    () => validateInput({
+      ...webInput,
+      prompt: 'Hold a plank for 15 minutes',
+      duration: 'year',
+      dailyMinutes: 10,
+    }),
+    /Контрольный замер 900 сек\. не помещается в дневной лимит 600 сек\./,
+  );
+  const laterCycleContext = {
+    target: {
+      userStatement: 'Hold a plank for 15 minutes',
+      normalizedMetric: 'Plank duration',
+      value: 900,
+      unit: 'seconds',
+    },
+    roadmap: [
+      { cycleNumber: 1, title: 'Start', focus: 'Start', targetValue: 500, targetUnit: 'seconds' },
+      { cycleNumber: 2, title: 'Next', focus: 'Next', targetValue: 700, targetUnit: 'seconds' },
+    ],
+    completedCycles: [],
+  };
+  assert.throws(
+    () => validateInput({
+      ...webInput,
+      prompt: 'Hold a plank for 15 minutes',
+      cycleNumber: 2,
+      dailyMinutes: 10,
+      programContext: laterCycleContext,
+    }),
+    /Контрольный замер 700 сек\. не помещается в дневной лимит 600 сек\./,
   );
   assert.equal(
     requestIdFromRequest({ headers: { 'x-actum-request-id': 'actum_12345678' } }),
@@ -229,6 +322,25 @@ test('durable state preserves the v1 shape, TTLs, transitions, and per-factory i
   assert.equal(restartedBeforeTransition.readStageResult(planningKey), undefined);
   const restartedAfterTransition = createDurableState({ stateFile, now });
   assert.equal(restartedAfterTransition.readStageResult(planningKey).payload.id, 'resp_123');
+});
+
+test('program research remains reusable after a monthly cycle', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'actum-research-lifetime-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const stateFile = join(directory, 'ai-state.json');
+  const startedAt = 1_900_000_000_000;
+  let timestamp = startedAt;
+  const state = createDurableState({ stateFile, now: () => timestamp });
+
+  assert.ok(DURABLE_STATE_TTLS.researchCacheMs >= 400 * 24 * 60 * 60_000);
+  state.saveResearch('annual-program', { brief: 'program-level research' });
+  timestamp += 30 * 24 * 60 * 60_000;
+
+  const restartedAfterCycle = createDurableState({ stateFile, now: () => timestamp });
+  assert.equal(
+    restartedAfterCycle.readResearch('annual-program').brief,
+    'program-level research',
+  );
 });
 
 test('durable state recovers recent completed paid stages and fails closed on corrupt JSON', (t) => {

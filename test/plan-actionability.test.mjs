@@ -10,7 +10,11 @@ import {
   PLAN_VALIDATOR_VERSION,
   validatePlanActionability,
 } from '../scripts/ai/contracts/validate-plan.mjs';
-import { parseTrustedBaseline } from '../scripts/ai/contracts/parse-baseline.mjs';
+import {
+  BASELINE_PARSER_VERSION,
+  parseTrustedBaseline,
+  parseTrustedTarget,
+} from '../scripts/ai/contracts/parse-baseline.mjs';
 import {
   buildPlanInstructions,
   PROMPT_VERSION,
@@ -19,21 +23,28 @@ import {
 } from '../scripts/ai/prompts/plan-v1.mjs';
 
 const USER_BASELINE = 'Сухая статическая задержка: рекорд 1:20';
-const TARGET_TIMELINE = '1 год';
+const USER_PROMPT = 'Научиться задерживать дыхание на 10 минут';
 const TRUSTED_BASELINE = { value: 80, unit: 'seconds' };
+const TRUSTED_TARGET = { value: 600, unit: 'seconds' };
 
-function validatePlan(plan, horizonDays = 30) {
-  return validatePlanActionability(
-    plan,
-    30,
-    horizonDays,
-    USER_BASELINE,
-    TARGET_TIMELINE,
-    TRUSTED_BASELINE,
-  );
+function validationOptions(overrides = {}) {
+  return {
+    dailyMinutes: 30,
+    duration: 'year',
+    cycleNumber: 1,
+    expectedBaselineStatement: USER_BASELINE,
+    expectedTargetStatement: USER_PROMPT,
+    trustedBaseline: TRUSTED_BASELINE,
+    trustedTarget: TRUSTED_TARGET,
+    ...overrides,
+  };
 }
 
-test('plan-v5 accepts thirty explicit in-app days with exact timer baseline calculations', () => {
+function validatePlan(plan, overrides) {
+  return validatePlanActionability(plan, validationOptions(overrides));
+}
+
+test('plan-v6 accepts a full roadmap and thirty explicit in-app days', () => {
   const plan = actionablePlan();
   assert.equal(validatePlan(plan), plan);
   assert.equal(plan.days.length, 30);
@@ -109,33 +120,33 @@ test('all four closed-loop block primitives validate inside one Actum execution'
   assert.doesNotThrow(() => validatePlan(plan));
 });
 
-test('plan-v5 rejects legacy day fields and non-exact block shapes', () => {
+test('plan-v6 rejects legacy day fields and non-exact block shapes', () => {
   const legacySteps = actionablePlan();
   legacySteps.days[0].steps = ['Старое свободное указание.'];
   assert.throws(
     () => validatePlan(legacySteps),
-    /days\.0\.steps: поле не поддерживается контрактом plan-v5/,
+    /days\.0\.steps: поле не поддерживается контрактом plan-v6/,
   );
 
   const legacyProgression = actionablePlan();
   legacyProgression.days[0].progressionRule = 'Если готово, увеличь; иначе повтори.';
   assert.throws(
     () => validatePlan(legacyProgression),
-    /days\.0\.progressionRule: поле не поддерживается контрактом plan-v5/,
+    /days\.0\.progressionRule: поле не поддерживается контрактом plan-v6/,
   );
 
   const extraTimerField = actionablePlan();
   extraTimerField.days[0].execution.blocks[0].workSecondsPerSet = 36;
   assert.throws(
     () => validatePlan(extraTimerField),
-    /execution\.blocks\.0\.workSecondsPerSet: поле не поддерживается контрактом plan-v5/,
+    /execution\.blocks\.0\.workSecondsPerSet: поле не поддерживается контрактом plan-v6/,
   );
 
   const wrongExecutionKind = actionablePlan();
   wrongExecutionKind.days[0].execution.kind = 'routine';
   assert.throws(
     () => validatePlan(wrongExecutionKind),
-    /execution\.kind: для plan-v5 ожидается только in_app/,
+    /execution\.kind: для plan-v6 ожидается только in_app/,
   );
 });
 
@@ -260,14 +271,9 @@ test('in-app text_log is valid and source URLs or verbatim baseline are not scan
   ];
 
   assert.doesNotThrow(() =>
-    validatePlanActionability(
-      plan,
-      30,
-      30,
-      baselineStatement,
-      TARGET_TIMELINE,
-      TRUSTED_BASELINE,
-    ),
+    validatePlanActionability(plan, validationOptions({
+      expectedBaselineStatement: baselineStatement,
+    })),
   );
 });
 
@@ -545,6 +551,14 @@ test('counter baseline result equals targetPerSet', () => {
     unit: 'repetitions',
     calculationRule: 'Исходное значение восемь повторений фиксируется на весь блок.',
   };
+  plan.target.value = null;
+  plan.target.unit = null;
+  plan.roadmap.forEach((entry) => {
+    entry.targetValue = null;
+    entry.targetUnit = null;
+  });
+  plan.assessment.targetValue = null;
+  plan.assessment.targetUnit = null;
   plan.days.forEach((day) => {
     day.execution.blocks = [
       counterBlock({
@@ -560,27 +574,21 @@ test('counter baseline result equals targetPerSet', () => {
   });
 
   assert.doesNotThrow(() =>
-    validatePlanActionability(
-      plan,
-      30,
-      30,
-      baselineStatement,
-      TARGET_TIMELINE,
-      { value: 8, unit: 'reps' },
-    ),
+    validatePlanActionability(plan, validationOptions({
+      expectedBaselineStatement: baselineStatement,
+      trustedBaseline: { value: 8, unit: 'reps' },
+      trustedTarget: null,
+    })),
   );
 
   plan.days[0].execution.blocks[0].targetPerSet = 7;
   assert.throws(
     () =>
-      validatePlanActionability(
-        plan,
-        30,
-        30,
-        baselineStatement,
-        TARGET_TIMELINE,
-        { value: 8, unit: 'reps' },
-      ),
+      validatePlanActionability(plan, validationOptions({
+        expectedBaselineStatement: baselineStatement,
+        trustedBaseline: { value: 8, unit: 'reps' },
+        trustedTarget: null,
+      })),
     /targetPerSet 7 не совпадает с loadBasis\.result 6/,
   );
 
@@ -588,14 +596,11 @@ test('counter baseline result equals targetPerSet', () => {
   plan.days[0].execution.blocks[0].loadBasis.result = 6.009;
   assert.throws(
     () =>
-      validatePlanActionability(
-        plan,
-        30,
-        30,
-        baselineStatement,
-        TARGET_TIMELINE,
-        { value: 8, unit: 'reps' },
-      ),
+      validatePlanActionability(plan, validationOptions({
+        expectedBaselineStatement: baselineStatement,
+        trustedBaseline: { value: 8, unit: 'reps' },
+        trustedTarget: null,
+      })),
     /targetPerSet 6 не совпадает с loadBasis\.result 6\.009/,
   );
 });
@@ -618,24 +623,21 @@ test('trusted move or practice baselines require a load-linked numeric block', (
     day.execution.blocks[0].loadBasis = null;
   });
   assert.doesNotThrow(() =>
-    validatePlanActionability(
-      untrusted,
-      30,
-      30,
-      USER_BASELINE,
-      TARGET_TIMELINE,
-      null,
-    ),
+    validatePlanActionability(untrusted, validationOptions({ trustedBaseline: null })),
   );
 });
 
-test('baseline statement, target timeline, calendar coverage, and phases remain strict', () => {
-  const changedTimeline = actionablePlan();
-  changedTimeline.targetTimeline = '3 месяца';
+test('duration, baseline, exact target, calendar coverage, and phases remain strict', () => {
+  const changedDuration = actionablePlan();
+  changedDuration.duration = 'half-year';
   assert.throws(
-    () => validatePlan(changedTimeline),
-    /targetTimeline: срок большой цели пользователя был изменён/,
+    () => validatePlan(changedDuration),
+    /duration: выбранный срок программы был изменён/,
   );
+
+  const changedTarget = actionablePlan();
+  changedTarget.target.userStatement = `${USER_PROMPT}.`;
+  assert.throws(() => validatePlan(changedTarget), /цель пользователя должна быть сохранена дословно/);
 
   const changedStatement = actionablePlan();
   changedStatement.baseline.userStatement = 'Другая исходная точка';
@@ -655,10 +657,10 @@ test('baseline statement, target timeline, calendar coverage, and phases remain 
   missingDay.days.pop();
   assert.throws(() => validatePlan(missingDay), /ровно 30 календарных дней/);
 
-  const reordered = actionablePlan(14);
+  const reordered = actionablePlan();
   [reordered.days[0], reordered.days[1]] = [reordered.days[1], reordered.days[0]];
   assert.throws(
-    () => validatePlan(reordered, 14),
+    () => validatePlan(reordered),
     /days\.0\.dayNumber: ожидается последовательный день 1/,
   );
 
@@ -670,8 +672,174 @@ test('baseline statement, target timeline, calendar coverage, and phases remain 
   );
 });
 
+test('roadmap is monotonic, reaches the final target, and matches the day-30 assessment', () => {
+  const backwards = actionablePlan();
+  backwards.roadmap[4].targetValue = 200;
+  assert.throws(
+    () => validatePlan(backwards),
+    /roadmap\.4\.targetValue: этапы должны монотонно приближаться к цели/,
+  );
+
+  const missesTarget = actionablePlan();
+  missesTarget.roadmap[11].targetValue = 590;
+  assert.throws(
+    () => validatePlan(missesTarget),
+    /roadmap: последний этап должен точно совпадать с конечной целью/,
+  );
+
+  const mismatchedAssessment = actionablePlan();
+  mismatchedAssessment.assessment.targetValue = 121;
+  assert.throws(
+    () => validatePlan(mismatchedAssessment),
+    /assessment: контрольный замер должен совпадать с целью текущего цикла/,
+  );
+
+  const displayOnlyAssessment = actionablePlan();
+  displayOnlyAssessment.days[29].execution.blocks = [checklistBlock()];
+  assert.throws(
+    () => validatePlan(displayOnlyAssessment),
+    /контрольный замер должен указывать на timer или counter/,
+  );
+
+  const timerMismatch = actionablePlan();
+  timerMismatch.days[29].execution.blocks[0].durationSecondsPerSet = 119;
+  timerMismatch.days[29].execution.blocks[0].loadBasis = null;
+  assert.throws(
+    () => validatePlan(timerMismatch),
+    /длительность timer не совпадает с целью замера/,
+  );
+});
+
+test('later cycles adapt to a new baseline without rewriting completed roadmap entries', () => {
+  const firstCycle = actionablePlan();
+  const secondCycle = actionablePlan();
+  const newBaselineStatement = 'Новый контрольный результат: рекорд 2 минуты 10 секунд';
+  secondCycle.cycleNumber = 2;
+  secondCycle.baseline = {
+    ...secondCycle.baseline,
+    userStatement: newBaselineStatement,
+    value: 130,
+  };
+  secondCycle.assessment.targetValue = secondCycle.roadmap[1].targetValue;
+  secondCycle.days.forEach((day, index) => {
+    const assessmentDay = index === 29;
+    const durationSecondsPerSet = assessmentDay ? 165 : 59;
+    day.execution.blocks = [{
+      ...day.execution.blocks[0],
+      sets: assessmentDay ? 1 : 3,
+      durationSecondsPerSet,
+      restSeconds: assessmentDay ? 0 : 60,
+      loadBasis: {
+        percentage: assessmentDay ? (165 / 130) * 100 : 45,
+        baseValue: 130,
+        baseUnit: 'seconds',
+        result: durationSecondsPerSet,
+      },
+    }];
+  });
+  const programContext = {
+    target: structuredClone(firstCycle.target),
+    roadmap: structuredClone(firstCycle.roadmap),
+    completedCycles: [
+      { cycleNumber: 1, completedAt: '2026-10-04T00:00:00.000Z', measuredValue: 130, unit: 'seconds' },
+    ],
+  };
+  const options = validationOptions({
+    cycleNumber: 2,
+    expectedBaselineStatement: newBaselineStatement,
+    trustedBaseline: { value: 130, unit: 'seconds' },
+    programContext,
+  });
+
+  assert.equal(validatePlanActionability(secondCycle, options), secondCycle);
+
+  const renamedTarget = structuredClone(secondCycle);
+  renamedTarget.target.normalizedMetric = 'Другая формулировка той же метрики';
+  assert.throws(
+    () => validatePlanActionability(renamedTarget, options),
+    /target: цель программы нельзя изменять между циклами/,
+  );
+
+  const aliasedTargetUnit = structuredClone(secondCycle);
+  aliasedTargetUnit.target.unit = 'секунд';
+  assert.throws(
+    () => validatePlanActionability(aliasedTargetUnit, options),
+    /target: цель программы нельзя изменять между циклами/,
+  );
+
+  secondCycle.roadmap[0].focus = 'Переписанный завершённый цикл.';
+  assert.throws(
+    () => validatePlanActionability(secondCycle, options),
+    /roadmap\.0: завершённый этап программы нельзя изменять/,
+  );
+});
+
+test('a migrated legacy roadmap preserves completed null milestones but keeps the active future numeric', () => {
+  const migratedContextPlan = actionablePlan();
+  const secondCycle = actionablePlan();
+  secondCycle.cycleNumber = 2;
+  secondCycle.cycleGoal = 'Проверить сухую задержку на уровне ста шестидесяти пяти секунд.';
+  secondCycle.roadmap[0].targetValue = null;
+  secondCycle.roadmap[0].targetUnit = null;
+  secondCycle.assessment.targetValue = 165;
+  secondCycle.days[29].execution.blocks[0] = {
+    ...secondCycle.days[29].execution.blocks[0],
+    durationSecondsPerSet: 165,
+    loadBasis: {
+      percentage: 206.25,
+      baseValue: 80,
+      baseUnit: 'seconds',
+      result: 165,
+    },
+  };
+
+  const legacyRoadmap = structuredClone(migratedContextPlan.roadmap);
+  legacyRoadmap.forEach((entry) => {
+    entry.targetValue = null;
+    entry.targetUnit = null;
+  });
+  const programContext = {
+    target: structuredClone(migratedContextPlan.target),
+    roadmap: legacyRoadmap,
+    completedCycles: [
+      { cycleNumber: 1, completedAt: '2026-10-04T00:00:00.000Z', measuredValue: 80, unit: 'seconds' },
+    ],
+  };
+  const options = validationOptions({ cycleNumber: 2, programContext });
+
+  assert.equal(validatePlanActionability(secondCycle, options), secondCycle);
+
+  const rewrittenPast = structuredClone(secondCycle);
+  rewrittenPast.roadmap[0].targetValue = 120;
+  rewrittenPast.roadmap[0].targetUnit = 'seconds';
+  assert.throws(
+    () => validatePlanActionability(rewrittenPast, options),
+    /roadmap\.0: завершённый этап программы нельзя изменять/,
+  );
+
+  const missingActiveMilestone = structuredClone(secondCycle);
+  missingActiveMilestone.roadmap[1].targetValue = null;
+  missingActiveMilestone.roadmap[1].targetUnit = null;
+  missingActiveMilestone.assessment.targetValue = null;
+  missingActiveMilestone.assessment.targetUnit = null;
+  assert.throws(
+    () => validatePlanActionability(missingActiveMilestone, options),
+    /roadmap\.1\.targetValue: ожидается число/,
+  );
+
+  const freshPlanWithNullMilestone = actionablePlan();
+  freshPlanWithNullMilestone.roadmap[0].targetValue = null;
+  freshPlanWithNullMilestone.roadmap[0].targetUnit = null;
+  freshPlanWithNullMilestone.assessment.targetValue = null;
+  freshPlanWithNullMilestone.assessment.targetUnit = null;
+  assert.throws(
+    () => validatePlan(freshPlanWithNullMilestone),
+    /roadmap\.0\.targetValue: ожидается число/,
+  );
+});
+
 test('dynamic provider schema fixes calendar and every block duration before the paid response', () => {
-  const schema = createPlanSchema(45, 30);
+  const schema = createPlanSchema(45, 'half-year', 3);
   const day = schema.properties.days.items.properties;
   const execution = day.execution;
   const variants = execution.properties.blocks.items.anyOf;
@@ -679,6 +847,11 @@ test('dynamic provider schema fixes calendar and every block duration before the
 
   assert.equal(schema.properties.days.minItems, 30);
   assert.equal(schema.properties.days.maxItems, 30);
+  assert.deepEqual(schema.properties.duration.enum, ['half-year']);
+  assert.deepEqual(schema.properties.totalCycles.enum, [6]);
+  assert.deepEqual(schema.properties.cycleNumber.enum, [3]);
+  assert.equal(schema.properties.roadmap.minItems, 6);
+  assert.equal(schema.properties.roadmap.maxItems, 6);
   assert.equal(day.dayNumber.maximum, 30);
   assert.equal(day.estimatedMinutes.maximum, 45);
   assert.equal(execution.properties.kind.enum[0], 'in_app');
@@ -734,35 +907,53 @@ test('local baseline parser prefers explicit records and normalizes time', () =>
   }
 });
 
-test('prompt, research, schema, and validator advertise the closed-loop plan-v5 contract', () => {
+test('local target parser normalizes the requested measurable outcome', () => {
+  assert.equal(BASELINE_PARSER_VERSION, 'numeric-metric-v2');
+  assert.deepEqual(parseTrustedTarget(USER_PROMPT), TRUSTED_TARGET);
+  assert.deepEqual(parseTrustedTarget('Хочу удерживать планку 2 минуты'), {
+    value: 120,
+    unit: 'seconds',
+  });
+  assert.deepEqual(parseTrustedTarget('Хочу выполнить 50 повторений'), {
+    value: 50,
+    unit: 'reps',
+  });
+  assert.equal(parseTrustedTarget('Хочу улучшить технику'), null);
+});
+
+test('prompt, research, schema, and validator advertise the adaptive plan-v6 contract', () => {
   const instructions = buildPlanInstructions({ hasResearch: true });
   const execution = PLAN_SCHEMA.properties.days.items.properties.execution;
 
-  assert.equal(PLAN_CONTRACT_VERSION, 'plan-v5');
-  assert.equal(PLAN_VALIDATOR_VERSION, 'plan-validator-v5');
-  assert.equal(PROMPT_VERSION, 'actum-plan-2026-09-04-action-first-v6');
-  assert.equal(RESEARCH_PROMPT_VERSION, 'actum-research-2026-08-01-closed-loop-v2');
-  assert.ok(PLAN_SCHEMA.required.includes('targetTimeline'));
-  assert.match(RESEARCH_INSTRUCTIONS, /timer, counter, checklist и text_log/);
-  assert.match(RESEARCH_INSTRUCTIONS, /Всё выполнение и журналирование должно завершаться внутри Actum/);
-  assert.match(instructions, /days содержит ровно horizonDays объектов/);
-  assert.match(instructions, /Никаких repeatCount/);
-  assert.match(instructions, /"percentage": 45.*"baseValue": 80.*"result": 36/);
-  assert.match(instructions, /execution всегда имеет точную форму \{ "kind": "in_app"/);
-  assert.match(instructions, /никаких steps, progressionRule, manual, routine/);
-  assert.match(instructions, /Для timer loadBasis\.result точно равен durationSecondsPerSet/);
-  assert.match(instructions, /одиночную подводную задержку дыхания/);
-  assert.match(instructions, /Никогда не создавай отдельный checklist проверки безопасности/);
-  assert.match(instructions, /предупреждения хранятся только в safetyNotes или day\.warning/);
+  assert.equal(PLAN_CONTRACT_VERSION, 'plan-v6');
+  assert.equal(PLAN_VALIDATOR_VERSION, 'plan-validator-v6');
+  assert.equal(PROMPT_VERSION, 'actum-plan-2026-09-04-adaptive-program-v1');
+  assert.equal(RESEARCH_PROMPT_VERSION, 'actum-research-2026-09-04-program-v3');
+  assert.ok(PLAN_SCHEMA.required.includes('duration'));
+  assert.ok(PLAN_SCHEMA.required.includes('roadmap'));
+  assert.ok(PLAN_SCHEMA.required.includes('assessment'));
+  assert.equal(PLAN_SCHEMA.required.includes('targetTimeline'), false);
+  assert.match(RESEARCH_INSTRUCTIONS, /timer,\s+counter, checklist и text_log/);
+  assert.match(RESEARCH_INSTRUCTIONS, /внутри Actum/);
+  assert.match(RESEARCH_INSTRUCTIONS, /полную траекторию выбранного срока/);
+  assert.match(instructions, /days содержит ровно 30 явных объектов/);
+  assert.match(instructions, /roadmap содержит ровно totalCycles/);
+  assert.match(instructions, /следующий запрос строит новый цикл/);
+  assert.match(instructions, /legacy-записи оба поля targetValue\/targetUnit равны null/);
+  assert.match(instructions, /текущая и все будущие\s+записи roadmap обязаны иметь числовые targetValue/);
+  assert.match(instructions, /durationSecondsPerSet точно равен assessment\.targetValue/);
+  assert.match(instructions, /одиночную подводную задержку/);
+  assert.match(instructions, /Предупреждения допускаются только в safetyNotes и day\.warning/);
   assert.deepEqual(
     execution.properties.blocks.items.anyOf.map((variant) => variant.properties.kind.enum[0]),
     ['timer', 'counter', 'checklist', 'text_log'],
   );
 });
 
-function actionablePlan(horizonDays = 30) {
-  const firstEnd = Math.ceil(horizonDays / 3);
-  const secondEnd = firstEnd + Math.ceil((horizonDays - firstEnd) / 2);
+function actionablePlan() {
+  const horizonDays = 30;
+  const firstEnd = 10;
+  const secondEnd = 20;
   const phases = [
     { title: 'Фаза 1', subtitle: 'Первые календарные дни', startDay: 1, endDay: firstEnd },
     {
@@ -783,7 +974,32 @@ function actionablePlan(horizonDays = 30) {
     title: 'Конкретный подневный маршрут',
     domain: 'move',
     targetMetric: 'Выполнить полный календарный блок с измеримой нагрузкой',
-    targetTimeline: TARGET_TIMELINE,
+    duration: 'year',
+    totalCycles: 12,
+    cycleNumber: 1,
+    target: {
+      userStatement: USER_PROMPT,
+      normalizedMetric: 'Максимальная сухая статическая задержка',
+      value: 600,
+      unit: 'seconds',
+    },
+    cycleGoal: 'Проверить устойчивую сухую задержку на уровне ста двадцати секунд.',
+    roadmap: [120, 165, 210, 255, 300, 345, 390, 435, 480, 525, 560, 600].map(
+      (targetValue, index) => ({
+        cycleNumber: index + 1,
+        title: `Цикл ${index + 1}`,
+        focus: 'Последовательное развитие измеримого навыка внутри Actum.',
+        targetValue,
+        targetUnit: 'seconds',
+      }),
+    ),
+    assessment: {
+      dayNumber: 30,
+      blockIndex: 0,
+      metric: 'Максимальная сухая статическая задержка',
+      targetValue: 120,
+      targetUnit: 'seconds',
+    },
     summary: 'Маршрут проверяет точную ежедневную дозировку без обращения к OpenAI.',
     baseline: {
       userStatement: USER_BASELINE,
@@ -799,6 +1015,7 @@ function actionablePlan(horizonDays = 30) {
     days: Array.from({ length: horizonDays }, (_, index) => {
       const dayNumber = index + 1;
       const phaseIndex = dayNumber <= firstEnd ? 1 : dayNumber <= secondEnd ? 2 : 3;
+      const assessmentDay = dayNumber === 30;
       return {
         dayNumber,
         phaseIndex,
@@ -814,14 +1031,14 @@ function actionablePlan(horizonDays = 30) {
               kind: 'timer',
               title: 'Субмаксимальный интервал',
               instruction: 'Сохраняй неподвижное положение с обычным дыханием до конца интервала.',
-              sets: 3,
-              durationSecondsPerSet: 36,
-              restSeconds: 60,
+              sets: assessmentDay ? 1 : 3,
+              durationSecondsPerSet: assessmentDay ? 120 : 36,
+              restSeconds: assessmentDay ? 0 : 60,
               loadBasis: {
-                percentage: 45,
+                percentage: assessmentDay ? 150 : 45,
                 baseValue: 80,
                 baseUnit: 'seconds',
-                result: 36,
+                result: assessmentDay ? 120 : 36,
               },
               successCriterion: 'Положение сохраняется до автоматического завершения таймера.',
             },

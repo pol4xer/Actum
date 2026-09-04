@@ -21,6 +21,7 @@ export type AppCommands = {
     strictness: StrictnessMode;
   }): void;
   createGoal(generated: GeneratedGoal): void;
+  advanceGoalCycle(generated: GeneratedGoal): void;
   beginMissionRun(missionId: string): MissionRun | undefined;
   restartMissionRun(missionId: string): MissionRun | undefined;
   saveMissionRun(run: MissionRun): void;
@@ -70,6 +71,25 @@ export function createAppCommands({
     },
     createGoal(generated) {
       dispatch({ type: 'create-goal', generated, now: timestamp() });
+    },
+    advanceGoalCycle(generated) {
+      const currentProgram = state.activeGoal?.program;
+      const currentCycle = state.activePlan?.cycleNumber ?? currentProgram?.activeCycle;
+      const nextProgram = generated.goal.program;
+      if (
+        !state.activePlan ||
+        !currentProgram ||
+        state.activeGoal?.status !== 'active' ||
+        !currentCycle ||
+        !state.activePlan.missions.every((mission) => mission.outcome !== 'pending') ||
+        generated.plan.cycleNumber !== currentCycle + 1 ||
+        generated.plan.totalCycles !== currentProgram.totalCycles ||
+        !nextProgram ||
+        nextProgram.duration !== currentProgram.duration
+      ) {
+        return;
+      }
+      dispatch({ type: 'advance-goal-cycle', generated, now: timestamp() });
     },
     beginMissionRun(missionId) {
       const existing = state.missionRuns[missionId];
