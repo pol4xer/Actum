@@ -32,6 +32,7 @@ export type AppCommands = {
     note?: string,
     runId?: string,
   ): void;
+  skipMissionForTesting(missionId: string): void;
   restartActivePlan(planId: string): void;
   startNewGoal(): void;
   setNotificationsEnabled(enabled: boolean): void;
@@ -41,6 +42,7 @@ export type AppCommandDependencies = {
   state: AppState;
   dispatch(action: AppStateAction): void;
   now(): Date;
+  canSkipMissionDays: boolean;
 };
 
 function checkInId(at: string): string {
@@ -52,6 +54,7 @@ export function createAppCommands({
   state,
   dispatch,
   now,
+  canSkipMissionDays,
 }: AppCommandDependencies): AppCommands {
   const timestamp = () => now().toISOString();
 
@@ -112,6 +115,22 @@ export function createAppCommands({
         outcome,
         note,
         runId,
+        checkInId: checkInId(at),
+        now: at,
+      });
+    },
+    skipMissionForTesting(missionId) {
+      if (!canSkipMissionDays) return;
+
+      const currentMission = state.activePlan?.missions.find(
+        (mission) => mission.outcome === 'pending',
+      );
+      if (currentMission?.id !== missionId) return;
+
+      const at = timestamp();
+      dispatch({
+        type: 'skip-mission-for-testing',
+        missionId,
         checkInId: checkInId(at),
         now: at,
       });

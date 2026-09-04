@@ -71,6 +71,7 @@ cp .env.example .env.local
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-5.6
 EXPO_PUBLIC_ACTUM_AI_URL=http://127.0.0.1:8787
+EXPO_PUBLIC_ACTUM_MODE=development
 ```
 
 Ключ создаётся в [OpenAI API dashboard](https://platform.openai.com/api-keys). Не вставляй его в `EXPO_PUBLIC_*`: тогда он попадёт в мобильный bundle.
@@ -161,6 +162,18 @@ Haptics автоматически отключены в Simulator и остаю
 
 Для повторного теста уже оплаченного и сохранённого маршрута используй «Настройки» → «Начать план заново». Эта операция не удаляет plan/research и не обращается к OpenAI: она очищает только результаты миссий, сессии, check-in и комментарии, сохраняет профиль/уровень/XP и переносит День 1 на текущую дату.
 
+### Быстрый пропуск дней при тестировании
+
+В локальной development-сборке можно последовательно пропускать дни через «Настройки» → «Тестирование» → «Пропустить день». Для этого в `.env.local` должно быть точное значение:
+
+```dotenv
+EXPO_PUBLIC_ACTUM_MODE=development
+```
+
+После изменения переменной полностью останови Metro и снова запусти `./scripts/dev-ios.sh`: Expo встраивает `EXPO_PUBLIC_*` в JavaScript bundle, поэтому одного перехода между экранами недостаточно. Чтобы получить обычное приложение без тестовой секции, поставь `EXPO_PUBLIC_ACTUM_MODE=production` (или удали строку) и также перезапусти Metro.
+
+Режим fail-closed: кнопка появляется только при сочетании точного значения `development` и системного `__DEV__`. Поэтому preview/production bundle не покажет её даже при ошибочной конфигурации. Тестовый пропуск открывает следующий день, но не начисляет XP и не меняет остальные RPG-метрики. «Начать план заново» сбрасывает все такие пропуски, сохраняя уже оплаченный план.
+
 ### Физический iPhone
 
 Для Simulator подходит `127.0.0.1`. Для физического iPhone телефон и Mac должны быть в одной доверенной Wi-Fi сети. В `.env.local` укажи LAN IP Mac и разреши серверу слушать локальную сеть:
@@ -220,11 +233,11 @@ pnpm test:ai
 pnpm check
 ```
 
-`pnpm test:ai` использует фальшивый OpenAI, не открывает сетевые сокеты и не тратит API-деньги. Он воспроизводит сбои POST и polling, проверяет восстановление guard/response ID/кэшей, бесплатную reuse-only проверку, resume по тому же response ID, research, `inflight_join`, кэш готового плана, строгий plan-v5, запрет внешних зависимостей и скрытых временных нагрузок, вычисления baseline, миграцию локального состояния, сохранение MissionRun, локальный перезапуск выбранного плана, подготовку `3 → 2 → 1`, критерии и совместимость старых plan-v1–plan-v4. Дополнительно проверяются DTO-mapper, parity клиентского и серверного plan-v5, изолированные server modules, reward policy, presentation старых планов, детерминированная машина runner и архитектурные границы. `pnpm check` запускает TypeScript, 70 локальных тестов и production export web-версии.
+`pnpm test:ai` использует фальшивый OpenAI, не открывает сетевые сокеты и не тратит API-деньги. Он воспроизводит сбои POST и polling, проверяет восстановление guard/response ID/кэшей, бесплатную reuse-only проверку, resume по тому же response ID, research, `inflight_join`, кэш готового плана, строгий plan-v5, запрет внешних зависимостей и скрытых временных нагрузок, вычисления baseline, миграцию локального состояния, сохранение MissionRun, локальный перезапуск выбранного плана, подготовку `3 → 2 → 1`, DEV-пропуск дней, feature flags, критерии и совместимость старых plan-v1–plan-v4. Дополнительно проверяются DTO-mapper, parity клиентского и серверного plan-v5, изолированные server modules, reward policy, presentation старых планов, детерминированная машина runner и архитектурные границы. `pnpm check` запускает TypeScript, 74 локальных теста и production export web-версии.
 
 ## Expo Application Services
 
-Проект связан с EAS-проектом `@pol4xer/actum`. Профили находятся в `eas.json`: `development`, `preview`, `production`.
+Проект связан с EAS-проектом `@pol4xer/actum`. Профили находятся в `eas.json`: `development` включает тестовые элементы, а `preview` и `production` явно используют production-режим.
 
 Проверить привязку:
 
@@ -254,10 +267,11 @@ scripts/ai/prompts/        # независимо редактируемые res
 scripts/ai/providers/      # адаптер Responses API
 src/
 ├── app/                   # тонкие Expo Router entrypoints
+├── config/                # fail-closed runtime mode и feature flags
 ├── features/              # автономные пользовательские сценарии и публичные index.ts
 │   ├── goal-planning/     # порт, DTO contract, HTTP adapter, mapper, controller и view
 │   ├── mission-session/   # runner и журнал одной сессии
-│   └── home|journey|twin|settings|onboarding|check-in
+│   └── home|journey|twin|settings|onboarding|check-in|dev-tools
 ├── domain/                # чистые rules, reward policy и mission-run state machine
 ├── state/                 # reducer, codec, commands, repository и persistence queue
 ├── shared/presentation/   # общие display-справочники и formatters

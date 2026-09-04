@@ -31,7 +31,6 @@ export default function AppTabs() {
     <Tabs
       screenOptions={{
         animation: 'fade',
-        freezeOnBlur: true,
         headerShown: false,
         sceneStyle: { backgroundColor: Palette.ink },
         tabBarActiveTintColor: Palette.gold,

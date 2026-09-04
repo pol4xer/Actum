@@ -55,6 +55,12 @@ export type AppStateAction =
       checkInId: string;
       now: string;
     }
+  | {
+      type: 'skip-mission-for-testing';
+      missionId: string;
+      checkInId: string;
+      now: string;
+    }
   | { type: 'set-notifications-enabled'; enabled: boolean; now: string }
   | { type: 'restart-active-plan'; planId: string; startDate: string; now: string }
   | { type: 'start-new-goal'; now: string }
@@ -346,6 +352,51 @@ export function appStateReducer(state: AppState, action: AppStateAction): AppSta
               : state.character.buffs.filter((buff) => buff !== 'Импульс'),
           debuffs,
         },
+        recovery: undefined,
+      },
+      action.now,
+    );
+  }
+
+  if (action.type === 'skip-mission-for-testing') {
+    if (!state.activePlan) return state;
+    const currentMission = state.activePlan.missions.find(
+      (mission) => mission.outcome === 'pending',
+    );
+    if (!currentMission || currentMission.id !== action.missionId) return state;
+
+    // This advances the persisted QA journey without fabricating completed work
+    // or applying gameplay rewards/penalties. Restarting the plan removes the
+    // DEV check-ins and restores every mission to pending.
+    const missions = state.activePlan.missions.map((mission) =>
+      mission.id === action.missionId ? { ...mission, outcome: 'skipped' as const } : mission,
+    );
+    const allReported = missions.every((mission) => mission.outcome !== 'pending');
+    const missionRuns = { ...state.missionRuns };
+    delete missionRuns[action.missionId];
+    const note = 'Пропущено в DEV-режиме.';
+
+    return withTimestamp(
+      {
+        ...state,
+        activeGoal: state.activeGoal
+          ? { ...state.activeGoal, status: allReported ? 'completed' : 'active' }
+          : undefined,
+        activePlan: { ...state.activePlan, missions },
+        missionRuns,
+        checkIns: [
+          {
+            id: action.checkInId,
+            missionId: action.missionId,
+            outcome: 'skipped',
+            comment: note,
+            note,
+            xpDelta: 0,
+            energyDelta: 0,
+            createdAt: action.now,
+          },
+          ...state.checkIns,
+        ],
         recovery: undefined,
       },
       action.now,

@@ -87,6 +87,16 @@ test('source imports respect Actum module boundaries', () => {
 
   for (const absolute of files) {
     const from = projectPath(absolute);
+    const source = readFileSync(absolute, 'utf8');
+    if (
+      from.startsWith('src/') &&
+      source.includes('process.env.EXPO_PUBLIC_ACTUM_MODE') &&
+      from !== 'src/config/feature-flags.ts'
+    ) {
+      violations.push(
+        `public app mode must be read only at the config boundary: ${from}`,
+      );
+    }
     for (const edge of moduleEdges(absolute)) {
       const target = normalizeTarget(absolute, edge.specifier);
       const detail = `${from} -> ${edge.specifier}`;

@@ -16,6 +16,7 @@ src/state                application store, команды и persistence orches
 src/domain               чистые типы, правила и state machines
 
 src/features/* ───────→ src/shared       общие presentation helpers
+src/features/* ───────→ src/config       runtime mode и feature flags
 src/state ─────────────→ src/lib         platform adapters
 
 scripts/ai-server.mjs    server composition root
@@ -49,7 +50,8 @@ scripts/ai/*             contracts, prompts, provider, cache/state/http modules
   и mapper в доменную модель;
 - `mission-session` — runner и журнал одной сессии;
 - `check-in` — итоговая оценка выполненной миссии;
-- `home`, `journey`, `twin`, `settings`, `onboarding` — самостоятельные экраны.
+- `home`, `journey`, `twin`, `settings`, `onboarding` — самостоятельные экраны;
+- `dev-tools` — изолированные тестовые элементы, недоступные в production bundle.
 
 Внешний код импортирует feature только через `src/features/<name>/index.ts`. Внутри
 feature используются относительные импорты. Если одному feature нужен другой, он также
@@ -96,6 +98,14 @@ State разделён на отдельные ответственности:
 `components/ui/info-popover.tsx` отвечает только за показ и доступность. Поэтому стиль
 подсказки, политика отбора текста и бизнес-контракт плана меняются независимо.
 
+### `src/config`
+
+`feature-flags.ts` — единственная клиентская граница чтения
+`EXPO_PUBLIC_ACTUM_MODE`. Resolver работает fail-closed: режим `development` возможен
+только при точном значении переменной и системном `__DEV__`; любое другое значение,
+preview или release bundle становятся `production`. Feature UI получает готовый флаг и
+не читает environment самостоятельно.
+
 ## AI gateway
 
 `scripts/ai-server.mjs` остаётся process/composition root и сохраняет совместимый HTTP API:
@@ -136,6 +146,7 @@ validator остаётся второй линией проверки резул
 | Награды и проекция героя | domain policy/selectors | reducer и Twin не дублируют числа |
 | Формат хранения | `src/state/app-state-codec.ts` + repository migration | feature UI |
 | iOS/web storage | `src/lib/storage.*` | reducer, commands |
+| DEV-инструменты и режим приложения | `src/config/feature-flags.ts`, `src/features/dev-tools` | production UI, domain rules |
 | Текст AI-инструкций | `scripts/ai/prompts` + version bump | мобильный UI |
 | JSON plan contract | server contract + client DTO contract + version bump | HTTP transport |
 | OpenAI transport/model | provider/config adapter | plan mapper, screens |
@@ -152,6 +163,8 @@ validator остаётся второй линией проверки резул
 7. Межмодульный импорт идёт через публичный `index.ts`.
 8. Серверная JSON Schema и клиентская Zod-схема plan-v5 структурно совпадают для всех
    поддерживаемых дневных лимитов и горизонтов.
+9. DEV-функции включаются только через `src/config` при `__DEV__` и точном
+   `EXPO_PUBLIC_ACTUM_MODE=development`; неизвестные значения считаются production.
 
 ## Как добавить новый feature
 

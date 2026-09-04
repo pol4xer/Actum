@@ -5,6 +5,7 @@ import {
   useMemo,
 } from 'react';
 
+import { featureFlags } from '@/config/feature-flags';
 import type {
   AppState,
   Archetype,
@@ -55,6 +56,7 @@ export type AppContextValue = {
     note?: string,
     runId?: string,
   ): void;
+  skipMissionForTesting(missionId: string): void;
   restartActivePlan(planId: string): void;
   startNewGoal(): void;
   setNotificationsEnabled(enabled: boolean): void;
@@ -80,7 +82,12 @@ export function AppProvider({ children }: PropsWithChildren) {
   } = usePersistentAppState(appStateRepository);
 
   const value = useMemo<AppContextValue>(() => {
-    const commands = createAppCommands({ state, dispatch, now: () => new Date() });
+    const commands = createAppCommands({
+      state,
+      dispatch,
+      now: () => new Date(),
+      canSkipMissionDays: featureFlags.canSkipMissionDays,
+    });
 
     const resetProgress: AppContextValue['resetProgress'] = async () => {
       await resetPersistedState(createInitialAppState(new Date()), disableDailyReminder);

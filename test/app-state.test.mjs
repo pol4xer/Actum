@@ -279,6 +279,7 @@ test('application commands coordinate domain actions with an injected clock and 
     state,
     dispatch: (action) => actions.push(action),
     now: () => new Date(T1),
+    canSkipMissionDays: true,
   });
 
   const run = commands.beginMissionRun('mission-1');
@@ -293,6 +294,26 @@ test('application commands coordinate domain actions with an injected clock and 
     startDate: '2026-08-01',
     now: T1,
   });
+
+  commands.skipMissionForTesting('not-current');
+  assert.equal(actions.length, 2);
+  commands.skipMissionForTesting('mission-1');
+  assert.deepEqual(actions[2], {
+    type: 'skip-mission-for-testing',
+    missionId: 'mission-1',
+    checkInId: `checkin-${Date.parse(T1).toString(36)}`,
+    now: T1,
+  });
+
+  const productionActions = [];
+  const productionCommands = createAppCommands({
+    state,
+    dispatch: (action) => productionActions.push(action),
+    now: () => new Date(T1),
+    canSkipMissionDays: false,
+  });
+  productionCommands.skipMissionForTesting('mission-1');
+  assert.deepEqual(productionActions, []);
 });
 
 function completedCheckpoint(run, targetMet = true) {
@@ -727,6 +748,78 @@ test('persisted plan-v1 through plan-v4 missions keep their legacy check-in path
   assert.equal(state.checkIns[0].runId, undefined);
   assert.equal(state.checkIns[0].comment, 'Legacy result retained');
   assert.equal(state.character.xp, 20);
+});
+
+test('DEV skip advances only the current day without changing RPG metrics', () => {
+  const generated = generatedGoal();
+  generated.plan.horizonDays = 2;
+  generated.plan.missions.push({
+    ...structuredClone(generated.plan.missions[0]),
+    id: 'mission-2',
+    sequence: 2,
+    dayNumber: 2,
+    title: 'Second day',
+  });
+  let state = appStateReducer(createInitialAppState(T0), {
+    type: 'create-goal',
+    generated,
+    now: T0,
+  });
+  const characterBefore = structuredClone(state.character);
+  const run = createMissionRun(state.activePlan.missions[0], T0);
+  state = appStateReducer(state, { type: 'begin-mission-run', run, now: T0 });
+
+  const outOfOrder = appStateReducer(state, {
+    type: 'skip-mission-for-testing',
+    missionId: 'mission-2',
+    checkInId: 'dev-skip-out-of-order',
+    now: T1,
+  });
+  assert.equal(outOfOrder, state);
+
+  state = appStateReducer(state, {
+    type: 'skip-mission-for-testing',
+    missionId: 'mission-1',
+    checkInId: 'dev-skip-1',
+    now: T1,
+  });
+  assert.equal(state.activePlan.missions[0].outcome, 'skipped');
+  assert.equal(state.activePlan.missions[1].outcome, 'pending');
+  assert.equal(state.missionRuns['mission-1'], undefined);
+  assert.deepEqual(state.character, characterBefore);
+  assert.deepEqual(state.checkIns[0], {
+    id: 'dev-skip-1',
+    missionId: 'mission-1',
+    outcome: 'skipped',
+    comment: 'Пропущено в DEV-режиме.',
+    note: 'Пропущено в DEV-режиме.',
+    xpDelta: 0,
+    energyDelta: 0,
+    createdAt: T1,
+  });
+
+  state = appStateReducer(state, {
+    type: 'skip-mission-for-testing',
+    missionId: 'mission-2',
+    checkInId: 'dev-skip-2',
+    now: T2,
+  });
+  assert.equal(state.activePlan.missions[1].outcome, 'skipped');
+  assert.equal(state.activeGoal.status, 'completed');
+  assert.deepEqual(state.character, characterBefore);
+
+  state = appStateReducer(state, {
+    type: 'restart-active-plan',
+    planId: 'plan-1',
+    startDate: '2026-08-01',
+    now: T2,
+  });
+  assert.deepEqual(
+    state.activePlan.missions.map((mission) => mission.outcome),
+    ['pending', 'pending'],
+  );
+  assert.deepEqual(state.checkIns, []);
+  assert.deepEqual(state.character, characterBefore);
 });
 
 test('reporting requires the current finished run and restarting replaces its checkpoints', () => {

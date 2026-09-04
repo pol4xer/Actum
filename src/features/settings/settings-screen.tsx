@@ -6,6 +6,7 @@ import { ThemedText } from '@/components/themed-text';
 import { InfoPopover } from '@/components/ui/info-popover';
 import { AppButton, Card, Pill, Screen, ScreenHeader } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
+import { DevToolsSection } from '@/features/dev-tools';
 import { disableDailyReminder, enableDailyReminder } from '@/lib/notifications';
 import type { ContextInfoSection } from '@/shared/presentation/context-info';
 import { useApp } from '@/state';
@@ -183,6 +184,8 @@ export default function SettingsScreen() {
           <AppButton label="Новая цель" variant="secondary" onPress={confirmNewGoal} />
         ) : null}
       </View>
+
+      <DevToolsSection />
 
       <View style={styles.section}>
         <ThemedText type="eyebrow" style={styles.sectionTitle}>
