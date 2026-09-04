@@ -8,9 +8,22 @@ import { ThemedText } from '@/components/themed-text';
 import { InfoPopover } from '@/components/ui/info-popover';
 import { AppButton, Card, Pill, ProgressBar, Screen, ScreenHeader } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
-import type { Mission, MissionOutcome } from '@/domain/types';
+import type { GeneratedGoal, Mission, MissionOutcome } from '@/domain/types';
 import { formatCalendarDate } from '@/lib/calendar-date';
-import { planContextSections } from '@/shared/presentation/context-info';
+import {
+  executionBlockContextSections,
+  missionContextSections,
+  planContextSections,
+  type ContextInfoSection,
+} from '@/shared/presentation/context-info';
+import {
+  actionableExecutionBlocks,
+  presentExecutionSection,
+} from '@/shared/presentation/execution-visibility';
+import {
+  presentMissionDay,
+  type MissionActionPresentation,
+} from '@/shared/presentation/mission-actions';
 import { formatMissionDuration } from '@/shared/presentation/plan-formatters';
 import { useApp } from '@/state';
 
@@ -23,120 +36,102 @@ const OUTCOME_META: Record<MissionOutcome, { icon: string; color: string; label:
 
 export default function JourneyScreen() {
   const { state, currentMission, mutateMissionRun, reportMission } = useApp();
-  const [detailMissionId, setDetailMissionId] = useState<string>();
+  const [expandedMissionId, setExpandedMissionId] = useState<string>();
+  const [runnerMissionId, setRunnerMissionId] = useState<string>();
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const [checkInMissionId, setCheckInMissionId] = useState<string>();
   const [checkInRunId, setCheckInRunId] = useState<string>();
 
   if (!state.activeGoal || !state.activePlan) {
     return (
       <Screen>
-        <ScreenHeader
-          eyebrow="Маршрут"
-          title="Сначала выбери цель"
-        />
-        <Card>
-          <ThemedText type="subtitle">Путь ещё не начат</ThemedText>
-          <AppButton label="Перейти к новой цели" onPress={() => router.push('/')} />
-        </Card>
+        <ScreenHeader eyebrow="План" title="Сначала выбери цель" />
+        <AppButton label="Новая цель" onPress={() => router.push('/')} />
       </Screen>
     );
   }
 
   const reported = state.activePlan.missions.filter((mission) => mission.outcome !== 'pending').length;
   const progress = reported / state.activePlan.missions.length;
-  const detailMission = state.activePlan.missions.find((mission) => mission.id === detailMissionId);
+  const runnerMission = state.activePlan.missions.find(
+    (mission) => mission.id === runnerMissionId,
+  );
   const checkInMission = state.activePlan.missions.find(
     (mission) => mission.id === checkInMissionId,
   );
   const checkInRun = checkInMission ? state.missionRuns[checkInMission.id] : undefined;
-  const detailIsCurrent = detailMission?.id === currentMission?.id;
+  const runnerIsCurrent = runnerMission?.id === currentMission?.id;
+  const planPreview: GeneratedGoal = {
+    goal: state.activeGoal,
+    plan: state.activePlan,
+  };
+
   return (
     <>
       <Screen>
         <ScreenHeader
-          eyebrow="Карта пути"
-          title="Главная миссия"
+          eyebrow="План"
+          title="По дням"
           subtitle={state.activeGoal.title}
         />
 
-        <Card accent>
-          <View style={styles.questHeader}>
-            <View style={styles.questCopy}>
-              <Pill tone={state.activeGoal.status === 'completed' ? 'success' : 'gold'}>
-                {state.activeGoal.status === 'completed' ? 'маршрут завершён' : 'активная цель'}
-              </Pill>
-              <ThemedText type="subtitle">{state.activeGoal.targetMetric}</ThemedText>
-            </View>
+        <Card style={styles.summaryCard}>
+          <View style={styles.row}>
+            <ThemedText type="smallBold" numberOfLines={2} style={styles.flex}>
+              {state.activeGoal.targetMetric}
+            </ThemedText>
             <InfoPopover
               title="О плане"
-              accessibilityLabel="Показать пояснения и источники плана"
-              sections={planContextSections(state.activePlan, {
-                baseline: state.activeGoal.baseline,
-                targetTimeline: state.activeGoal.targetTimeline,
-              })}
+              accessibilityLabel="Показать методику и источники плана"
+              sections={planInfoWithoutSafety(planPreview)}
             />
-            <View style={styles.percentCircle}>
-              <ThemedText type="smallBold" style={styles.gold}>
-                {Math.round(progress * 100)}%
-              </ThemedText>
-            </View>
           </View>
           <ProgressBar value={progress} />
-          <ThemedText type="small" style={styles.muted}>
-            {state.activePlan.dailyMinutes} мин/день · {state.activePlan.horizonDays} дней
-          </ThemedText>
+          <View style={styles.row}>
+            <ThemedText type="small" style={styles.muted}>
+              {reported} из {state.activePlan.missions.length}
+            </ThemedText>
+            <ThemedText type="small" style={styles.muted}>
+              {state.activePlan.dailyMinutes} мин/день
+            </ThemedText>
+          </View>
         </Card>
 
-        <View style={styles.timeline}>
-          {state.activePlan.chapters.map((chapter, chapterIndex) => {
-            const missions = state.activePlan?.missions.filter(
+        <View style={styles.daySections}>
+          {state.activePlan.chapters.map((chapter) => {
+            const missions = state.activePlan!.missions.filter(
               (mission) => mission.chapterId === chapter.id,
-            ) ?? [];
-            const complete = missions.every((mission) => mission.outcome !== 'pending');
-            const active = missions.some((mission) => mission.id === currentMission?.id);
+            );
+            if (!missions.length) return null;
+            const chapterPresentation = presentExecutionSection(chapter.title);
 
             return (
-              <View key={chapter.id} style={styles.chapterRow}>
-                <View style={styles.rail}>
-                  <View
-                    style={[
-                      styles.chapterNode,
-                      complete && styles.chapterNodeComplete,
-                      active && styles.chapterNodeActive,
-                    ]}>
-                    <ThemedText
-                      type="smallBold"
-                      style={complete ? styles.nodeCompleteText : styles.nodeText}>
-                      {complete ? '✓' : chapterIndex + 1}
-                    </ThemedText>
-                  </View>
-                  {chapterIndex < state.activePlan!.chapters.length - 1 ? (
-                    <View style={[styles.railLine, complete && styles.railLineComplete]} />
-                  ) : null}
-                </View>
-                <Card style={[styles.chapterCard, active && styles.chapterCardActive]}>
-                  <View style={styles.chapterTitle}>
-                    <View style={styles.questCopy}>
-                      <ThemedText type="smallBold">{chapter.title}</ThemedText>
-                    </View>
-                    {active ? <Pill tone="violet">сейчас</Pill> : null}
+              <View key={chapter.id} style={styles.chapterSection}>
+                <View style={styles.chapterHeader}>
+                  <ThemedText type="eyebrow" style={styles.muted}>
+                    {chapterPresentation.title}
+                  </ThemedText>
+                  {chapterPresentation.showContext ? (
                     <InfoPopover
-                      title={chapter.title}
-                      accessibilityLabel={`Показать пояснение к фазе ${chapter.title}`}
+                      title={chapterPresentation.title}
+                      accessibilityLabel={`Показать пояснение к этапу ${chapterPresentation.title}`}
                       sections={[{ body: chapter.subtitle }]}
                     />
-                  </View>
-                  <View style={styles.missionList}>
-                    {missions.map((mission) => (
-                      <MissionRow
-                        key={mission.id}
-                        mission={mission}
-                        isCurrent={mission.id === currentMission?.id}
-                        onPress={() => setDetailMissionId(mission.id)}
-                      />
-                    ))}
-                  </View>
-                </Card>
+                  ) : null}
+                </View>
+                {missions.map((mission) => {
+                  const expanded = expandedMissionId === mission.id;
+                  return (
+                    <MissionRow
+                      key={mission.id}
+                      mission={mission}
+                      isCurrent={mission.id === currentMission?.id}
+                      expanded={expanded}
+                      onToggle={() => setExpandedMissionId(expanded ? undefined : mission.id)}
+                      onOpen={() => setRunnerMissionId(mission.id)}
+                    />
+                  );
+                })}
               </View>
             );
           })}
@@ -144,55 +139,61 @@ export default function JourneyScreen() {
 
         {state.checkIns.length ? (
           <View style={styles.history}>
-            <ThemedText type="eyebrow" style={styles.muted}>
-              Журнал событий
-            </ThemedText>
-            {state.checkIns.map((checkIn) => {
-              const mission = state.activePlan?.missions.find(
-                (item) => item.id === checkIn.missionId,
-              );
-              const run = state.missionRuns[checkIn.missionId];
-              const recordedRun = run?.id === checkIn.runId ? run : undefined;
-              const meta = OUTCOME_META[checkIn.outcome];
-              return (
-                <View key={checkIn.id} style={styles.historyEntry}>
-                  <View style={styles.historyRow}>
-                    <View style={[styles.historyDot, { backgroundColor: meta.color }]} />
-                    <View style={styles.questCopy}>
-                      <ThemedText type="smallBold">{mission?.title ?? 'Миссия'}</ThemedText>
-                      <ThemedText type="small" style={styles.muted}>
-                        {meta.label} · {checkIn.xpDelta > 0 ? `+${checkIn.xpDelta} XP` : 'без XP'} ·{' '}
-                        {formatCheckInDate(checkIn.createdAt)}
-                      </ThemedText>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ expanded: historyExpanded }}
+              onPress={() => setHistoryExpanded((value) => !value)}
+              style={({ pressed }) => [styles.historyToggle, pressed && styles.pressed]}>
+              <ThemedText type="smallBold">История</ThemedText>
+              <ThemedText type="small" style={styles.muted}>
+                {state.checkIns.length} {historyExpanded ? '⌃' : '⌄'}
+              </ThemedText>
+            </Pressable>
+
+            {historyExpanded
+              ? state.checkIns.map((checkIn) => {
+                  const mission = state.activePlan?.missions.find(
+                    (item) => item.id === checkIn.missionId,
+                  );
+                  const run = state.missionRuns[checkIn.missionId];
+                  const recordedRun = run?.id === checkIn.runId ? run : undefined;
+                  const meta = OUTCOME_META[checkIn.outcome];
+                  return (
+                    <View key={checkIn.id} style={styles.historyEntry}>
+                      <View style={styles.historyRow}>
+                        <View style={[styles.historyDot, { backgroundColor: meta.color }]} />
+                        <View style={styles.flex}>
+                          <ThemedText type="smallBold">{mission?.title ?? 'День'}</ThemedText>
+                          <ThemedText type="small" style={styles.muted}>
+                            {meta.label} · {formatCheckInDate(checkIn.createdAt)}
+                          </ThemedText>
+                        </View>
+                      </View>
+                      {mission && recordedRun ? (
+                        <RunSummary mission={mission} run={recordedRun} />
+                      ) : null}
+                      {checkIn.note ? (
+                        <ThemedText type="small" style={styles.note}>
+                          {checkIn.note}
+                        </ThemedText>
+                      ) : null}
                     </View>
-                  </View>
-                  {mission && recordedRun ? <RunSummary mission={mission} run={recordedRun} /> : null}
-                  {checkIn.note ? (
-                    <View style={styles.finalNote}>
-                      <ThemedText type="eyebrow" style={styles.muted}>
-                        итоговый комментарий и недочёты
-                      </ThemedText>
-                      <ThemedText type="small" style={styles.note}>
-                        {checkIn.note}
-                      </ThemedText>
-                    </View>
-                  ) : null}
-                </View>
-              );
-            })}
+                  );
+                })
+              : null}
           </View>
         ) : null}
       </Screen>
 
       <MissionRunner
-        mission={detailMission}
-        visible={Boolean(detailMission)}
-        readOnly={!detailIsCurrent}
-        onClose={() => setDetailMissionId(undefined)}
+        mission={runnerMission}
+        visible={Boolean(runnerMission)}
+        readOnly={!runnerIsCurrent}
+        onClose={() => setRunnerMissionId(undefined)}
         onCheckIn={(runId) => {
-          if (!detailMission || !detailIsCurrent) return;
-          setDetailMissionId(undefined);
-          setCheckInMissionId(detailMission.id);
+          if (!runnerMission || !runnerIsCurrent) return;
+          setRunnerMissionId(undefined);
+          setCheckInMissionId(runnerMission.id);
           setCheckInRunId(runId);
         }}
       />
@@ -225,135 +226,252 @@ export default function JourneyScreen() {
 function MissionRow({
   mission,
   isCurrent,
-  onPress,
+  expanded,
+  onToggle,
+  onOpen,
 }: {
   mission: Mission;
   isCurrent: boolean;
-  onPress(): void;
+  expanded: boolean;
+  onToggle(): void;
+  onOpen(): void;
 }) {
   const meta = OUTCOME_META[mission.outcome];
   const scheduledDate = formatCalendarDate(mission.scheduledDate);
+  const context = missionInfoWithoutSafety(mission);
+
   return (
-    <Pressable
-      accessibilityLabel={`Открыть день ${mission.dayNumber ?? mission.sequence}: ${mission.title}`}
-      accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.missionRow,
-        isCurrent && styles.missionRowActive,
-        pressed && styles.pressed,
-      ]}>
-      <View style={[styles.outcomeIcon, { borderColor: meta.color }]}>
-        <ThemedText type="smallBold" style={{ color: meta.color }}>
-          {meta.icon || mission.sequence}
-        </ThemedText>
+    <Card style={[styles.dayCard, isCurrent && styles.currentDayCard]}>
+      <View style={styles.dayHeaderRow}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${expanded ? 'Свернуть' : 'Раскрыть'} день ${mission.dayNumber ?? mission.sequence}: ${mission.title}`}
+          accessibilityState={{ expanded }}
+          onPress={onToggle}
+          style={({ pressed }) => [styles.dayHeaderButton, pressed && styles.pressed]}>
+          <View style={[styles.dayNumber, { borderColor: meta.color }]}>
+            <ThemedText type="smallBold" style={{ color: meta.color }}>
+              {meta.icon || mission.dayNumber || mission.sequence}
+            </ThemedText>
+          </View>
+          <View style={styles.flex}>
+            <View style={styles.titleRow}>
+              <ThemedText type="eyebrow" style={styles.dayLabel}>
+                День {mission.dayNumber ?? mission.sequence}
+                {scheduledDate ? ` · ${scheduledDate}` : ''}
+              </ThemedText>
+              {isCurrent ? <Pill tone="violet">сейчас</Pill> : null}
+            </View>
+            <ThemedText type="smallBold" style={mission.outcome === 'skipped' && styles.strike}>
+              {mission.title}
+            </ThemedText>
+            <ThemedText type="small" style={styles.muted}>
+              {formatMissionDuration(mission)}
+            </ThemedText>
+          </View>
+          <ThemedText style={styles.chevron}>{expanded ? '⌃' : '⌄'}</ThemedText>
+        </Pressable>
+        {expanded ? (
+          <InfoPopover
+            title={`О дне ${mission.dayNumber ?? mission.sequence}`}
+            accessibilityLabel={`Показать пояснение к дню ${mission.dayNumber ?? mission.sequence}`}
+            sections={context}
+          />
+        ) : null}
       </View>
-      <View style={styles.questCopy}>
-        <ThemedText type="eyebrow" style={styles.missionDay}>
-          День {mission.dayNumber ?? mission.sequence}
-          {scheduledDate ? ` · ${scheduledDate}` : ''}
-        </ThemedText>
-        <ThemedText type="smallBold" style={mission.outcome === 'skipped' && styles.strike}>
-          {mission.title}
-        </ThemedText>
-        <ThemedText type="small" style={styles.muted}>
-          {formatMissionDuration(mission)} · {mission.xp} XP
-        </ThemedText>
-      </View>
-      <ThemedText style={styles.chevron}>›</ThemedText>
-    </Pressable>
+
+      {expanded ? (
+        <View style={styles.expandedDay}>
+          <MissionActionDetails mission={mission} />
+          <AppButton
+            label={isCurrent ? 'Начать день' : 'Открыть день'}
+            variant={isCurrent ? 'primary' : 'secondary'}
+            onPress={onOpen}
+          />
+        </View>
+      ) : null}
+    </Card>
   );
+}
+
+function MissionActionDetails({ mission }: { mission: Mission }) {
+  const presentation = presentMissionDay(mission);
+  return (
+    <View style={styles.actionList}>
+      {presentation.actions.map((action, index) => (
+        <ActionBlock key={action.id} action={action} index={index} />
+      ))}
+      <Criterion text={presentation.dayCriterion} day />
+    </View>
+  );
+}
+
+function ActionBlock({
+  action,
+  index,
+}: {
+  action: MissionActionPresentation;
+  index: number;
+}) {
+  return (
+    <View style={styles.actionBlock}>
+      <ThemedText type="smallBold">
+        {index + 1}. {action.title}
+      </ThemedText>
+      {action.dose ? (
+        <ThemedText type="smallBold" style={styles.actionDose}>
+          {action.dose}
+        </ThemedText>
+      ) : null}
+      {action.items?.map((item, itemIndex) => (
+        <ThemedText key={`${item}-${itemIndex}`} type="small">
+          {itemIndex + 1}. {item}
+        </ThemedText>
+      ))}
+      {action.instruction ? <ThemedText type="small">{action.instruction}</ThemedText> : null}
+      <Criterion text={action.criterion} />
+    </View>
+  );
+}
+
+function Criterion({ text, day = false }: { text?: string; day?: boolean }) {
+  if (!text?.trim()) return null;
+  return (
+    <View style={day ? styles.dayCriterion : styles.criterion}>
+      <ThemedText type="eyebrow" style={styles.muted}>
+        {day ? 'День выполнен' : 'Готово, если'}
+      </ThemedText>
+      <ThemedText type="small">{text}</ThemedText>
+    </View>
+  );
+}
+
+function missionInfoWithoutSafety(mission: Mission): ContextInfoSection[] {
+  const sections = missionContextSections(mission).filter(
+    (section) => section.heading !== 'Предупреждение' && section.heading !== 'Критерий дня',
+  );
+  if (mission.execution?.kind !== 'in_app') return sections;
+
+  return [
+    ...sections,
+    ...actionableExecutionBlocks(mission.execution.blocks).flatMap((block) =>
+      executionBlockContextSections(block).map((section) => ({
+        ...section,
+        heading: `${block.title} · ${section.heading ?? 'расчёт'}`,
+      })),
+    ),
+  ];
+}
+
+function planInfoWithoutSafety(preview: GeneratedGoal): ContextInfoSection[] {
+  return planContextSections(preview.plan, {
+    baseline: preview.goal.baseline,
+    targetTimeline: preview.goal.targetTimeline,
+  }).filter((section) => section.heading !== 'Безопасность' && section.tone !== 'warning');
 }
 
 function formatCheckInDate(value: string) {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'в журнале Actum';
+  if (Number.isNaN(date.getTime())) return 'в Actum';
   return new Intl.DateTimeFormat('ru-RU', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
   }).format(date);
 }
 
 const styles = StyleSheet.create({
-  muted: { color: Palette.textMuted },
-  gold: { color: Palette.goldBright },
-  missionDay: { color: Palette.goldBright },
-  questHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
-  questCopy: { flex: 1, gap: 4 },
-  pressed: { opacity: 0.7 },
-  percentCircle: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: Palette.gold,
-    backgroundColor: '#2A2419',
-  },
-  timeline: { gap: 0 },
-  chapterRow: { flexDirection: 'row', alignItems: 'stretch', gap: Spacing.two },
-  rail: { width: 34, alignItems: 'center' },
-  chapterNode: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Palette.line,
-    backgroundColor: Palette.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  chapterNodeActive: { borderColor: Palette.violet, backgroundColor: '#292344' },
-  chapterNodeComplete: { borderColor: Palette.success, backgroundColor: '#173126' },
-  nodeText: { color: Palette.textMuted },
-  nodeCompleteText: { color: Palette.success },
-  railLine: { flex: 1, width: 1, minHeight: 24, backgroundColor: Palette.line },
-  railLineComplete: { backgroundColor: '#36634E' },
-  chapterCard: { flex: 1, marginBottom: Spacing.three, borderRadius: Radius.medium },
-  chapterCardActive: { borderColor: '#4A4277' },
-  chapterTitle: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  missionList: { gap: Spacing.two },
-  missionRow: {
+  flex: { flex: 1 },
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: Spacing.two,
-    minHeight: 58,
-    padding: Spacing.two,
-    borderRadius: Radius.small,
-    backgroundColor: Palette.inkRaised,
   },
-  missionRowActive: { backgroundColor: '#1F1B34', borderWidth: 1, borderColor: '#463D73' },
-  chevron: { color: Palette.textDim, fontSize: 24 },
-  outcomeIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  muted: { color: Palette.textMuted },
+  dayLabel: { color: Palette.goldBright },
+  pressed: { opacity: 0.7 },
+  summaryCard: { gap: Spacing.two },
+  daySections: { gap: Spacing.three },
+  chapterSection: { gap: Spacing.two },
+  chapterHeader: {
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.one,
+  },
+  dayCard: { gap: 0, padding: Spacing.twoHalf },
+  currentDayCard: { borderColor: Palette.cyan },
+  dayHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  dayHeaderButton: {
+    flex: 1,
+    minHeight: 62,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.twoHalf,
+  },
+  dayNumber: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: Spacing.one,
+  },
+  chevron: { color: Palette.textMuted, fontSize: 20 },
   strike: { color: Palette.textMuted, textDecorationLine: 'line-through' },
+  expandedDay: {
+    gap: Spacing.two,
+    paddingTop: Spacing.twoHalf,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Palette.line,
+  },
+  actionList: { gap: Spacing.two },
+  actionBlock: {
+    gap: Spacing.one,
+    padding: Spacing.twoHalf,
+    borderRadius: Radius.small,
+    backgroundColor: Palette.surfaceSoft,
+  },
+  actionDose: { color: Palette.cyan },
+  criterion: {
+    gap: 2,
+    paddingTop: Spacing.one,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Palette.line,
+  },
+  dayCriterion: {
+    gap: 2,
+    padding: Spacing.twoHalf,
+    borderRadius: Radius.small,
+    backgroundColor: Palette.surfaceSoft,
+  },
   history: { gap: Spacing.two },
+  historyToggle: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: Radius.medium,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Palette.line,
+    backgroundColor: Palette.surface,
+    paddingHorizontal: Spacing.three,
+  },
   historyEntry: {
     gap: Spacing.two,
     padding: Spacing.three,
     borderRadius: Radius.medium,
     backgroundColor: Palette.surface,
   },
-  historyRow: {
-    flexDirection: 'row',
-    gap: Spacing.twoHalf,
-  },
+  historyRow: { flexDirection: 'row', gap: Spacing.twoHalf },
   historyDot: { width: 9, height: 9, borderRadius: 5, marginTop: 7 },
-  note: { color: Palette.text, fontStyle: 'italic', marginTop: 4 },
-  finalNote: {
-    gap: 2,
-    paddingTop: Spacing.two,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Palette.line,
-  },
+  note: { color: Palette.text, fontStyle: 'italic' },
 });

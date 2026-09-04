@@ -191,7 +191,7 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   assert.equal(health.body.baselineParserVersion, 'baseline-v1');
   assert.equal(health.body.contractVersion, 'plan-v5');
   assert.equal(health.body.validatorVersion, 'plan-validator-v5');
-  assert.equal(health.body.promptVersion, 'actum-plan-2026-08-01-closed-loop-v5');
+  assert.equal(health.body.promptVersion, 'actum-plan-2026-09-04-action-first-v6');
   assert.equal(health.body.researchPromptVersion, 'actum-research-2026-08-01-closed-loop-v2');
   const noSavedPlan = await getSavedPlan();
   assert.equal(noSavedPlan.status, 404);
@@ -214,7 +214,7 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   const second = await postPlan(firstInput, 'actum_test_retry_002');
   assert.equal(second.status, 200);
   assert.equal(second.body.meta.contractVersion, 'plan-v5');
-  assert.equal(second.body.meta.promptVersion, 'actum-plan-2026-08-01-closed-loop-v5');
+  assert.equal(second.body.meta.promptVersion, 'actum-plan-2026-09-04-action-first-v6');
   assert.equal(second.body.meta.researchResponseId, 'resp_research_test');
   assert.equal(second.body.meta.sources[0].url, 'https://example.com/research');
   assert.deepEqual(

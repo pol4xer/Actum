@@ -278,7 +278,9 @@ function isOptionalString(value: unknown): value is string | undefined {
 }
 
 function isCursorStage(value: unknown): value is MissionRunCursorStage {
-  return ['ready', 'work', 'rest', 'review', 'complete'].includes(String(value));
+  return ['ready', 'preparing', 'work', 'rest', 'review', 'complete'].includes(
+    String(value),
+  );
 }
 
 function isSetResult(value: unknown, kind: 'timer' | 'counter'): boolean {

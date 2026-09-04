@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -20,11 +20,14 @@ import {
   missionRunSummary,
 } from '@/domain/mission-run';
 import {
+  MISSION_RUN_PREPARATION_SECONDS,
+  advanceMissionRunTimedStage,
   checkpointMissionRunWork,
   completeCounterMissionRunSet,
   completeSimpleMissionRunBlock,
   completeTimerMissionRunSet,
   continueMissionRunAfterReview,
+  skipMissionRunBlock,
   startMissionRunWork,
 } from '@/domain/mission-run-machine';
 import type {
@@ -42,6 +45,11 @@ import {
   missionContextSections,
   type ContextInfoSection,
 } from '@/shared/presentation/context-info';
+import {
+  actionableExecutionBlocks,
+  isSafetyOnlyExecutionBlock,
+  withoutExecutionSafetyCopy,
+} from '@/shared/presentation/execution-visibility';
 
 type Props = {
   mission: Mission;
@@ -73,9 +81,12 @@ export function InAppMissionRunner({
   onRetryPersistence,
 }: Props) {
   const [now, setNow] = useState(Date.now());
+  const skippedBlockRef = useRef<string | undefined>(undefined);
   const execution = mission.execution?.kind === 'in_app' ? mission.execution : undefined;
   const activeBlock = execution?.blocks[run?.cursor.blockIndex ?? 0];
   const activeResult = run?.blockResults[run.cursor.blockIndex];
+  const visibleBlocks = execution ? actionableExecutionBlocks(execution.blocks) : [];
+  const activeBlockIsHidden = activeBlock ? isSafetyOnlyExecutionBlock(activeBlock) : false;
   const scheduledDate = formatCalendarDate(mission.scheduledDate);
 
   useEffect(() => {
@@ -90,34 +101,56 @@ export function InAppMissionRunner({
       !visible ||
       !run ||
       run.status !== 'running' ||
-      !run.stageEndsAt ||
-      (run.cursor.stage !== 'work' && run.cursor.stage !== 'rest')
+      !execution ||
+      !activeBlockIsHidden
     ) {
       return;
     }
 
+    const skipKey = `${run.id}:${run.cursor.blockIndex}`;
+    if (skippedBlockRef.current === skipKey) return;
+    skippedBlockRef.current = skipKey;
+    const transition = skipMissionRunBlock(run, execution.blocks, new Date());
+    if (!transition) return;
+    if (transition.kind === 'finish') {
+      onFinish(transition.run, transition.reason);
+    } else {
+      onSave(transition.run);
+    }
+  }, [activeBlockIsHidden, execution, onFinish, onSave, run, visible]);
+
+  useEffect(() => {
+    if (
+      !visible ||
+      !run ||
+      run.status !== 'running' ||
+      !run.stageEndsAt ||
+      !['preparing', 'work', 'rest'].includes(run.cursor.stage)
+    ) {
+      return;
+    }
+
+    const deadlineMilliseconds = Date.parse(run.stageEndsAt);
     const timeout = setTimeout(() => {
-      if (run.cursor.stage === 'rest') {
-        const checkpoint = startMissionRunWork(run, execution?.blocks, new Date());
-        if (checkpoint) onSave(checkpoint);
-        return;
-      }
-      if (activeBlock?.kind === 'timer' && activeResult?.kind === 'timer') {
-        const checkpoint = completeTimerMissionRunSet(run, activeBlock, true, new Date());
-        if (checkpoint) onSave(checkpoint);
-        return;
-      }
-    }, Math.max(0, Date.parse(run.stageEndsAt) - Date.now()));
+      const checkpoint = advanceMissionRunTimedStage(run, execution?.blocks);
+      if (checkpoint) onSave(checkpoint);
+    }, Math.max(0, deadlineMilliseconds - Date.now()));
     return () => clearTimeout(timeout);
-  }, [activeBlock, activeResult, execution?.blocks, onSave, run, visible]);
+  }, [execution?.blocks, onSave, run, visible]);
 
   if (!execution) return null;
 
   const summary = run
     ? missionRunSummary(run)
     : { completedBlocks: 0, totalBlocks: 0, targetMetSets: 0, totalSets: 0 };
-  const progress = execution.blocks.length
-    ? summary.completedBlocks / execution.blocks.length
+  const completedVisibleBlocks = run
+    ? visibleBlocks.filter((block) => {
+        const originalIndex = execution.blocks.indexOf(block);
+        return run.blockResults[originalIndex]?.completed;
+      }).length
+    : 0;
+  const progress = visibleBlocks.length
+    ? completedVisibleBlocks / visibleBlocks.length
     : 0;
   const remainingSeconds = run?.stageEndsAt
     ? Math.max(0, Math.ceil((Date.parse(run.stageEndsAt) - now) / 1000))
@@ -146,10 +179,10 @@ export function InAppMissionRunner({
                 {readOnly
                   ? 'просмотр'
                   : isAwaitingCheckIn
-                    ? 'сессия записана'
+                    ? 'готово'
                     : run
-                      ? 'сессия идёт'
-                      : 'всё внутри Actum'}
+                      ? 'сессия'
+                      : 'план'}
               </Pill>
               <ThemedText type="small" style={styles.muted}>
                 День {mission.dayNumber ?? mission.sequence}
@@ -205,7 +238,7 @@ export function InAppMissionRunner({
 
             {!run ? (
               <>
-                <ExecutionPlan blocks={execution.blocks} />
+                <ExecutionPlan blocks={visibleBlocks} />
                 <View style={styles.footerActions}>
                   {readOnly ? (
                     <AppButton label="Закрыть просмотр" variant="secondary" onPress={onClose} />
@@ -225,15 +258,15 @@ export function InAppMissionRunner({
               </>
             ) : null}
 
-            {!readOnly && run?.status === 'running' && activeBlock && activeResult ? (
+            {!readOnly && run?.status === 'running' && activeBlock && activeResult && !activeBlockIsHidden ? (
               <>
                 <View style={styles.progressCard}>
                   <View style={styles.rowBetween}>
                     <ThemedText type="eyebrow" style={styles.muted}>
-                      блок {run.cursor.blockIndex + 1} из {execution.blocks.length}
+                      {Math.max(1, visibleBlocks.indexOf(activeBlock) + 1)}/{visibleBlocks.length}
                     </ThemedText>
                     <ThemedText type="small" style={styles.muted}>
-                      {summary.completedBlocks}/{execution.blocks.length} записано
+                      {completedVisibleBlocks}/{visibleBlocks.length}
                     </ThemedText>
                   </View>
                   <ProgressBar value={progress} color={Palette.cyan} height={10} />
@@ -246,6 +279,14 @@ export function InAppMissionRunner({
                       const checkpoint = startMissionRunWork(run, execution.blocks, new Date());
                       if (checkpoint) onSave(checkpoint);
                     }}
+                  />
+                ) : null}
+
+                {run.cursor.stage === 'preparing' ? (
+                  <PreparationCountdown
+                    block={activeBlock}
+                    remainingSeconds={remainingSeconds}
+                    setIndex={run.cursor.setIndex}
                   />
                 ) : null}
 
@@ -264,10 +305,9 @@ export function InAppMissionRunner({
                 {run.cursor.stage === 'rest' ? (
                   <View style={[styles.activeCard, styles.restCard]}>
                     <ThemedText type="eyebrow" style={styles.cyan}>
-                      встроенный отдых
+                      отдых
                     </ThemedText>
                     <ThemedText style={styles.clock}>{formatClock(remainingSeconds)}</ThemedText>
-                    <ThemedText style={styles.center}>Следующий шаг начнётся автоматически.</ThemedText>
                     <AppButton
                       label="Пропустить отдых"
                       variant="secondary"
@@ -293,7 +333,7 @@ export function InAppMissionRunner({
 
                 <View style={styles.footerActions}>
                   <AppButton
-                    label="Остановить сессию и сохранить"
+                    label="Остановить и сохранить"
                     variant="secondary"
                     onPress={() =>
                       onFinish(checkpointMissionRunWork(run, activeBlock, new Date()), 'stopped')
@@ -321,23 +361,48 @@ export function InAppMissionRunner({
 function ReadyBlock({ block, onStart }: { block: MissionExecutionBlock; onStart(): void }) {
   return (
     <View style={styles.activeCard}>
-      <ThemedText type="eyebrow" style={styles.gold}>
-        следующий блок
-      </ThemedText>
       <View style={styles.titleRow}>
         <ThemedText type="subtitle" style={styles.flex}>
           {block.title}
         </ThemedText>
         <BlockInfoPopover block={block} />
       </View>
-      {'instruction' in block ? <ThemedText>{block.instruction}</ThemedText> : null}
+      {'instruction' in block ? (
+        <ThemedText>{primaryInstruction(block.instruction)}</ThemedText>
+      ) : null}
       <ThemedText type="smallBold" style={styles.cyan}>
         {blockPrescription(block)}
       </ThemedText>
-      <ThemedText type="small" style={styles.planCriterion}>
-        Засчитано, если: {block.successCriterion}
-      </ThemedText>
       <AppButton label={startLabel(block)} icon="→" onPress={onStart} />
+    </View>
+  );
+}
+
+function PreparationCountdown({
+  block,
+  remainingSeconds,
+  setIndex,
+}: {
+  block: MissionExecutionBlock;
+  remainingSeconds: number;
+  setIndex: number;
+}) {
+  const countdown = Math.min(
+    MISSION_RUN_PREPARATION_SECONDS,
+    Math.max(1, remainingSeconds),
+  );
+  return (
+    <View style={[styles.activeCard, styles.preparationCard]}>
+      <ThemedText type="eyebrow" style={styles.muted}>
+        приготовься · подход {setIndex + 1}
+      </ThemedText>
+      <ThemedText type="subtitle">{block.title}</ThemedText>
+      <ThemedText
+        accessibilityLabel={`Старт через ${countdown}`}
+        accessibilityLiveRegion="assertive"
+        style={styles.countdownNumber}>
+        {countdown}
+      </ThemedText>
     </View>
   );
 }
@@ -371,12 +436,12 @@ function ActiveBlock({
           </ThemedText>
           <BlockInfoPopover block={block} />
         </View>
-        <ThemedText>{block.instruction}</ThemedText>
+        <ThemedText>{primaryInstruction(block.instruction)}</ThemedText>
         <ThemedText accessibilityLiveRegion="polite" style={styles.clock}>
           {formatClock(remainingSeconds)}
         </ThemedText>
         <AppButton
-          label="Не выдержал — записать фактическое время"
+          label="Остановить и записать"
           variant="secondary"
           onPress={() => {
             const checkpoint = completeTimerMissionRunSet(run, block, false, new Date());
@@ -402,7 +467,7 @@ function ActiveBlock({
           </ThemedText>
           <BlockInfoPopover block={block} />
         </View>
-        <ThemedText>{block.instruction}</ThemedText>
+        <ThemedText>{primaryInstruction(block.instruction)}</ThemedText>
         <ThemedText type="small" style={styles.muted}>
           Цель: {formatQuantity(block.targetPerSet)} {counterUnitLabel(block)} ·{' '}
           {run.stageEndsAt && remainingSeconds > 0
@@ -439,10 +504,10 @@ function ActiveBlock({
     const allChecked = result.checkedIndexes.length === block.items.length;
     return (
       <View style={styles.activeCard}>
-        <ThemedText type="subtitle">{block.title}</ThemedText>
-        <ThemedText type="small" style={styles.muted}>
-          {blockPrescription(block)}
-        </ThemedText>
+        <View style={styles.titleRow}>
+          <ThemedText type="subtitle" style={styles.flex}>{block.title}</ThemedText>
+          <BlockInfoPopover block={block} />
+        </View>
         <View style={styles.checklist}>
           {block.items.map((item, index) => {
             const checked = result.checkedIndexes.includes(index);
@@ -481,15 +546,16 @@ function ActiveBlock({
 
   if (block.kind === 'text_log' && result.kind === 'text_log') {
     const enough = Array.from(result.value.trim()).length >= block.minCharacters;
+    const prompt = withoutExecutionSafetyCopy(block.prompt) ?? block.title;
     return (
       <View style={styles.activeCard}>
-        <ThemedText type="subtitle">{block.title}</ThemedText>
-        <ThemedText>{block.prompt}</ThemedText>
-        <ThemedText type="small" style={styles.muted}>
-          {blockPrescription(block)}
-        </ThemedText>
+        <View style={styles.titleRow}>
+          <ThemedText type="subtitle" style={styles.flex}>{block.title}</ThemedText>
+          <BlockInfoPopover block={block} />
+        </View>
+        <ThemedText>{prompt}</ThemedText>
         <TextInput
-          accessibilityLabel={block.prompt}
+          accessibilityLabel={prompt}
           maxLength={block.maxCharacters}
           multiline
           onChangeText={(value) => {
@@ -560,7 +626,7 @@ function BlockReview({
       <View style={styles.criterionCheck}>
         <ThemedText type="smallBold">Критерий выполнен?</ThemedText>
         <ThemedText type="small" style={styles.muted}>
-          {block.successCriterion}
+          {withoutExecutionSafetyCopy(block.successCriterion) ?? 'Действие выполнено.'}
         </ThemedText>
         <View style={styles.criterionOptions}>
           <Pressable
@@ -638,9 +704,6 @@ function BlockReview({
 function ExecutionPlan({ blocks }: { blocks: MissionExecutionBlock[] }) {
   return (
     <View style={styles.plan}>
-      <ThemedText type="eyebrow" style={styles.muted}>
-        порядок действий
-      </ThemedText>
       {blocks.map((block, index) => (
         <View key={`${index}-${block.title}`} style={styles.planBlock}>
           <View style={styles.planIndex}>
@@ -656,28 +719,6 @@ function ExecutionPlan({ blocks }: { blocks: MissionExecutionBlock[] }) {
               <BlockInfoPopover block={block} />
             </View>
             <ThemedText type="smallBold" style={styles.cyan}>{blockPrescription(block)}</ThemedText>
-            {'instruction' in block ? (
-              <ThemedText type="small">
-                {block.instruction}
-              </ThemedText>
-            ) : null}
-            {block.kind === 'checklist' ? (
-              <View style={styles.planDetails}>
-                {block.items.map((item, itemIndex) => (
-                  <ThemedText key={`${itemIndex}-${item}`} type="small">
-                    {itemIndex + 1}. {item}
-                  </ThemedText>
-                ))}
-              </View>
-            ) : null}
-            {block.kind === 'text_log' ? (
-              <ThemedText type="small">
-                {block.prompt}
-              </ThemedText>
-            ) : null}
-            <ThemedText type="small" style={styles.planCriterion}>
-              Критерий: {block.successCriterion}
-            </ThemedText>
           </View>
         </View>
       ))}
@@ -687,6 +728,14 @@ function ExecutionPlan({ blocks }: { blocks: MissionExecutionBlock[] }) {
 
 export function RunSummary({ mission, run }: { mission: Mission; run: MissionRun }) {
   const summary = missionRunSummary(run);
+  const blocks = mission.execution?.kind === 'in_app' ? mission.execution.blocks : [];
+  const visibleBlockIndexes = blocks
+    .map((block, index) => ({ block, index }))
+    .filter(({ block }) => !isSafetyOnlyExecutionBlock(block))
+    .map(({ index }) => index);
+  const completedBlocks = visibleBlockIndexes.filter(
+    (index) => run.blockResults[index]?.completed,
+  ).length;
   const successful = isMissionRunSuccessful(run);
   const elapsed = Math.max(
     0,
@@ -706,7 +755,7 @@ export function RunSummary({ mission, run }: { mission: Mission; run: MissionRun
       </View>
       <ThemedText type="subtitle">Журнал: {mission.title}</ThemedText>
       <ThemedText type="small" style={styles.muted}>
-        {summary.completedBlocks}/{summary.totalBlocks} блоков
+        {completedBlocks}/{visibleBlockIndexes.length} блоков
         {summary.totalSets
           ? ` · ${summary.targetMetSets}/${summary.totalSets} подходов по цели`
           : ''}{' '}
@@ -717,11 +766,12 @@ export function RunSummary({ mission, run }: { mission: Mission; run: MissionRun
 }
 
 function runDetailSections(mission: Mission, run: MissionRun): ContextInfoSection[] {
-  return run.blockResults.map((result) => {
+  return run.blockResults.flatMap((result) => {
     const block =
       mission.execution?.kind === 'in_app'
         ? mission.execution.blocks[result.blockIndex]
         : undefined;
+    if (block && isSafetyOnlyExecutionBlock(block)) return [];
     const details = [
       blockResultLabel(result),
       `Критерий: ${result.criterionMet === true ? 'да' : result.criterionMet === false ? 'нет' : 'не отмечен'}`,
@@ -739,11 +789,13 @@ function runDetailSections(mission: Mission, run: MissionRun): ContextInfoSectio
     }
     if (result.comment?.trim()) details.push(`Комментарий: ${result.comment.trim()}`);
 
-    return {
-      heading: `${blockResultSuccessful(result) ? '✓' : result.completed ? '≈' : '—'} ${result.title}`,
-      body: details.filter(Boolean).join('\n'),
-      ...(result.criterionMet === false ? { tone: 'warning' as const } : {}),
-    };
+    return [
+      {
+        heading: `${blockResultSuccessful(result) ? '✓' : result.completed ? '≈' : '—'} ${result.title}`,
+        body: details.filter(Boolean).join('\n'),
+        ...(result.criterionMet === false ? { tone: 'warning' as const } : {}),
+      },
+    ];
   });
 }
 
@@ -835,27 +887,51 @@ function blockPrescription(block: MissionExecutionBlock) {
     return `${block.sets} × ${formatDuration(block.durationSecondsPerSet)} · отдых ${formatDuration(block.restSeconds)}`;
   }
   if (block.kind === 'counter') {
-    return `${block.sets} × ${formatQuantity(block.targetPerSet)} ${counterUnitLabel(block)} · время подхода ${formatDuration(block.workSecondsPerSet)} · отдых ${formatDuration(block.restSeconds)}${block.tempo ? ` · темп ${block.tempo}` : ''}`;
+    return `${block.sets} × ${formatQuantity(block.targetPerSet)} ${counterUnitLabel(block)} · ${formatDuration(block.workSecondsPerSet)} · отдых ${formatDuration(block.restSeconds)}${block.tempo ? ` · ${block.tempo}` : ''}`;
   }
   if (block.kind === 'checklist') {
-    return `${block.items.length} пунктов внутри приложения · ориентир ${formatDuration(block.estimatedSeconds)}`;
+    return `${block.items.length} пунктов · ~${formatDuration(block.estimatedSeconds)}`;
   }
-  return `ответ ${block.minCharacters}–${block.maxCharacters} знаков внутри приложения · ориентир ${formatDuration(block.estimatedSeconds)}`;
+  return `${block.minCharacters}–${block.maxCharacters} знаков · ~${formatDuration(block.estimatedSeconds)}`;
 }
 
 function BlockInfoPopover({ block }: { block: MissionExecutionBlock }) {
   return (
     <InfoPopover
-      title={`Расчёт: ${block.title}`}
-      accessibilityLabel={`Показать расчёт нагрузки для блока ${block.title}`}
-      sections={executionBlockContextSections(block)}
+      title={block.title}
+      accessibilityLabel={`Показать подробности блока ${block.title}`}
+      sections={blockContextSections(block)}
     />
   );
 }
 
+function blockContextSections(block: MissionExecutionBlock): ContextInfoSection[] {
+  const sections: ContextInfoSection[] = [];
+  if ('instruction' in block) {
+    const details = instructionDetails(block.instruction);
+    if (details) sections.push({ heading: 'Подробнее', body: details });
+  }
+  const criterion = withoutExecutionSafetyCopy(block.successCriterion);
+  if (criterion) sections.push({ heading: 'Критерий', body: criterion });
+  sections.push(...executionBlockContextSections(block));
+  return sections;
+}
+
+function primaryInstruction(instruction: string) {
+  const normalized = withoutExecutionSafetyCopy(instruction)?.trim() ?? '';
+  const match = normalized.match(/^.*?[.!?](?=\s|$)/u);
+  return match?.[0].trim() || normalized;
+}
+
+function instructionDetails(instruction: string) {
+  const normalized = withoutExecutionSafetyCopy(instruction)?.trim() ?? '';
+  const primary = primaryInstruction(normalized);
+  return normalized.slice(primary.length).trim();
+}
+
 function startLabel(block: MissionExecutionBlock) {
-  if (block.kind === 'timer') return 'Запустить встроенный таймер';
-  if (block.kind === 'counter') return 'Открыть встроенный счётчик';
+  if (block.kind === 'timer') return 'Начать таймер';
+  if (block.kind === 'counter') return 'Начать подход';
   if (block.kind === 'checklist') return 'Открыть чек-лист';
   return 'Открыть поле ответа';
 }
@@ -950,14 +1026,16 @@ const styles = StyleSheet.create({
     padding: Spacing.twoHalf,
     borderRadius: Radius.medium,
     borderWidth: 1,
-    borderColor: '#2F624B',
-    backgroundColor: '#15271F',
+    borderColor: Palette.line,
+    backgroundColor: Palette.surface,
   },
-  persistenceCardError: { borderColor: '#6B3737', backgroundColor: '#2B1818' },
+  persistenceCardError: {
+    borderColor: 'rgba(215, 0, 21, 0.28)',
+    backgroundColor: 'rgba(215, 0, 21, 0.06)',
+  },
   muted: { color: Palette.textMuted },
   cyan: { color: Palette.cyan },
   gold: { color: Palette.goldBright },
-  center: { textAlign: 'center' },
   flex: { flex: 1 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   plan: { gap: Spacing.two },
@@ -976,11 +1054,9 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#2A2418',
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
   },
   planCopy: { flex: 1, gap: 4 },
-  planDetails: { gap: 3, paddingTop: Spacing.one },
-  planCriterion: { color: Palette.text, paddingTop: Spacing.one },
   progressCard: { gap: Spacing.two },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', gap: Spacing.two },
   activeCard: {
@@ -989,9 +1065,24 @@ const styles = StyleSheet.create({
     borderRadius: Radius.large,
     backgroundColor: Palette.surface,
     borderWidth: 1,
-    borderColor: '#4A432E',
+    borderColor: Palette.line,
   },
-  restCard: { borderColor: '#2D5961', backgroundColor: '#16272D' },
+  preparationCard: {
+    alignItems: 'center',
+    paddingVertical: Spacing.six,
+  },
+  countdownNumber: {
+    color: Palette.text,
+    fontSize: 120,
+    lineHeight: 128,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  restCard: {
+    borderColor: 'rgba(0, 122, 255, 0.24)',
+    backgroundColor: 'rgba(0, 122, 255, 0.06)',
+  },
   clock: {
     color: Palette.text,
     fontSize: 64,
@@ -1050,7 +1141,10 @@ const styles = StyleSheet.create({
     borderColor: Palette.line,
     backgroundColor: Palette.surfaceSoft,
   },
-  checkRowDone: { borderColor: Palette.success, backgroundColor: '#163025' },
+  checkRowDone: {
+    borderColor: Palette.success,
+    backgroundColor: 'rgba(36, 138, 61, 0.08)',
+  },
   checkbox: {
     width: 28,
     height: 28,
@@ -1093,8 +1187,14 @@ const styles = StyleSheet.create({
     borderColor: Palette.line,
     backgroundColor: Palette.surface,
   },
-  criterionOptionSuccess: { borderColor: Palette.success, backgroundColor: '#163025' },
-  criterionOptionWarning: { borderColor: Palette.warning, backgroundColor: '#2A2117' },
+  criterionOptionSuccess: {
+    borderColor: Palette.success,
+    backgroundColor: 'rgba(36, 138, 61, 0.08)',
+  },
+  criterionOptionWarning: {
+    borderColor: Palette.warning,
+    backgroundColor: 'rgba(199, 120, 0, 0.08)',
+  },
   commentInput: {
     minHeight: 90,
     borderRadius: Radius.medium,
@@ -1110,8 +1210,8 @@ const styles = StyleSheet.create({
     padding: Spacing.three,
     borderRadius: Radius.large,
     borderWidth: 1,
-    borderColor: '#2F624B',
-    backgroundColor: '#15271F',
+    borderColor: Palette.line,
+    backgroundColor: Palette.surface,
   },
   warningText: { color: Palette.warning },
   footerActions: { gap: Spacing.two, paddingTop: Spacing.two },

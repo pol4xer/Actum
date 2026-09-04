@@ -60,8 +60,7 @@ feature используются относительные импорты. Ес
 Здесь находятся долговечные правила, не зависящие от UI:
 
 - `mission-run.ts` — создание, проверка и сводка сохранённой сессии;
-- `mission-run-machine.ts` — детерминированные переходы work/rest/review/finish;
-- `goal-engine.ts` — локальная классификация риска;
+- `mission-run-machine.ts` — детерминированные переходы preparing/work/rest/review/finish;
 - `types.ts` — канонические TypeScript-типы доменной модели.
 
 State machine принимает время аргументом. Поэтому таймеры можно тестировать без React,
@@ -88,9 +87,12 @@ State разделён на отдельные ответственности:
 низкоуровневые utilities. Platform suffixes `.native`/`.web` выбирает Expo bundler.
 
 `shared/presentation` содержит только общие правила отображения: подписи архетипов,
-форматирование baseline, источника и длительности миссии. `context-info.ts` отдельно
-выбирает объяснения, предупреждения и provenance, которые можно спрятать за `?`, не
-затронув исполняемые инструкции, дозировки и критерии. Универсальный
+форматирование baseline, источника и длительности миссии. `mission-actions.ts` приводит
+новые и старые контракты плана к единому подневному виду, а
+`execution-visibility.ts` отсекает неисполняемые блоки старых планов и очищает их
+пользовательское представление без изменения сохранённых данных. `context-info.ts`
+выбирает объяснения и provenance, которые можно спрятать за `?`, не затронув
+исполняемые инструкции, дозировки и критерии. Универсальный
 `components/ui/info-popover.tsx` отвечает только за показ и доступность. Поэтому стиль
 подсказки, политика отбора текста и бизнес-контракт плана меняются независимо.
 
@@ -127,6 +129,7 @@ validator остаётся второй линией проверки резул
 | Цвета, интервалы, радиусы | `src/constants/theme.ts` | domain, AI, storage |
 | Общие UI primitives | `src/components/ui` | маршруты, pipeline |
 | Контекст за `?` | `src/shared/presentation/context-info.ts` | исполняемые поля плана, AI-кэш |
+| Подневное представление и видимость старых блоков | `src/shared/presentation/mission-actions.ts`, `execution-visibility.ts` | сохранённый plan, OpenAI |
 | Экран/сценарий | `src/features/<name>` | Router и другие feature internals |
 | Навигационный путь | `src/app` | реализация feature |
 | Переходы runner | `src/domain/mission-run-machine.ts` | React view, persistence adapter |

@@ -6,8 +6,8 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "actum",
-    "userInterfaceStyle": "dark",
-    "backgroundColor": "#090B14",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#F2F2F7",
     "ios": {
       "icon": "./assets/images/icon.png",
       "bundleIdentifier": "com.actum.liferpg",
@@ -15,7 +15,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#090B14",
+        "backgroundColor": "#F2F2F7",
         "foregroundImage": "./assets/images/icon.png"
       },
       "predictiveBackGestureEnabled": false,
@@ -30,7 +30,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#090B14"
+          "backgroundColor": "#F2F2F7"
         }
       ],
       "expo-notifications",

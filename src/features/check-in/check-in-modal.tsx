@@ -13,8 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { InfoPopover } from '@/components/ui/info-popover';
-import { RunSummary } from '@/features/mission-session';
-import { AppButton, Pill } from '@/components/ui/primitives';
+import { AppButton } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import { isMissionRunSuccessful } from '@/domain/mission-run';
 import { Mission, MissionOutcome, MissionRun } from '@/domain/types';
@@ -75,9 +74,19 @@ export function CheckInModal({
           <View style={styles.handle} />
           <View style={styles.header}>
             <View style={styles.headerCopy}>
-              <Pill tone="gold">честный check-in</Pill>
-              <ThemedText type="title">Как всё прошло?</ThemedText>
-              <ThemedText style={styles.muted}>{mission?.title}</ThemedText>
+              <ThemedText type="title">Итог</ThemedText>
+              <View style={styles.missionRow}>
+                <ThemedText type="small" numberOfLines={2} style={[styles.muted, styles.flex]}>
+                  {mission?.title}
+                </ThemedText>
+                {mission?.completionCriterion ? (
+                  <InfoPopover
+                    title="Критерий выполнения"
+                    accessibilityLabel="Показать критерий выполнения"
+                    sections={[{ body: mission.completionCriterion }]}
+                  />
+                ) : null}
+              </View>
             </View>
             <Pressable
               accessibilityLabel="Закрыть"
@@ -92,17 +101,6 @@ export function CheckInModal({
             contentContainerStyle={styles.content}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}>
-            {mission?.completionCriterion ? (
-              <View style={styles.criterionCard}>
-                <ThemedText type="eyebrow" style={styles.muted}>
-                  критерий полного выполнения
-                </ThemedText>
-                <ThemedText type="smallBold">{mission.completionCriterion}</ThemedText>
-              </View>
-            ) : null}
-
-            {mission && run ? <RunSummary mission={mission} run={run} /> : null}
-
             {!canSubmit ? (
               <View style={styles.unavailableCard}>
                 <View style={styles.rowBetween}>
@@ -123,7 +121,7 @@ export function CheckInModal({
 
             <View style={styles.options}>
               <View style={styles.rowBetween}>
-                <ThemedText type="smallBold">Результат</ThemedText>
+                <ThemedText type="subtitle">Результат</ThemedText>
                 <InfoPopover
                   title="Как считается результат?"
                   sections={[
@@ -174,7 +172,7 @@ export function CheckInModal({
                   setNote(value);
                   if (run && onSaveComment) onSaveComment(run.id, value);
                 }}
-                placeholder="Что получилось, где не хватило времени, что изменить в следующей сессии…"
+                placeholder="Короткий комментарий…"
                 placeholderTextColor={Palette.textDim}
                 style={styles.input}
                 value={note}
@@ -182,13 +180,7 @@ export function CheckInModal({
             </View>
 
             <AppButton
-              label={
-                outcome === 'completed'
-                  ? 'Забрать награду'
-                  : outcome === 'partial'
-                    ? 'Сохранить честный результат'
-                    : 'Сохранить результат'
-              }
+              label="Сохранить"
               disabled={!canSubmit}
               onPress={submit}
             />
@@ -256,6 +248,7 @@ const styles = StyleSheet.create({
   },
   header: { flexDirection: 'row', gap: Spacing.three },
   headerCopy: { flex: 1, gap: Spacing.two },
+  missionRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   close: {
     width: 38,
     height: 38,
@@ -266,33 +259,24 @@ const styles = StyleSheet.create({
   },
   closeText: { color: Palette.textMuted, fontSize: 27, lineHeight: 29 },
   muted: { color: Palette.textMuted },
-  center: { textAlign: 'center' },
   flex: { flex: 1 },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.two },
-  criterionCard: {
-    gap: Spacing.one,
-    borderRadius: Radius.medium,
-    borderWidth: 1,
-    borderColor: '#4A432E',
-    backgroundColor: '#262316',
-    padding: Spacing.twoHalf,
-  },
   unavailableCard: {
     gap: Spacing.one,
     borderRadius: Radius.medium,
-    borderWidth: 1,
-    borderColor: '#614A2C',
-    backgroundColor: '#2A2117',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(199, 120, 0, 0.22)',
+    backgroundColor: 'rgba(255, 149, 0, 0.08)',
     padding: Spacing.twoHalf,
   },
   options: { gap: Spacing.two },
   option: {
-    minHeight: 74,
+    minHeight: 60,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.twoHalf,
     borderRadius: Radius.medium,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: Palette.line,
     backgroundColor: Palette.surface,
     padding: Spacing.twoHalf,
@@ -300,18 +284,18 @@ const styles = StyleSheet.create({
   optionDisabled: { opacity: 0.42 },
   pressed: { opacity: 0.72 },
   outcomeIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   optionCopy: { flex: 1, gap: 2 },
   radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 1, borderColor: Palette.textDim },
   noteBlock: { gap: Spacing.two },
   input: {
-    minHeight: 96,
+    minHeight: 76,
     borderRadius: Radius.medium,
     borderWidth: 1,
     borderColor: Palette.line,

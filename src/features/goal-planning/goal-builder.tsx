@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -13,8 +13,10 @@ import { ThemedText } from '@/components/themed-text';
 import { InfoPopover } from '@/components/ui/info-popover';
 import { AppButton, Card, Pill, Screen, ScreenHeader } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
-import type { Mission, RoutineUnit } from '@/domain/types';
+import type { GeneratedGoal, Mission } from '@/domain/types';
 import { formatCalendarDate } from '@/lib/calendar-date';
+import { actionableExecutionBlocks } from '@/shared/presentation/execution-visibility';
+import { presentMissionDay, type MissionActionPresentation } from '@/shared/presentation/mission-actions';
 import {
   formatMissionDuration,
 } from '@/shared/presentation/plan-formatters';
@@ -62,7 +64,6 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
     savedPreview,
     generationError,
     generationErrorCode,
-    risk,
     detailsComplete,
     continueFromIntent,
     backToIntent,
@@ -72,12 +73,18 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
     openSavedPlan,
     acceptPlan,
   } = useGoalBuilderController({ onAcceptGoal: createGoal, planner });
+  const [showPlanDetails, setShowPlanDetails] = useState(false);
+  const [expandedPreviewMissionId, setExpandedPreviewMissionId] = useState<string>();
+
+  useEffect(() => {
+    if (stage === 'review') return;
+    setShowPlanDetails(false);
+    setExpandedPreviewMissionId(undefined);
+  }, [stage]);
+
   const screenContext = goalBuilderContextSections({
     stage,
     researchMode,
-    riskTitle: risk.safe ? undefined : risk.title,
-    riskMessage: risk.safe ? undefined : risk.message,
-    safe: risk.safe,
     generationError,
     generationErrorCode,
   });
@@ -93,14 +100,16 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
             stage === 'intent'
               ? 'Что хочешь изменить?'
               : stage === 'details'
-                ? 'Сделаем цель реальной'
+                ? 'Настроим план'
                 : stage === 'generating'
-                  ? 'GPT собирает маршрут'
+                  ? 'Собираю план'
                   : stage === 'error'
                     ? 'План пока не пришёл'
-                      : 'Твой первый маршрут'
+                    : showPlanDetails
+                      ? 'План по дням'
+                      : 'План готов'
           }
-          action={<InfoPopover title="Об этом шаге" sections={screenContext} />}
+          action={stage === 'review' ? undefined : <InfoPopover title="Об этом шаге" sections={screenContext} />}
         />
 
         {stage === 'intent' ? (
@@ -118,7 +127,7 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
             />
             <View style={styles.exampleBlock}>
               <ThemedText type="eyebrow" style={styles.muted}>
-                Подходящие для MVP цели
+                Примеры
               </ThemedText>
               <View style={styles.exampleWrap}>
                 {['Дочитать книгу', 'Выучить основы испанского', 'Разобрать документы'].map(
@@ -136,7 +145,7 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
             {savedPreview ? (
               <Card accent>
                 <View style={styles.cardTop}>
-                  <Pill tone="success">сохранённый план</Pill>
+                  <ThemedText type="smallBold">План уже сохранён</ThemedText>
                   <InfoPopover
                     title="Почему это бесплатно?"
                     sections={[
@@ -146,11 +155,7 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
                     ]}
                   />
                 </View>
-                <ThemedText type="subtitle">Сохранённый исследованный план найден</ThemedText>
-                <AppButton
-                  label="Открыть сохранённый план"
-                  onPress={openSavedPlan}
-                />
+                <AppButton label="Открыть план" onPress={openSavedPlan} />
               </Card>
             ) : null}
             <AppButton
@@ -164,7 +169,7 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
         {stage === 'details' ? (
           <>
             <Question
-              title="Текущая измеренная точка · обязательно"
+              title="С чего начинаешь? · обязательно"
               help={[
                 {
                   body: 'Укажи число и единицу, если они известны. GPT сохранит исходную формулировку и отдельно нормализует метрику.',
@@ -184,7 +189,7 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
             </Question>
 
             <Question
-              title="Срок большой цели · обязательно"
+              title="Когда хочешь достичь цели? · обязательно"
               help={[
                 {
                   body: 'Подробный календарь покроет первый выбранный горизонт, а этот срок останется направлением всей цели.',
@@ -201,7 +206,7 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
               />
             </Question>
 
-            <Question title="Сколько времени реально есть в день?">
+            <Question title="Сколько минут в день?">
               <ChoiceRow>
                 {MINUTES.map((value) => (
                   <Choice
@@ -214,7 +219,7 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
               </ChoiceRow>
             </Question>
 
-            <Question title="Какой первый горизонт?">
+            <Question title="На сколько дней расписать?">
               <ChoiceRow>
                 {HORIZONS.map((option) => (
                   <Choice
@@ -227,7 +232,7 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
               </ChoiceRow>
             </Question>
 
-            <Question title="Опыт относительно цели">
+            <Question title="Твой опыт">
               <View style={styles.levelList}>
                 <LevelChoice
                   label="Начинаю с нуля"
@@ -248,7 +253,7 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
             </Question>
 
             <Question
-              title="Насколько глубоко исследовать цель?"
+              title="Как собрать план?"
               help={[
                 {
                   body:
@@ -259,12 +264,12 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
               ]}>
               <ChoiceRow>
                 <Choice
-                  label="Web research"
+                  label="С исследованием"
                   selected={researchMode === 'web'}
                   onPress={() => setResearchMode('web')}
                 />
                 <Choice
-                  label="Быстрый GPT"
+                  label="Быстро"
                   selected={researchMode === 'quick'}
                   onPress={() => setResearchMode('quick')}
                 />
@@ -274,7 +279,7 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
             <View style={styles.buttonRow}>
               <AppButton label="Назад" variant="ghost" onPress={backToIntent} />
               <AppButton
-                label={researchMode === 'web' ? 'Исследовать и собрать' : 'Собрать с GPT'}
+                label="Собрать план"
                 disabled={!detailsComplete}
                 onPress={generateGoal}
                 style={styles.flex}
@@ -334,90 +339,184 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
         ) : null}
 
         {stage === 'review' && preview ? (
-          <>
-            <Card accent>
-              <View style={styles.cardTop}>
-                <Pill tone="success">план готов</Pill>
-                <InfoPopover
-                  title="О плане"
-                  sections={[
-                    ...planContextSections(preview.plan, {
-                      baseline: preview.goal.baseline,
-                      targetTimeline: preview.goal.targetTimeline,
-                    }),
-                    ...(!risk.safe
-                      ? [
-                          {
-                            heading: risk.title,
-                            body: risk.message,
-                            tone: 'warning' as const,
-                          },
-                        ]
-                      : []),
-                  ]}
+          showPlanDetails ? (
+            <>
+              <View style={styles.planDetailsHeader}>
+                <ThemedText type="smallBold" style={styles.flex}>
+                  {preview.goal.title}
+                </ThemedText>
+                <InfoPopover title="О плане" sections={planInfoWithoutSafety(preview)} />
+              </View>
+
+              <View style={styles.dayList}>
+                {preview.plan.missions.map((mission, index) => {
+                  const expanded = expandedPreviewMissionId === mission.id;
+                  return (
+                    <PlanDayPreview
+                      key={mission.id}
+                      mission={mission}
+                      index={index}
+                      expanded={expanded}
+                      onToggle={() =>
+                        setExpandedPreviewMissionId(expanded ? undefined : mission.id)
+                      }
+                    />
+                  );
+                })}
+              </View>
+
+              <View style={styles.buttonRow}>
+                <AppButton
+                  label="Назад"
+                  variant="ghost"
+                  onPress={() => {
+                    setShowPlanDetails(false);
+                    setExpandedPreviewMissionId(undefined);
+                  }}
                 />
+                <AppButton label="Начать" onPress={acceptPlan} style={styles.flex} />
               </View>
-              <ThemedText type="subtitle">{preview.goal.title}</ThemedText>
-              <View style={styles.planMeta}>
-                <Meta value={`${dailyMinutes} мин`} label="в день" />
-                <Meta value={`${horizonDays}`} label="дней" />
-                <Meta value={`${preview.plan.missions.length}`} label="дней в плане" />
-              </View>
-            </Card>
-
-            <View style={styles.section}>
-              <ThemedText type="eyebrow" style={styles.muted}>
-                Календарь · все дни
-              </ThemedText>
-              {preview.plan.missions.map((mission, index) => (
-                <View key={mission.id} style={styles.missionPreview}>
-                  <View style={styles.sequence}>
-                    <ThemedText type="smallBold" style={styles.sequenceText}>
-                      {mission.dayNumber ?? index + 1}
-                    </ThemedText>
-                  </View>
-                  <View style={styles.missionCopy}>
-                    <ThemedText type="eyebrow" style={styles.missionDate}>
-                      {missionCalendarLabel(mission, index)}
-                    </ThemedText>
-                    <View style={styles.missionTitleRow}>
-                      <ThemedText type="smallBold" style={styles.flex}>
-                        {mission.title}
-                      </ThemedText>
-                      <InfoPopover
-                        title={`День ${mission.dayNumber ?? index + 1}`}
-                        accessibilityLabel={`Показать пояснение к дню ${mission.dayNumber ?? index + 1}`}
-                        sections={missionPreviewContextSections(mission)}
-                      />
-                    </View>
-                    <ThemedText type="small" style={styles.muted}>
-                      {formatMissionDuration(mission, { inAppRecordLabel: 'отметок' })} ·{' '}
-                      {mission.xp} XP
-                    </ThemedText>
-                    {mission.execution?.kind === 'in_app' ? (
-                      <ThemedText type="small" style={styles.prescriptionPreview}>
-                        {[
-                          ...mission.execution.blocks.map((block) =>
-                            inAppBlockActionPreview(block),
-                          ),
-                          `✓ День засчитан: ${mission.execution.successCriterion}`,
-                        ].join('\n')}
-                      </ThemedText>
-                    ) : null}
-                  </View>
+            </>
+          ) : (
+            <>
+              <Card accent style={styles.readyCard}>
+                <View style={styles.readyTop}>
+                  <ThemedText type="subtitle" numberOfLines={2} style={styles.flex}>
+                    {preview.goal.title}
+                  </ThemedText>
+                  <InfoPopover title="О плане" sections={planInfoWithoutSafety(preview)} />
                 </View>
-              ))}
-            </View>
+                <View style={styles.planMeta}>
+                  <Meta value={`${preview.plan.horizonDays}`} label="дней" />
+                  <Meta value={`${preview.plan.dailyMinutes} мин`} label="в день" />
+                </View>
+              </Card>
 
-            <View style={styles.buttonRow}>
-              <AppButton label="Изменить" variant="ghost" onPress={editDetails} />
-              <AppButton label="Принять план" icon="✦" onPress={acceptPlan} style={styles.flex} />
-            </View>
-          </>
+              <View style={styles.reviewActions}>
+                <AppButton label="Начать" onPress={acceptPlan} />
+                <AppButton
+                  label="Посмотреть план"
+                  variant="secondary"
+                  onPress={() => setShowPlanDetails(true)}
+                />
+                <AppButton label="Изменить" variant="ghost" onPress={editDetails} />
+              </View>
+            </>
+          )
         ) : null}
       </Screen>
     </KeyboardAvoidingView>
   );
+}
+
+
+function PlanDayPreview({
+  mission,
+  index,
+  expanded,
+  onToggle,
+}: {
+  mission: Mission;
+  index: number;
+  expanded: boolean;
+  onToggle(): void;
+}) {
+  return (
+    <Card style={styles.dayCard}>
+      <View style={styles.dayHeaderRow}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${expanded ? 'Свернуть' : 'Раскрыть'} день ${mission.dayNumber ?? index + 1}: ${mission.title}`}
+          accessibilityState={{ expanded }}
+          onPress={onToggle}
+          style={({ pressed }) => [styles.dayHeaderButton, pressed && styles.pressed]}>
+          <View style={styles.sequence}>
+            <ThemedText type="smallBold" style={styles.sequenceText}>
+              {mission.dayNumber ?? index + 1}
+            </ThemedText>
+          </View>
+          <View style={styles.missionCopy}>
+            <ThemedText type="eyebrow" style={styles.missionDate}>
+              {missionCalendarLabel(mission, index)}
+            </ThemedText>
+            <ThemedText type="smallBold">{mission.title}</ThemedText>
+            <ThemedText type="small" style={styles.muted}>
+              {formatMissionDuration(mission, { inAppRecordLabel: 'отметок' })}
+            </ThemedText>
+          </View>
+          <ThemedText style={styles.dayChevron}>{expanded ? '⌃' : '⌄'}</ThemedText>
+        </Pressable>
+        {expanded ? (
+          <InfoPopover
+            title={`О дне ${mission.dayNumber ?? index + 1}`}
+            accessibilityLabel={`Показать пояснения к дню ${mission.dayNumber ?? index + 1}`}
+            sections={missionPreviewContextSections(mission)}
+          />
+        ) : null}
+      </View>
+
+      {expanded ? <MissionActionDetails mission={mission} /> : null}
+    </Card>
+  );
+}
+
+function MissionActionDetails({ mission }: { mission: Mission }) {
+  const presentation = presentMissionDay(mission);
+  return (
+    <View style={styles.expandedDay}>
+      {presentation.actions.map((action, index) => (
+        <ActionBlock key={action.id} action={action} index={index} />
+      ))}
+      <Criterion text={presentation.dayCriterion} day />
+    </View>
+  );
+}
+
+function ActionBlock({
+  action,
+  index,
+}: {
+  action: MissionActionPresentation;
+  index: number;
+}) {
+  return (
+    <View style={styles.actionBlock}>
+      <ThemedText type="smallBold">
+        {index + 1}. {action.title}
+      </ThemedText>
+      {action.dose ? (
+        <ThemedText type="smallBold" style={styles.actionDose}>
+          {action.dose}
+        </ThemedText>
+      ) : null}
+      {action.items?.map((item, itemIndex) => (
+        <ThemedText key={`${item}-${itemIndex}`} type="small">
+          {itemIndex + 1}. {item}
+        </ThemedText>
+      ))}
+      {action.instruction ? <ThemedText type="small">{action.instruction}</ThemedText> : null}
+      <Criterion text={action.criterion} />
+    </View>
+  );
+}
+
+function Criterion({ text, day = false }: { text?: string; day?: boolean }) {
+  if (!text?.trim()) return null;
+  return (
+    <View style={day ? styles.dayCriterion : styles.criterion}>
+      <ThemedText type="eyebrow" style={styles.muted}>
+        {day ? 'День выполнен' : 'Готово, если'}
+      </ThemedText>
+      <ThemedText type="small">{text}</ThemedText>
+    </View>
+  );
+}
+
+function planInfoWithoutSafety(preview: GeneratedGoal): ContextInfoSection[] {
+  return planContextSections(preview.plan, {
+    baseline: preview.goal.baseline,
+    targetTimeline: preview.goal.targetTimeline,
+  }).filter((section) => section.heading !== 'Безопасность' && section.tone !== 'warning');
 }
 
 function Question({
@@ -516,36 +615,14 @@ function Meta({ value, label }: { value: string; label: string }) {
   );
 }
 
-function inAppBlockActionPreview(
-  block: Extract<NonNullable<Mission['execution']>, { kind: 'in_app' }>['blocks'][number],
-) {
-  if (block.kind === 'timer') {
-    return `• ${block.title}: ${block.instruction} · ${block.sets}×${formatCompactDuration(block.durationSecondsPerSet)}, отдых ${formatCompactDuration(block.restSeconds)}\n  ✓ ${block.successCriterion}`;
-  }
-  if (block.kind === 'counter') {
-    const unit = routineUnitLabel(block.unit, block.unitLabel);
-    return `• ${block.title}: ${block.instruction} · ${block.sets}×${block.targetPerSet} ${unit}, время подхода ${formatCompactDuration(block.workSecondsPerSet)}, отдых ${formatCompactDuration(block.restSeconds)}${block.tempo ? ` · темп: ${block.tempo}` : ''}\n  ✓ ${block.successCriterion}`;
-  }
-  if (block.kind === 'checklist') {
-    return `• ${block.title}: ${block.items.join('; ')} · ориентир ${formatCompactDuration(block.estimatedSeconds)}\n  ✓ ${block.successCriterion}`;
-  }
-  return `• ${block.title}: ${block.prompt} · ${block.minCharacters}–${block.maxCharacters} знаков · ориентир ${formatCompactDuration(block.estimatedSeconds)}\n  ✓ ${block.successCriterion}`;
-}
-
 function goalBuilderContextSections({
   stage,
   researchMode,
-  riskTitle,
-  riskMessage,
-  safe,
   generationError,
   generationErrorCode,
 }: {
   stage: GoalBuilderStage;
   researchMode: 'quick' | 'web';
-  riskTitle?: string;
-  riskMessage?: string;
-  safe: boolean;
   generationError?: string;
   generationErrorCode?: AIPlannerErrorCode;
 }): ContextInfoSection[] {
@@ -568,19 +645,18 @@ function goalBuilderContextSections({
   } else if (stage === 'review') {
     sections.push({ body: 'Проверь календарь действий и прими его, если нагрузка подходит.' });
   }
-  if (!safe && riskTitle && riskMessage) {
-    sections.push({ heading: riskTitle, body: riskMessage, tone: 'warning' });
-  }
   return sections;
 }
 
 function missionPreviewContextSections(mission: Mission): ContextInfoSection[] {
-  const sections = missionContextSections(mission);
+  const sections = missionContextSections(mission).filter(
+    (section) => section.heading !== 'Предупреждение' && section.heading !== 'Критерий дня',
+  );
   if (mission.execution?.kind !== 'in_app') return sections;
 
   return [
     ...sections,
-    ...mission.execution.blocks.flatMap((block) =>
+    ...actionableExecutionBlocks(mission.execution.blocks).flatMap((block) =>
       executionBlockContextSections(block).map((section) => ({
         ...section,
         heading: `${block.title} · ${section.heading ?? 'расчёт'}`,
@@ -626,25 +702,6 @@ function errorRetryContext(code?: AIPlannerErrorCode): ContextInfoSection | unde
   return undefined;
 }
 
-function formatCompactDuration(seconds: number) {
-  return seconds >= 60 && seconds % 60 === 0 ? `${seconds / 60} мин` : `${seconds} сек`;
-}
-
-function routineUnitLabel(unit: RoutineUnit, custom?: string) {
-  if (unit === 'custom') return custom || 'ед.';
-  const labels: Record<Exclude<RoutineUnit, 'custom'>, string> = {
-    reps: 'повт.',
-    seconds: 'сек',
-    minutes: 'мин',
-    pages: 'стр.',
-    items: 'элем.',
-    words: 'слов',
-    meters: 'м',
-    attempts: 'попыток',
-  };
-  return labels[unit];
-}
-
 function missionCalendarLabel(mission: Mission, index: number) {
   const dayNumber = mission.dayNumber ?? index + 1;
   const dateLabel = formatCalendarDate(mission.scheduledDate, 'long');
@@ -654,7 +711,6 @@ function missionCalendarLabel(mission: Mission, index: number) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  prescriptionPreview: { color: Palette.cyan, lineHeight: 20 },
   muted: { color: Palette.textMuted },
   violet: { color: Palette.violetSoft },
   gold: { color: Palette.goldBright },
@@ -709,7 +765,10 @@ const styles = StyleSheet.create({
     borderColor: Palette.line,
     backgroundColor: Palette.surface,
   },
-  choiceActive: { borderColor: Palette.gold, backgroundColor: '#2A2419' },
+  choiceActive: {
+    borderColor: Palette.accent,
+    backgroundColor: 'rgba(0, 122, 255, 0.08)',
+  },
   choiceTextActive: { color: Palette.goldBright },
   levelList: { gap: Spacing.two },
   levelChoice: {
@@ -723,7 +782,10 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.surface,
     paddingHorizontal: Spacing.three,
   },
-  levelChoiceActive: { borderColor: Palette.violet, backgroundColor: '#1D1A32' },
+  levelChoiceActive: {
+    borderColor: Palette.accent,
+    backgroundColor: 'rgba(0, 122, 255, 0.08)',
+  },
   radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 1, borderColor: Palette.textDim },
   radioActive: { borderWidth: 5, borderColor: Palette.violetSoft },
   buttonRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
@@ -733,8 +795,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: Spacing.three,
   },
-  errorCard: { gap: Spacing.three, borderColor: '#5B4228' },
+  errorCard: { gap: Spacing.three, borderColor: 'rgba(199, 120, 0, 0.24)' },
   cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  readyCard: { gap: Spacing.three },
+  readyTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  reviewActions: { gap: Spacing.two },
+  planDetailsHeader: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
   planMeta: {
     flexDirection: 'row',
     paddingTop: Spacing.three,
@@ -742,17 +813,41 @@ const styles = StyleSheet.create({
     borderTopColor: Palette.line,
   },
   meta: { flex: 1, gap: 3 },
-  section: { gap: Spacing.two },
-  missionPreview: {
+  dayList: { gap: Spacing.two },
+  dayCard: { gap: 0, padding: Spacing.twoHalf },
+  dayHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  dayHeaderButton: {
+    flex: 1,
+    minHeight: 58,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.twoHalf,
-    minHeight: 64,
-    borderRadius: Radius.medium,
-    backgroundColor: Palette.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Palette.line,
+  },
+  dayChevron: { color: Palette.textMuted, fontSize: 20 },
+  expandedDay: {
+    gap: Spacing.two,
+    paddingTop: Spacing.twoHalf,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Palette.line,
+  },
+  actionBlock: {
+    gap: Spacing.one,
     padding: Spacing.twoHalf,
+    borderRadius: Radius.small,
+    backgroundColor: Palette.surfaceSoft,
+  },
+  actionDose: { color: Palette.cyan },
+  criterion: {
+    gap: 2,
+    paddingTop: Spacing.one,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Palette.line,
+  },
+  dayCriterion: {
+    gap: 2,
+    padding: Spacing.twoHalf,
+    borderRadius: Radius.small,
+    backgroundColor: Palette.surfaceSoft,
   },
   sequence: {
     width: 34,
@@ -760,12 +855,11 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#2B251A',
+    backgroundColor: 'rgba(0, 122, 255, 0.08)',
     borderWidth: 1,
-    borderColor: '#5D4B2B',
+    borderColor: 'rgba(0, 122, 255, 0.2)',
   },
   sequenceText: { color: Palette.goldBright },
   missionCopy: { flex: 1, gap: 2 },
-  missionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   missionDate: { color: Palette.violetSoft },
 });

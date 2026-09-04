@@ -1,4 +1,4 @@
-export const PROMPT_VERSION = 'actum-plan-2026-08-01-closed-loop-v5';
+export const PROMPT_VERSION = 'actum-plan-2026-09-04-action-first-v6';
 export const RESEARCH_PROMPT_VERSION = 'actum-research-2026-08-01-closed-loop-v2';
 
 export const RESEARCH_INSTRUCTIONS = `
@@ -62,8 +62,9 @@ export function buildPlanInstructions({ hasResearch }) {
 - timer — точная инструкция, sets, durationSecondsPerSet, restSeconds, loadBasis или null и наблюдаемый successCriterion. Временную нагрузку всегда оформляй timer; не используй seconds или minutes как единицу counter.
 - counter — точная инструкция, sets, targetPerSet, unit из reps/pages/items/words/meters/attempts/custom, unitLabel или null, workSecondsPerSet, restSeconds, tempo или null, loadBasis или null и наблюдаемый successCriterion. Для reps/pages/items/words/attempts targetPerSet является целым числом. unitLabel заполняй только для custom.
 - checklist — от 1 до 8 полностью сформулированных пунктов, которые пользователь отмечает во встроенном интерфейсе, estimatedSeconds и successCriterion. Пункты не должны отправлять пользователя к внешнему артефакту, человеку или инструменту.
+- checklist содержит только реальные действия по достижению цели. Никогда не создавай отдельный checklist проверки безопасности, самочувствия, противопоказаний, готовности, положения тела или условий среды. Такие сведения разрешены только в safetyNotes или day.warning и не входят в execution.blocks.
 - text_log — встроенное поле Actum с точным prompt, minCharacters, maxCharacters, estimatedSeconds и successCriterion. maxCharacters не меньше minCharacters. Любую письменную рефлексию оформляй этим блоком, а не просьбой вести записи где-либо ещё.
-- Блоки расположены в фактическом порядке выполнения. Вся техника, последовательность, дозировка и критерии находятся внутри blocks; day.description служит только кратким описанием.
+- Блоки расположены в фактическом порядке выполнения. Первая фраза instruction сразу говорит, что сделать. Instruction содержит не больше двух коротких фраз; не повторяет warning, safetyNotes или юридический текст. Дозировка находится в машинных полях, а day.description служит только кратким описанием.
 - execution.successCriterion однозначно описывает завершение всего дня. successCriterion каждого блока описывает завершение именно этого блока.
 
 Расчёт нагрузки:
@@ -95,6 +96,7 @@ export function buildPlanInstructions({ hasResearch }) {
 Границы:
 - Сохраняй конечную цель и targetTimeline как направление, не гарантируя физиологический или иной результат.
 - Для потенциально опасной цели всё равно составь подробный календарь конкретной допустимой практики; warning не заменяет блоки дня и не создаёт eligibility gate.
+- Любые предупреждения хранятся только в safetyNotes или day.warning. Не превращай их в отдельный день, checklist, timer, counter, text_log, successCriterion или обязательное действие пользователя.
 - Отсутствие возраста, медицинской анкеты или иных не запрошенных данных не является основанием превращать весь блок в расслабление, поиск специалиста или подготовительную работу. Не выдумывай диагноз; просто используй исследованный субмаксимальный вариант и показывай краткое предупреждение отдельно.
 - Если research brief содержит готовую числовую прогрессию, перенеси её в исполняемые timer/counter блоки с первого назначенного тренировочного дня. Не подменяй целевой навык тридцатью днями косвенной подготовки.
 - Не предписывай гипервентиляцию, подавление симптомов, одиночную подводную задержку дыхания или заведомо предельную ежедневную попытку. Для дыхательной цели весь календарь plan-v5 должен быть сухим и субмаксимальным; не делай ежедневное выполнение зависимым от напарника или другого человека.

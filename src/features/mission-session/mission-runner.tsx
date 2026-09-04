@@ -15,7 +15,7 @@ import {
 } from '@/shared/presentation/context-info';
 import { useApp } from '@/state';
 
-type RunnerPhase = 'instructions' | 'running' | 'finished';
+type RunnerPhase = 'instructions' | 'countdown' | 'running' | 'finished';
 type FinishReason = 'completed' | 'elapsed' | 'stopped';
 type RoutineStage = 'work' | 'rest';
 
@@ -128,6 +128,17 @@ function LegacyMissionRunner({
     setEndAt(actionSeconds ? startTime + actionSeconds * 1000 : undefined);
   }, []);
 
+  const beginExecution = useCallback(() => {
+    const startTime = Date.now();
+    setStartedAt(startTime);
+    setNow(startTime);
+    setEndAt(isLegacyTimed ? startTime + durationMs : undefined);
+    setStageStartedAt(undefined);
+
+    if (isRoutine) startRoutineWork(routineActions[0], startTime);
+    setPhase('running');
+  }, [durationMs, isLegacyTimed, isRoutine, routineActions, startRoutineWork]);
+
   const completeRoutineSet = useCallback(
     (completedAt: number, metTarget = true) => {
       const setKey = `${routineActionIndex}:${routineSetIndex}`;
@@ -192,6 +203,18 @@ function LegacyMissionRunner({
     setStageStartedAt(undefined);
     completedRoutineSetKey.current = undefined;
   }, [mission?.id]);
+
+  useEffect(() => {
+    if (!visible || phase !== 'countdown' || !endAt) return;
+
+    setNow(Date.now());
+    const interval = setInterval(() => setNow(Date.now()), 100);
+    const timeout = setTimeout(beginExecution, Math.max(0, endAt - Date.now()));
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [beginExecution, endAt, phase, visible]);
 
   useEffect(() => {
     if (!visible || phase !== 'running') return;
@@ -268,6 +291,13 @@ function LegacyMissionRunner({
     : steps[Math.min(stepIndex, steps.length - 1)];
   const hasStageCountdown = Boolean(endAt) && (isLegacyTimed || isRoutine);
   const shownSeconds = Math.ceil((hasStageCountdown ? remainingMs : elapsedMs) / 1000);
+  const countdownSeconds =
+    phase === 'countdown' && endAt ? Math.max(1, Math.ceil((endAt - now) / 1000)) : 3;
+  const modeSummary = isLegacyTimed
+    ? formatDuration(timerSeconds)
+    : isRoutine
+      ? `${formatCount(routineActions.length, ['действие', 'действия', 'действий'])} · ${formatCount(routineTotalSets, ['подход', 'подхода', 'подходов'])}`
+      : `${formatCount(steps.length, ['шаг', 'шага', 'шагов'])}`;
   const legacyRepeatRemaining =
     typeof mission.repeatTotal === 'number'
       ? Math.max(0, mission.repeatTotal - (mission.repeatIndex ?? 1))
@@ -281,10 +311,10 @@ function LegacyMissionRunner({
 
   const start = () => {
     if (readOnly) return;
-    const startTime = Date.now();
-    setStartedAt(startTime);
-    setNow(startTime);
-    setEndAt(isLegacyTimed ? startTime + durationMs : undefined);
+    const countdownStartedAt = Date.now();
+    setStartedAt(undefined);
+    setNow(countdownStartedAt);
+    setEndAt(countdownStartedAt + 3000);
     setStepIndex(0);
     setFinishReason(undefined);
     setRoutineActionIndex(0);
@@ -294,11 +324,7 @@ function LegacyMissionRunner({
     setStageStartedAt(undefined);
     completedRoutineSetKey.current = undefined;
 
-    if (isRoutine) {
-      startRoutineWork(routineActions[0], startTime);
-    }
-
-    setPhase('running');
+    setPhase('countdown');
   };
 
   const advanceManualStep = () => {
@@ -335,14 +361,16 @@ function LegacyMissionRunner({
         <View style={styles.handle} />
         <View style={styles.header}>
           <View style={styles.headerCopy}>
-            <Pill tone={phase === 'running' ? 'success' : readOnly ? 'violet' : 'gold'}>
+            <Pill tone={phase === 'running' ? 'success' : readOnly ? 'neutral' : 'gold'}>
               {readOnly
-                ? 'просмотр плана'
+                ? 'просмотр'
                 : phase === 'instructions'
-                  ? 'подготовка'
+                  ? 'готово к старту'
+                  : phase === 'countdown'
+                    ? 'приготовься'
                   : phase === 'running'
-                    ? 'миссия идёт'
-                    : 'выполнение завершено'}
+                    ? 'выполнение'
+                    : 'готово'}
             </Pill>
             <ThemedText type="small" style={styles.muted}>
               День {mission.dayNumber ?? mission.sequence}
@@ -373,32 +401,13 @@ function LegacyMissionRunner({
             <>
               <View style={styles.titleBlock}>
                 <ThemedText type="title">{mission.title}</ThemedText>
-              </View>
-
-              <View style={styles.modeCard}>
-                <View style={styles.modeIcon}>
-                  <ThemedText style={styles.modeGlyph}>
-                    {isLegacyTimed ? '◷' : isRoutine ? '≡' : '→'}
-                  </ThemedText>
-                </View>
-                <View style={styles.modeCopy}>
-                  <ThemedText type="smallBold">
-                    {isLegacyTimed
-                      ? `Таймер на ${formatDuration(timerSeconds)}`
-                      : isRoutine
-                        ? `${formatCount(routineActions.length, ['действие', 'действия', 'действий'])} · ${formatCount(routineTotalSets, ['подход', 'подхода', 'подходов'])}`
-                        : 'Выполнение в своём темпе'}
-                  </ThemedText>
-                </View>
+                <ThemedText type="small" style={styles.muted}>{modeSummary}</ThemedText>
               </View>
 
               {isRoutine ? <RoutinePlan actions={routineActions} /> : <MissionSteps steps={steps} />}
               {isRoutine && explicitSteps.length ? (
                 <MissionSteps steps={explicitSteps} title="техника и порядок" />
               ) : null}
-              <MissionOutcomeDetails
-                completionCriterion={mission.completionCriterion}
-              />
               <View style={styles.footerActions}>
                 {readOnly ? (
                   <AppButton label="Закрыть просмотр" variant="secondary" onPress={onClose} />
@@ -417,6 +426,19 @@ function LegacyMissionRunner({
                 )}
               </View>
             </>
+          ) : null}
+
+          {phase === 'countdown' ? (
+            <View style={styles.countdownStage}>
+              <ThemedText type="subtitle">Приготовься</ThemedText>
+              <ThemedText accessibilityLiveRegion="assertive" style={styles.countdownNumber}>
+                {countdownSeconds}
+              </ThemedText>
+              <ThemedText type="small" style={styles.muted} numberOfLines={2}>
+                {isRoutine ? routineActions[0]?.title : activeStep}
+              </ThemedText>
+              <AppButton label="Отмена" variant="secondary" onPress={restart} />
+            </View>
           ) : null}
 
           {phase === 'running' ? (
@@ -555,37 +577,6 @@ function LegacyMissionRunner({
                 </ThemedText>
               </View>
 
-              <View style={styles.resultCard}>
-                <View style={styles.resultRow}>
-                  <ThemedText type="small" style={styles.muted}>
-                    Результат
-                  </ThemedText>
-                  <ThemedText type="smallBold">ещё не выбран</ThemedText>
-                </View>
-                <View style={styles.resultRow}>
-                  <ThemedText type="small" style={styles.muted}>
-                    Награда
-                  </ThemedText>
-                  <ThemedText type="smallBold" style={styles.gold}>
-                    до +{mission.xp} XP
-                  </ThemedText>
-                </View>
-                {isRoutine && routineShortSets > 0 ? (
-                  <View style={styles.resultRow}>
-                    <ThemedText type="small" style={styles.muted}>
-                      Завершено раньше цели
-                    </ThemedText>
-                    <ThemedText type="smallBold" style={styles.warningText}>
-                      {routineShortSets} из {routineTotalSets}
-                    </ThemedText>
-                  </View>
-                ) : null}
-              </View>
-
-              <MissionOutcomeDetails
-                completionCriterion={mission.completionCriterion}
-              />
-
               <View style={styles.footerActions}>
                 {readOnly ? (
                   <AppButton label="Закрыть просмотр" variant="secondary" onPress={onClose} />
@@ -617,42 +608,18 @@ function RoutinePlan({ actions }: { actions: RoutineAction[] }) {
                   {index + 1}
                 </ThemedText>
               </View>
-              <ThemedText type="subtitle" style={styles.actionTitle}>
-                {action.title}
-              </ThemedText>
-              <LoadBasisInfo value={action.loadBasis} title={action.title} />
+              <View style={styles.actionTitleCopy}>
+                <ThemedText type="smallBold">{action.title}</ThemedText>
+                <ThemedText type="smallBold" style={styles.cyan}>
+                  {formatRoutinePrescription(action)}
+                </ThemedText>
+              </View>
+              <RoutineActionInfo action={action} />
             </View>
 
-            <ThemedText style={styles.actionInstruction}>{action.instruction}</ThemedText>
-
-            <View style={styles.prescriptionGrid}>
-              <PrescriptionValue
-                label="объём"
-                value={`${formatCount(action.sets, ['подход', 'подхода', 'подходов'])} × ${formatRoutineQuantity(action)}`}
-              />
-              {action.workSecondsPerSet ? (
-                <PrescriptionValue
-                  label="время подхода"
-                  value={`≈ ${formatDuration(action.workSecondsPerSet)}`}
-                />
-              ) : null}
-              <PrescriptionValue
-                label="отдых"
-                value={
-                  action.restSeconds > 0
-                    ? formatDuration(action.restSeconds)
-                    : 'без отдельного отдыха'
-                }
-              />
-              {action.tempo ? <PrescriptionValue label="темп" value={action.tempo} /> : null}
-            </View>
-
-            <View style={styles.actionCriterion}>
-              <ThemedText type="eyebrow" style={styles.successLabel}>
-                подход засчитан, если
-              </ThemedText>
-              <ThemedText type="small">{action.successCriterion}</ThemedText>
-            </View>
+            <ThemedText type="small" style={styles.actionInstruction}>
+              {action.instruction}
+            </ThemedText>
           </View>
         ))}
       </View>
@@ -681,7 +648,7 @@ function ActiveRoutineAction({
         <ThemedText style={styles.muted}>
           Подход {setIndex + 1} из {action.sets} · {formatRoutineQuantity(action)}
         </ThemedText>
-        <LoadBasisInfo value={action.loadBasis} title={action.title} />
+        <RoutineActionInfo action={action} />
       </View>
     );
   }
@@ -695,78 +662,30 @@ function ActiveRoutineAction({
         <ThemedText type="subtitle" style={styles.actionTitle}>
           {action.title}
         </ThemedText>
-        <LoadBasisInfo value={action.loadBasis} title={action.title} />
+        <RoutineActionInfo action={action} />
       </View>
       <ThemedText>{action.instruction}</ThemedText>
-      <View style={styles.activePrescription}>
-        <ThemedText type="smallBold" style={styles.cyan}>
-          {formatRoutineQuantity(action)}
-        </ThemedText>
-        {action.tempo ? (
-          <ThemedText type="small" style={styles.muted}>
-            Темп: {action.tempo}
-          </ThemedText>
-        ) : null}
-        {action.workSecondsPerSet && !getRoutineActionSeconds(action) ? (
-          <ThemedText type="small" style={styles.muted}>
-            Расчётное время подхода: ≈ {formatDuration(action.workSecondsPerSet)}
-          </ThemedText>
-        ) : null}
-      </View>
-      <View style={styles.actionCriterion}>
-        <ThemedText type="eyebrow" style={styles.successLabel}>
-          результат подхода
-        </ThemedText>
-        <ThemedText type="small">{action.successCriterion}</ThemedText>
-      </View>
-    </View>
-  );
-}
-
-function PrescriptionValue({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.prescriptionValue}>
-      <ThemedText type="eyebrow" style={styles.muted}>
-        {label}
+      <ThemedText type="smallBold" style={styles.cyan}>
+        {formatRoutinePrescription(action)}
       </ThemedText>
-      <ThemedText type="smallBold">{value}</ThemedText>
     </View>
   );
 }
 
-function LoadBasisInfo({
-  value,
-  title,
-}: {
-  value?: RoutineLoadBasis | string;
-  title: string;
-}) {
-  if (!value) return null;
+function RoutineActionInfo({ action }: { action: RoutineAction }) {
+  const sections: ContextInfoSection[] = [];
+  if (action.successCriterion.trim()) {
+    sections.push({ heading: 'Когда засчитано', body: action.successCriterion.trim() });
+  }
+  if (action.loadBasis) {
+    sections.push({ heading: 'Расчёт нагрузки', body: formatLoadBasis(action.loadBasis) });
+  }
   return (
     <InfoPopover
-      title={`Расчёт: ${title}`}
-      accessibilityLabel={`Показать расчёт нагрузки для ${title}`}
-      sections={[{ heading: 'Расчёт нагрузки', body: formatLoadBasis(value) }]}
+      title={action.title}
+      accessibilityLabel={`Показать пояснение для ${action.title}`}
+      sections={sections}
     />
-  );
-}
-
-function MissionOutcomeDetails({
-  completionCriterion,
-}: {
-  completionCriterion?: string;
-}) {
-  if (!completionCriterion) return null;
-
-  return (
-    <View style={styles.outcomeCard}>
-      <View style={styles.outcomeSection}>
-        <ThemedText type="eyebrow" style={styles.successLabel}>
-          миссия выполнена, если
-        </ThemedText>
-        <ThemedText>{completionCriterion}</ThemedText>
-      </View>
-    </View>
   );
 }
 
@@ -802,6 +721,9 @@ function legacyMissionContextSections(
     sections.push({ heading: 'О миссии', body: mission.description.trim() });
   }
   sections.push(...missionContextSections(mission));
+  if (mission.completionCriterion?.trim()) {
+    sections.push({ heading: 'Когда день засчитан', body: mission.completionCriterion.trim() });
+  }
   if (legacyRepeatRemaining && legacyRepeatRemaining > 0) {
     sections.push({
       heading: 'Повторение нагрузки',
@@ -862,6 +784,16 @@ function formatRoutineQuantity(action: RoutineAction) {
     custom: action.unitLabel?.trim() || 'ед.',
   };
   return `${quantity} ${units[action.unit]}`;
+}
+
+function formatRoutinePrescription(action: RoutineAction) {
+  return [
+    `${action.sets} × ${formatRoutineQuantity(action)}`,
+    action.restSeconds > 0 ? `отдых ${formatDuration(action.restSeconds)}` : undefined,
+    action.tempo?.trim() || undefined,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(' · ');
 }
 
 function formatLoadBasis(value: RoutineLoadBasis | string) {
@@ -926,66 +858,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.two,
     paddingBottom: Spacing.five,
-    gap: Spacing.four,
+    gap: Spacing.three,
   },
   titleBlock: { gap: Spacing.two },
-  description: { color: Palette.textMuted, fontSize: 17, lineHeight: 26 },
   muted: { color: Palette.textMuted },
   gold: { color: Palette.goldBright },
   cyan: { color: Palette.cyan },
-  successLabel: { color: Palette.success },
-  warningText: { color: Palette.warning },
   center: { textAlign: 'center' },
-  modeCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-    borderRadius: Radius.medium,
-    borderWidth: 1,
-    borderColor: Palette.line,
-    backgroundColor: Palette.surface,
-    padding: Spacing.three,
-  },
-  modeIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#20273A',
-    borderWidth: 1,
-    borderColor: '#38435F',
-  },
-  modeGlyph: { color: Palette.cyan, fontSize: 24 },
-  modeCopy: { flex: 1, gap: Spacing.one },
   stepsBlock: { gap: Spacing.two },
   steps: { gap: Spacing.two },
-  actionCards: { gap: Spacing.three },
+  actionCards: { gap: Spacing.two },
   actionCard: {
     borderRadius: Radius.medium,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: Palette.line,
     backgroundColor: Palette.surface,
-    padding: Spacing.three,
-    gap: Spacing.twoHalf,
+    padding: Spacing.twoHalf,
+    gap: Spacing.two,
   },
   actionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.twoHalf },
   actionTitle: { flex: 1 },
-  actionInstruction: { color: Palette.text, lineHeight: 23 },
-  prescriptionGrid: { gap: Spacing.two },
-  prescriptionValue: {
-    borderRadius: Radius.small,
-    backgroundColor: '#20273A',
-    paddingHorizontal: Spacing.twoHalf,
-    paddingVertical: Spacing.two,
-    gap: Spacing.one,
-  },
-  actionCriterion: {
-    borderTopWidth: 1,
-    borderTopColor: Palette.line,
-    paddingTop: Spacing.two,
-    gap: Spacing.one,
-  },
+  actionTitleCopy: { flex: 1, gap: 2 },
+  actionInstruction: { color: Palette.text, lineHeight: 21 },
   stepRow: {
     minHeight: 54,
     flexDirection: 'row',
@@ -999,21 +893,26 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#2B2418',
-    borderWidth: 1,
-    borderColor: '#5C4929',
+    backgroundColor: 'rgba(0, 122, 255, 0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0, 122, 255, 0.2)',
   },
   stepText: { flex: 1 },
-  warningCard: {
-    borderRadius: Radius.medium,
-    borderWidth: 1,
-    borderColor: '#59402B',
-    backgroundColor: '#2D2319',
-    padding: Spacing.three,
-    gap: Spacing.two,
-  },
-  warningCardCompact: { padding: Spacing.twoHalf },
   footerActions: { gap: Spacing.two },
+  countdownStage: {
+    flex: 1,
+    minHeight: 420,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.three,
+  },
+  countdownNumber: {
+    color: Palette.accent,
+    fontSize: 112,
+    lineHeight: 126,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
   runningTitle: { alignItems: 'center', gap: Spacing.one, paddingVertical: Spacing.four },
   clock: {
     color: Palette.text,
@@ -1028,35 +927,17 @@ const styles = StyleSheet.create({
   activeStepCard: {
     minHeight: 132,
     borderRadius: Radius.large,
-    borderWidth: 1,
-    borderColor: '#52462F',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Palette.line,
     backgroundColor: Palette.surface,
     padding: Spacing.four,
     justifyContent: 'center',
     gap: Spacing.two,
   },
-  restCard: { borderColor: '#31556A', backgroundColor: '#142631' },
-  activePrescription: {
-    borderRadius: Radius.small,
-    backgroundColor: '#20273A',
-    padding: Spacing.twoHalf,
-    gap: Spacing.one,
+  restCard: {
+    borderColor: 'rgba(0, 122, 255, 0.2)',
+    backgroundColor: 'rgba(0, 122, 255, 0.06)',
   },
-  loadBasis: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Palette.line,
-    paddingTop: Spacing.two,
-    gap: Spacing.one,
-  },
-  outcomeCard: {
-    borderRadius: Radius.medium,
-    borderWidth: 1,
-    borderColor: '#31556A',
-    backgroundColor: '#14222D',
-    padding: Spacing.three,
-    gap: Spacing.three,
-  },
-  outcomeSection: { gap: Spacing.one },
   finishedIcon: {
     alignSelf: 'center',
     width: 88,
@@ -1064,19 +945,10 @@ const styles = StyleSheet.create({
     borderRadius: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1B3027',
-    borderWidth: 1,
-    borderColor: '#36634E',
+    backgroundColor: 'rgba(52, 199, 89, 0.1)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(36, 138, 61, 0.22)',
     marginTop: Spacing.four,
   },
   finishedGlyph: { color: Palette.success, fontSize: 36 },
-  resultCard: {
-    borderRadius: Radius.medium,
-    borderWidth: 1,
-    borderColor: Palette.line,
-    backgroundColor: Palette.surface,
-    padding: Spacing.three,
-    gap: Spacing.two,
-  },
-  resultRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
 });

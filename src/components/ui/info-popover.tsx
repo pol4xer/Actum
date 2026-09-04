@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { GlassSurface } from '@/components/ui/primitives';
 import { Palette, Radius, Shadow, Spacing } from '@/constants/theme';
 import type { ContextInfoSection, ContextInfoTone } from '@/shared/presentation/context-info';
 
@@ -25,7 +26,6 @@ export function InfoPopover({
 }: InfoPopoverProps): ReactElement | null {
   const [visible, setVisible] = useState(false);
   const visibleSections = useMemo(() => normalizeSections(sections), [sections]);
-  const hasWarning = visibleSections.some((section) => section.tone === 'warning');
 
   useEffect(() => {
     if (!visible || Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -48,32 +48,24 @@ export function InfoPopover({
   return (
     <>
       <Pressable
-        accessibilityHint={
-          hasWarning
-            ? 'Открывает пояснение, содержащее предупреждение.'
-            : 'Открывает пояснение.'
-        }
+        accessibilityHint="Открывает пояснение."
         accessibilityLabel={triggerLabel}
         accessibilityRole="button"
         accessibilityState={{ expanded: visible }}
         hitSlop={8}
         onPress={() => setVisible(true)}
-        style={({ pressed }) => [
-          styles.trigger,
-          hasWarning && styles.triggerWarning,
-          pressed && styles.pressed,
-        ]}>
+        style={({ pressed }) => [styles.trigger, pressed && styles.pressed]}>
         <ThemedText
           accessibilityElementsHidden
           importantForAccessibility="no"
-          style={[styles.triggerGlyph, hasWarning && styles.triggerGlyphWarning]}>
+          style={styles.triggerGlyph}>
           ?
         </ThemedText>
       </Pressable>
 
       <Modal
         accessibilityLabel={title}
-        animationType="fade"
+        animationType="none"
         onRequestClose={close}
         presentationStyle="overFullScreen"
         statusBarTranslucent
@@ -87,11 +79,15 @@ export function InfoPopover({
             tabIndex={-1}
           />
 
-          <View
-            accessibilityViewIsModal
-            onAccessibilityEscape={close}
-            style={styles.card}>
-            <View style={styles.header}>
+          <GlassSurface
+            fallbackStyle={styles.cardFallback}
+            style={styles.card}
+            tintColor="rgba(255, 255, 255, 0.78)">
+            <View
+              accessibilityViewIsModal
+              onAccessibilityEscape={close}
+              style={styles.cardBody}>
+              <View style={styles.header}>
               <ThemedText accessibilityRole="header" type="subtitle" style={styles.title}>
                 {title}
               </ThemedText>
@@ -108,18 +104,19 @@ export function InfoPopover({
                   ×
                 </ThemedText>
               </Pressable>
-            </View>
+              </View>
 
-            <ScrollView
-              alwaysBounceVertical={false}
-              contentContainerStyle={styles.content}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator>
-              {visibleSections.map((section, index) => (
-                <InfoSection key={`${section.heading ?? 'section'}-${index}`} section={section} />
-              ))}
-            </ScrollView>
-          </View>
+              <ScrollView
+                alwaysBounceVertical={false}
+                contentContainerStyle={styles.content}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}>
+                {visibleSections.map((section, index) => (
+                  <InfoSection key={`${section.heading ?? 'section'}-${index}`} section={section} />
+                ))}
+              </ScrollView>
+            </View>
+          </GlassSurface>
         </View>
       </Modal>
     </>
@@ -188,47 +185,43 @@ function normalizeSections(sections: readonly ContextInfoSection[]): VisibleSect
 
 const styles = StyleSheet.create({
   trigger: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: Palette.line,
-    backgroundColor: Palette.surfaceSoft,
-  },
-  triggerWarning: {
-    borderColor: '#76502B',
-    backgroundColor: '#2D2319',
+    backgroundColor: 'rgba(255, 255, 255, 0.68)',
   },
   triggerGlyph: {
-    color: Palette.violetSoft,
+    color: Palette.accent,
     fontSize: 15,
     lineHeight: 18,
     fontWeight: '800',
   },
-  triggerGlyphWarning: { color: Palette.warning },
   pressed: { opacity: 0.65 },
   overlay: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     padding: Spacing.three,
-    backgroundColor: 'rgba(5, 7, 13, 0.72)',
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
   },
   card: {
     width: '100%',
     maxWidth: 440,
-    maxHeight: '82%',
+    maxHeight: '72%',
     overflow: 'hidden',
     borderRadius: Radius.large,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: Palette.line,
-    backgroundColor: Palette.inkRaised,
     padding: Spacing.three,
     gap: Spacing.twoHalf,
     ...Shadow,
   },
+  cardFallback: { backgroundColor: 'rgba(255, 255, 255, 0.97)' },
+  cardBody: { flexShrink: 1, gap: Spacing.twoHalf },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -260,8 +253,8 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
   },
   sectionWarning: {
-    borderColor: '#76502B',
-    backgroundColor: '#2D2319',
+    borderColor: 'rgba(199, 120, 0, 0.22)',
+    backgroundColor: 'rgba(255, 149, 0, 0.08)',
   },
   sectionHeadingRow: {
     flexDirection: 'row',
@@ -275,7 +268,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#56391F',
+    backgroundColor: 'rgba(255, 149, 0, 0.14)',
   },
   warningBadgeGlyph: {
     color: Palette.warning,

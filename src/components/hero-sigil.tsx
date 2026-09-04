@@ -1,7 +1,7 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { GlassSurface } from '@/components/ui/primitives';
 import type { Archetype } from '@/domain/types';
 import { Palette, Radius } from '@/constants/theme';
 import { ARCHETYPE_PRESENTATION } from '@/shared/presentation/archetypes';
@@ -28,14 +28,15 @@ export function HeroSigil({
           { width: size * 0.78, height: size * 0.78, borderRadius: size / 2 },
         ]}
       />
-      <LinearGradient
-        colors={dimmed ? ['#3A3D49', '#1A1D26'] : [...hero.colors]}
+      <GlassSurface
+        fallbackStyle={styles.coreFallback}
+        tintColor="rgba(255, 255, 255, 0.72)"
         style={[
           styles.core,
           { width: size * 0.62, height: size * 0.62, borderRadius: size / 2 },
         ]}>
         <ThemedText style={[styles.icon, { fontSize: size * 0.3 }]}>{hero.icon}</ThemedText>
-      </LinearGradient>
+      </GlassSurface>
       {level ? (
         <View style={styles.levelBadge}>
           <ThemedText type="smallBold" style={styles.levelText}>
@@ -54,26 +55,27 @@ const styles = StyleSheet.create({
   },
   auraOuter: {
     position: 'absolute',
-    borderWidth: 1,
-    borderColor: '#C9B67544',
-    backgroundColor: '#9D85510A',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0, 122, 255, 0.16)',
+    backgroundColor: 'rgba(0, 122, 255, 0.035)',
   },
   auraInner: {
     position: 'absolute',
-    borderWidth: 1,
-    borderColor: '#FFFFFF15',
-    backgroundColor: '#FFFFFF08',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(60, 60, 67, 0.12)',
+    backgroundColor: 'rgba(255, 255, 255, 0.24)',
     transform: [{ rotate: '45deg' }],
   },
   core: {
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#FFFFFF35',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.9)',
   },
+  coreFallback: { backgroundColor: 'rgba(255, 255, 255, 0.78)' },
   icon: {
-    color: Palette.white,
-    fontWeight: 300,
+    color: Palette.accent,
+    fontWeight: '500',
     lineHeight: 50,
   },
   levelBadge: {
@@ -86,9 +88,9 @@ const styles = StyleSheet.create({
     borderRadius: Radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Palette.inkRaised,
-    borderWidth: 1,
-    borderColor: Palette.gold,
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0, 122, 255, 0.28)',
   },
   levelText: {
     color: Palette.goldBright,

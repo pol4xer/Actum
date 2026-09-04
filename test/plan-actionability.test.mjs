@@ -740,7 +740,7 @@ test('prompt, research, schema, and validator advertise the closed-loop plan-v5 
 
   assert.equal(PLAN_CONTRACT_VERSION, 'plan-v5');
   assert.equal(PLAN_VALIDATOR_VERSION, 'plan-validator-v5');
-  assert.equal(PROMPT_VERSION, 'actum-plan-2026-08-01-closed-loop-v5');
+  assert.equal(PROMPT_VERSION, 'actum-plan-2026-09-04-action-first-v6');
   assert.equal(RESEARCH_PROMPT_VERSION, 'actum-research-2026-08-01-closed-loop-v2');
   assert.ok(PLAN_SCHEMA.required.includes('targetTimeline'));
   assert.match(RESEARCH_INSTRUCTIONS, /timer, counter, checklist и text_log/);
@@ -752,6 +752,8 @@ test('prompt, research, schema, and validator advertise the closed-loop plan-v5 
   assert.match(instructions, /никаких steps, progressionRule, manual, routine/);
   assert.match(instructions, /Для timer loadBasis\.result точно равен durationSecondsPerSet/);
   assert.match(instructions, /одиночную подводную задержку дыхания/);
+  assert.match(instructions, /Никогда не создавай отдельный checklist проверки безопасности/);
+  assert.match(instructions, /предупреждения хранятся только в safetyNotes или day\.warning/);
   assert.deepEqual(
     execution.properties.blocks.items.anyOf.map((variant) => variant.properties.kind.enum[0]),
     ['timer', 'counter', 'checklist', 'text_log'],

@@ -1,6 +1,6 @@
 import { Platform, StyleSheet, Text, type TextProps } from 'react-native';
 
-import { Fonts, ThemeColor } from '@/constants/theme';
+import { Fonts, Palette, ThemeColor } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 export type ThemedTextProps = TextProps & {
@@ -59,16 +59,16 @@ const styles = StyleSheet.create({
     fontWeight: 500,
   },
   title: {
-    fontSize: 30,
+    fontSize: 28,
     fontWeight: 700,
-    lineHeight: 36,
-    letterSpacing: -0.8,
+    lineHeight: 34,
+    letterSpacing: -0.6,
   },
   display: {
-    fontSize: 42,
-    fontWeight: 800,
-    lineHeight: 46,
-    letterSpacing: -1.5,
+    fontSize: 38,
+    fontWeight: 700,
+    lineHeight: 42,
+    letterSpacing: -1.1,
   },
   eyebrow: {
     fontSize: 11,
@@ -90,7 +90,7 @@ const styles = StyleSheet.create({
   linkPrimary: {
     lineHeight: 30,
     fontSize: 14,
-    color: '#3c87f7',
+    color: Palette.gold,
   },
   code: {
     fontFamily: Fonts.mono,

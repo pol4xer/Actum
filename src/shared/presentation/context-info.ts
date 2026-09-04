@@ -8,6 +8,10 @@ import type {
 } from '@/domain/types';
 
 import { formatBaselineMetric } from './plan-formatters';
+import {
+  containsExecutionSafetyCopy,
+  withoutExecutionSafetyCopy,
+} from './execution-visibility';
 
 export type ContextInfoTone = 'default' | 'warning';
 
@@ -33,18 +37,19 @@ export function missionContextSections(mission: Mission): ContextInfoSection[] {
   const inAppExecution = mission.execution?.kind === 'in_app' ? mission.execution : undefined;
 
   if (inAppExecution) {
-    appendSection(sections, 'О дне', mission.description);
+    appendSection(sections, 'О дне', withoutExecutionSafetyCopy(mission.description));
 
     // execution.successCriterion is the source of truth for an in-app day. The
     // persisted completionCriterion is retained as a fallback for older records.
     appendSection(
       sections,
       'Критерий дня',
-      firstNonEmpty(inAppExecution.successCriterion, mission.completionCriterion),
+      withoutExecutionSafetyCopy(
+        firstNonEmpty(inAppExecution.successCriterion, mission.completionCriterion),
+      ),
     );
   }
 
-  appendSection(sections, 'Предупреждение', mission.warning, 'warning');
   return sections;
 }
 
@@ -84,7 +89,7 @@ export function planContextSections(
     ]),
   );
 
-  appendSection(sections, 'Логика плана', plan.summary);
+  appendSection(sections, 'Логика плана', withoutExecutionSafetyCopy(plan.summary));
 
   if (baseline) {
     appendSection(
@@ -99,13 +104,20 @@ export function planContextSections(
   }
 
   appendSection(sections, 'Срок большой цели', targetTimeline);
-  appendListSection(sections, 'Безопасность', plan.research.safetyNotes, 'warning');
-  appendListSection(sections, 'Допущения', plan.research.assumptions);
-  appendListSection(sections, 'Основа методики', plan.research.sourceLabels);
-
-  const sources = plan.research.sources?.map((source) =>
-    joinLines([source.title, source.url]),
+  appendListSection(
+    sections,
+    'Допущения',
+    plan.research.assumptions.filter((value) => !containsExecutionSafetyCopy(value)),
   );
+  appendListSection(
+    sections,
+    'Основа методики',
+    plan.research.sourceLabels.filter((value) => !containsExecutionSafetyCopy(value)),
+  );
+
+  const sources = plan.research.sources
+    ?.filter((source) => !containsExecutionSafetyCopy(source.title))
+    .map((source) => joinLines([source.title, source.url]));
   appendListSection(sections, 'Источники', sources);
 
   if (plan.research.request) {

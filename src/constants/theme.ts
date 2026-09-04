@@ -1,22 +1,25 @@
 import { Platform } from 'react-native';
 
 export const Palette = {
-  ink: '#090B14',
-  inkRaised: '#101421',
-  surface: '#151A2A',
-  surfaceSoft: '#1B2133',
-  line: '#29314A',
-  text: '#F7F4EA',
-  textMuted: '#9AA4BC',
-  textDim: '#68728A',
-  gold: '#E6B85C',
-  goldBright: '#FFD884',
-  violet: '#8E7CFF',
-  violetSoft: '#A89BFF',
-  cyan: '#68D8D6',
-  success: '#72D6A1',
-  warning: '#F0B66A',
-  danger: '#ED7C8B',
+  /** iOS grouped background. Historical key retained to keep feature modules decoupled. */
+  ink: '#F2F2F7',
+  inkRaised: '#F8F8FA',
+  surface: 'rgba(255, 255, 255, 0.82)',
+  surfaceSoft: 'rgba(246, 247, 250, 0.9)',
+  line: 'rgba(60, 60, 67, 0.18)',
+  text: '#17171A',
+  textMuted: '#636366',
+  textDim: '#8E8E93',
+  accent: '#007AFF',
+  /** Semantic accent aliases retained for backwards compatibility. */
+  gold: '#007AFF',
+  goldBright: '#0A84FF',
+  violet: '#7C7C80',
+  violetSoft: '#6E6E73',
+  cyan: '#007AFF',
+  success: '#248A3D',
+  warning: '#C77800',
+  danger: '#D70015',
   white: '#FFFFFF',
   black: '#000000',
 } as const;
@@ -88,12 +91,12 @@ export const Radius = {
 export const Shadow = Platform.select({
   ios: {
     shadowColor: Palette.black,
-    shadowOpacity: 0.28,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.07,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
   },
   default: {
-    boxShadow: '0 10px 28px rgba(0,0,0,0.28)',
+    boxShadow: '0 8px 24px rgba(20, 20, 25, 0.08)',
   },
 });
 

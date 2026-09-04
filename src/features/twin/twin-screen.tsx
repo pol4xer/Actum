@@ -1,11 +1,12 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet, View } from 'react-native';
 
 import { HeroSigil } from '@/components/hero-sigil';
 import { ThemedText } from '@/components/themed-text';
+import { InfoPopover } from '@/components/ui/info-popover';
 import { Card, Pill, ProgressBar, Screen, ScreenHeader } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import { selectTwinProjection } from '@/domain/reward-policy';
+import type { ContextInfoSection } from '@/shared/presentation/context-info';
 import { useApp } from '@/state';
 
 export default function TwinScreen() {
@@ -14,14 +15,9 @@ export default function TwinScreen() {
   if (!state.activeGoal || !state.activePlan) {
     return (
       <Screen>
-        <ScreenHeader
-          eyebrow="Двойник"
-          title="Траектории появятся после цели"
-          subtitle="Потенциальная линия строится только от принятого плана, а не от обещаний."
-        />
+        <ScreenHeader title="Двойник" />
         <Card>
-          <ThemedText type="subtitle">Нет исходной точки</ThemedText>
-          <ThemedText style={styles.muted}>Создай цель на вкладке «Сегодня».</ThemedText>
+          <ThemedText type="subtitle">Сначала создай цель</ThemedText>
         </Card>
       </Screen>
     );
@@ -40,181 +36,125 @@ export default function TwinScreen() {
     potentialEnergy,
     potentialLight,
   } = selectTwinProjection(state.activePlan.missions, state.checkIns);
+  const adherencePercent = Math.round(adherence * 100);
+  const info: ContextInfoSection[] = [
+    {
+      heading: 'Как считается',
+      body: `Сравниваются только уже прошедшие дни текущего плана: ${completed} выполнено, ${partial} частично, ${skipped} пропущено.`,
+    },
+    {
+      heading: 'Что означает',
+      body:
+        'Линия «По плану» показывает игровые очки при полном выполнении. Это ориентир внутри Actum, а не прогноз реального результата.',
+    },
+  ];
 
   return (
     <Screen>
       <ScreenHeader
-        eyebrow="Реальный vs потенциальный"
-        title="Две траектории"
-        subtitle="Не приговор и не обещание — честное сравнение с утверждённым планом."
+        title="Двойник"
+        action={
+          <InfoPopover
+            title="О двойнике"
+            accessibilityLabel="Как считается двойник"
+            sections={info}
+          />
+        }
       />
 
-      <View style={styles.twins}>
-        <TwinCard
-          label="Ты сейчас"
-          tone="real"
-          level={state.character.level}
-          energy={state.character.energy}
-          light={state.character.worldLight}
-          xp={actualXp}
-          archetype={state.profile?.archetype}
-        />
-        <TwinCard
-          label="По плану"
-          tone="potential"
-          level={potentialLevel}
-          energy={potentialEnergy}
-          light={potentialLight}
-          xp={projectedXp}
-          archetype={state.profile?.archetype}
-        />
-      </View>
-
-      <Card accent>
-        <View style={styles.cardHeader}>
+      <Card style={styles.scoreCard}>
+        <View style={styles.rowBetween}>
           <View style={styles.flex}>
-            <ThemedText type="eyebrow" style={styles.gold}>
-              Разрыв траекторий
-            </ThemedText>
-            <ThemedText type="subtitle">
-              {reported === 0
-                ? 'Обе линии пока совпадают'
-                : adherenceBand === 'aligned'
-                  ? 'Ты почти на линии потенциала'
-                  : adherenceBand === 'recoverable'
-                    ? 'Разрыв можно закрыть'
-                    : 'Сейчас важен путь возвращения'}
+            <ThemedText type="subtitle">{adherencePercent}% плана</ThemedText>
+            <ThemedText type="small" style={styles.muted}>
+              {reported ? `${completed} из ${reported} дней полностью` : 'Начни первый день'}
             </ThemedText>
           </View>
-          <Pill
-            tone={
-              adherenceBand === 'aligned'
-                ? 'success'
-                : adherenceBand === 'recoverable'
-                  ? 'warning'
-                  : 'violet'
-            }>
-            {Math.round(adherence * 100)}%
+          <Pill tone={adherenceBand === 'aligned' ? 'success' : 'neutral'}>
+            {adherenceBand === 'aligned' ? 'в ритме' : 'есть разрыв'}
           </Pill>
         </View>
         <ProgressBar
           value={adherence}
-          color={adherenceBand === 'aligned' ? Palette.success : Palette.gold}
+          color={adherenceBand === 'aligned' ? Palette.success : Palette.accent}
+          height={8}
         />
-        <ThemedText style={styles.muted}>
-          Расчёт использует только события текущей версии плана: {completed} выполнено, {partial} частично,
-          {' '}{skipped} пропущено.
-        </ThemedText>
       </Card>
 
-      <View style={styles.section}>
-        <ThemedText type="eyebrow" style={styles.muted}>
-          Что изменилось
-        </ThemedText>
+      <Card style={styles.twinsCard}>
+        <Twin
+          label="Сейчас"
+          level={state.character.level}
+          archetype={state.profile?.archetype}
+          dimmed={state.character.worldLight < 20}
+        />
+        <ThemedText style={styles.arrow}>→</ThemedText>
+        <Twin
+          label="По плану"
+          level={potentialLevel}
+          archetype={state.profile?.archetype}
+        />
+      </Card>
+
+      <View style={styles.comparisons}>
+        <ComparisonRow title="Опыт" actual={`${actualXp} XP`} potential={`${projectedXp} XP`} />
         <ComparisonRow
-          icon="✦"
-          title="Опыт"
-          actual={`${actualXp} XP`}
-          potential={`${projectedXp} XP`}
-          delta={projectedXp - actualXp}
+          title="Энергия"
+          actual={`${state.character.energy}%`}
+          potential={`${potentialEnergy}%`}
         />
         <ComparisonRow
-          icon="◐"
-          title="Свет мира"
+          title="Свет"
           actual={`${state.character.worldLight}%`}
           potential={`${potentialLight}%`}
-          delta={potentialLight - state.character.worldLight}
-        />
-        <ComparisonRow
-          icon="↟"
-          title="Полные действия"
-          actual={`${completed}`}
-          potential={`${reported}`}
-          delta={reported - completed}
         />
       </View>
-
-      <Card style={styles.method}>
-        <Pill tone="violet">confidence band · prototype</Pill>
-        <ThemedText type="subtitle">Как читать двойника</ThemedText>
-        <ThemedText style={styles.muted}>
-          Потенциальный герой показывает игровой результат, который был бы получен при полном выполнении уже прошедших миссий. Он не предсказывает тело, здоровье, доход или гарантированный жизненный результат.
-        </ThemedText>
-      </Card>
     </Screen>
   );
 }
 
-function TwinCard({
+function Twin({
   label,
-  tone,
   level,
-  energy,
-  light,
-  xp,
   archetype,
+  dimmed = false,
 }: {
   label: string;
-  tone: 'real' | 'potential';
   level: number;
-  energy: number;
-  light: number;
-  xp: number;
   archetype: Parameters<typeof HeroSigil>[0]['archetype'];
+  dimmed?: boolean;
 }) {
-  const real = tone === 'real';
   return (
-    <LinearGradient
-      colors={real ? ['#182431', '#121823'] : ['#251E37', '#151426']}
-      style={[styles.twinCard, real ? styles.realCard : styles.potentialCard]}>
-      <Pill tone={real ? 'neutral' : 'violet'}>{label}</Pill>
-      <HeroSigil archetype={archetype} level={level} size={104} dimmed={real && light < 20} />
-      <View style={styles.twinStats}>
-        <MiniStat label="энергия" value={`${energy}%`} />
-        <MiniStat label="свет" value={`${light}%`} />
-        <MiniStat label="xp" value={xp} />
-      </View>
-    </LinearGradient>
-  );
-}
-
-function MiniStat({ label, value }: { label: string; value: string | number }) {
-  return (
-    <View style={styles.miniStat}>
-      <ThemedText type="eyebrow" style={styles.muted}>
+    <View style={styles.twin}>
+      <HeroSigil archetype={archetype} level={level} size={76} dimmed={dimmed} />
+      <ThemedText type="small" style={styles.muted}>
         {label}
       </ThemedText>
-      <ThemedText type="smallBold">{value}</ThemedText>
+      <ThemedText type="smallBold">Ур. {level}</ThemedText>
     </View>
   );
 }
 
 function ComparisonRow({
-  icon,
   title,
   actual,
   potential,
-  delta,
 }: {
-  icon: string;
   title: string;
   actual: string;
   potential: string;
-  delta: number;
 }) {
   return (
     <View style={styles.comparison}>
-      <View style={styles.comparisonIcon}>
-        <ThemedText style={styles.violet}>{icon}</ThemedText>
-      </View>
-      <View style={styles.flex}>
-        <ThemedText type="smallBold">{title}</ThemedText>
-        <ThemedText type="small" style={styles.muted}>
-          Сейчас {actual} · По плану {potential}
-        </ThemedText>
-      </View>
-      <ThemedText type="smallBold" style={delta > 0 ? styles.warning : styles.success}>
-        {delta > 0 ? `−${delta}` : '≈'}
+      <ThemedText type="smallBold" style={styles.comparisonTitle}>
+        {title}
+      </ThemedText>
+      <ThemedText type="small" style={styles.muted}>
+        {actual}
+      </ThemedText>
+      <ThemedText style={styles.comparisonArrow}>→</ThemedText>
+      <ThemedText type="smallBold" style={styles.accent}>
+        {potential}
       </ThemedText>
     </View>
   );
@@ -223,45 +163,34 @@ function ComparisonRow({
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   muted: { color: Palette.textMuted },
-  gold: { color: Palette.gold },
-  violet: { color: Palette.violetSoft },
-  warning: { color: Palette.warning },
-  success: { color: Palette.success },
-  twins: { flexDirection: 'row', gap: Spacing.two },
-  twinCard: {
-    flex: 1,
-    minHeight: 260,
-    borderRadius: Radius.large,
-    borderWidth: 1,
-    padding: Spacing.twoHalf,
+  accent: { color: Palette.accent },
+  rowBetween: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: Spacing.two,
   },
-  realCard: { borderColor: '#304756' },
-  potentialCard: { borderColor: '#50457B' },
-  twinStats: { width: '100%', flexDirection: 'row' },
-  miniStat: { flex: 1, alignItems: 'center', gap: 2 },
-  cardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two },
-  section: { gap: Spacing.two },
+  scoreCard: { gap: Spacing.twoHalf },
+  twinsCard: {
+    minHeight: 148,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+  },
+  twin: { flex: 1, alignItems: 'center', gap: Spacing.one },
+  arrow: { color: Palette.textDim, fontSize: 24 },
+  comparisons: { gap: Spacing.two },
   comparison: {
-    minHeight: 68,
+    minHeight: 58,
     borderRadius: Radius.medium,
     backgroundColor: Palette.surface,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Palette.line,
-    padding: Spacing.twoHalf,
+    paddingHorizontal: Spacing.three,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.twoHalf,
+    gap: Spacing.two,
   },
-  comparisonIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#201C35',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  method: { backgroundColor: '#131525' },
+  comparisonTitle: { flex: 1 },
+  comparisonArrow: { color: Palette.textDim },
 });

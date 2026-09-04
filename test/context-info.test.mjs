@@ -43,11 +43,6 @@ test('mission context keeps plan-v5 rationale but never legacy instructions', ()
   assert.deepEqual(missionContextSections(inAppMission), [
     { heading: 'О дне', body: 'Краткое объяснение роли этого дня.' },
     { heading: 'Критерий дня', body: 'Все блоки дня завершены.' },
-    {
-      heading: 'Предупреждение',
-      body: 'Остановись при дискомфорте.',
-      tone: 'warning',
-    },
   ]);
 
   const legacyMission = deepFreeze({
@@ -56,13 +51,7 @@ test('mission context keeps plan-v5 rationale but never legacy instructions', ()
     completionCriterion: 'Исполняемый критерий остаётся рядом с действием.',
     execution: { kind: 'manual' },
   });
-  assert.deepEqual(missionContextSections(legacyMission), [
-    {
-      heading: 'Предупреждение',
-      body: 'Остановись при дискомфорте.',
-      tone: 'warning',
-    },
-  ]);
+  assert.deepEqual(missionContextSections(legacyMission), []);
 });
 
 test('execution block context contains load provenance only', () => {
@@ -145,7 +134,10 @@ test('plan context exposes rationale and provenance without traversing executabl
       method: 'openai-web-research-v1',
       confidence: 'medium',
       safetyNotes: ['Не выполнять под водой.'],
-      assumptions: ['Практика проходит в безопасном месте.'],
+      assumptions: [
+        'Практика проходит в безопасном месте.',
+        'Доступно двадцать минут в день.',
+      ],
       sourceLabels: ['Принцип субмаксимальной нагрузки'],
       sources: [{ title: 'Исследование нагрузки', url: 'https://example.com/research' }],
       request: {
@@ -169,7 +161,6 @@ test('plan context exposes rationale and provenance without traversing executabl
       'Логика плана',
       'Исходная точка и расчёт',
       'Срок большой цели',
-      'Безопасность',
       'Допущения',
       'Основа методики',
       'Источники',
@@ -180,7 +171,8 @@ test('plan context exposes rationale and provenance without traversing executabl
     sections.find((section) => section.heading === 'Версия и метод')?.body ?? '',
     /План v5[\s\S]*Web research[\s\S]*средняя/u,
   );
-  assert.equal(sections.find((section) => section.heading === 'Безопасность')?.tone, 'warning');
+  assert.equal(JSON.stringify(sections).includes('Не выполнять под водой'), false);
+  assert.equal(JSON.stringify(sections).includes('безопасном месте'), false);
   assert.match(
     sections.find((section) => section.heading === 'Источники')?.body ?? '',
     /https:\/\/example\.com\/research/u,

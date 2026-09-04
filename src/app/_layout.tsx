@@ -1,4 +1,4 @@
-import { DarkTheme, ThemeProvider } from 'expo-router';
+import { DefaultTheme, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -16,9 +16,9 @@ SplashScreen.preventAutoHideAsync();
 configureNotificationHandler();
 
 const actumTheme = {
-  ...DarkTheme,
+  ...DefaultTheme,
   colors: {
-    ...DarkTheme.colors,
+    ...DefaultTheme.colors,
     primary: Palette.gold,
     background: Palette.ink,
     card: Palette.inkRaised,
@@ -32,7 +32,7 @@ export default function RootLayout() {
   return (
     <AppProvider>
       <ThemeProvider value={actumTheme}>
-        <StatusBar style="light" />
+        <StatusBar style="dark" />
         <AppTabs />
         <AppOverlay />
       </ThemeProvider>
@@ -120,8 +120,8 @@ const styles = StyleSheet.create({
     padding: Spacing.four,
     borderRadius: Radius.large,
     borderWidth: 1,
-    borderColor: '#6B3737',
-    backgroundColor: Palette.inkRaised,
+    borderColor: 'rgba(215, 0, 21, 0.24)',
+    backgroundColor: Palette.surface,
   },
   storageCopy: { color: Palette.textMuted },
 });

@@ -250,7 +250,13 @@ export type AppSettings = {
 
 export type MissionRunStatus = 'running' | 'awaiting_checkin' | 'reported';
 export type MissionRunFinishReason = 'completed' | 'stopped';
-export type MissionRunCursorStage = 'ready' | 'work' | 'rest' | 'review' | 'complete';
+export type MissionRunCursorStage =
+  | 'ready'
+  | 'preparing'
+  | 'work'
+  | 'rest'
+  | 'review'
+  | 'complete';
 
 export type MissionRunCursor = {
   blockIndex: number;
@@ -364,10 +370,6 @@ export type GoalInput = {
   horizonDays: number;
   researchMode?: 'quick' | 'web';
 };
-
-export type RiskGateResult =
-  | { safe: true; note: string }
-  | { safe: false; title: string; message: string };
 
 export type GeneratedGoal = {
   goal: Goal;

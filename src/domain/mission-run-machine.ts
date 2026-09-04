@@ -14,6 +14,8 @@ export type MissionRunTransition =
 
 type ClockValue = Date | string | number;
 
+export const MISSION_RUN_PREPARATION_SECONDS = 3;
+
 function clockMilliseconds(value: ClockValue): number {
   if (value instanceof Date) return value.getTime();
   if (typeof value === 'number') return value;
@@ -46,7 +48,10 @@ export function cloneMissionRun(run: MissionRun): MissionRun {
   };
 }
 
-/** Starts the current work set, or skips an active rest period. */
+/**
+ * Starts the current block. Timer sets first enter a durable preparation stage;
+ * calling this again at that stage's absolute deadline starts measured work.
+ */
 export function startMissionRunWork(
   run: MissionRun,
   blocks: MissionExecutionBlock[] | undefined,
@@ -55,11 +60,28 @@ export function startMissionRunWork(
   const block = blocks?.[run.cursor.blockIndex];
   const result = run.blockResults[run.cursor.blockIndex];
   if (!block || !result) return undefined;
+  if (!['ready', 'rest', 'preparing'].includes(run.cursor.stage)) return undefined;
 
   const checkpoint = cloneMissionRun(run);
   const atMilliseconds = clockMilliseconds(at);
   const atTimestamp = clockTimestamp(at);
   const target = checkpoint.blockResults[run.cursor.blockIndex];
+
+  if (
+    block.kind === 'timer' &&
+    target.kind === 'timer' &&
+    run.cursor.stage !== 'preparing'
+  ) {
+    checkpoint.cursor.stage = 'preparing';
+    checkpoint.stageStartedAt = atTimestamp;
+    checkpoint.stageEndsAt = new Date(
+      atMilliseconds + MISSION_RUN_PREPARATION_SECONDS * 1_000,
+    ).toISOString();
+    return checkpoint;
+  }
+
+  if (run.cursor.stage === 'preparing' && block.kind !== 'timer') return undefined;
+
   target.startedAt ||= atTimestamp;
   checkpoint.cursor.stage = 'work';
   checkpoint.stageStartedAt = atTimestamp;
@@ -148,6 +170,35 @@ export function completeTimerMissionRunSet(
   return advanceAfterSet(checkpoint, block, target, atMilliseconds);
 }
 
+/**
+ * Advances an automatic stage from its persisted deadline rather than callback time.
+ * This keeps preparation, work, and rest deterministic after the app resumes.
+ */
+export function advanceMissionRunTimedStage(
+  run: MissionRun,
+  blocks: MissionExecutionBlock[] | undefined,
+): MissionRun | undefined {
+  if (!run.stageEndsAt) return undefined;
+  const deadlineMilliseconds = Date.parse(run.stageEndsAt);
+  if (!Number.isFinite(deadlineMilliseconds)) return undefined;
+
+  if (run.cursor.stage === 'preparing' || run.cursor.stage === 'rest') {
+    return startMissionRunWork(run, blocks, deadlineMilliseconds);
+  }
+
+  const block = blocks?.[run.cursor.blockIndex];
+  const result = run.blockResults[run.cursor.blockIndex];
+  if (
+    run.cursor.stage === 'work' &&
+    block?.kind === 'timer' &&
+    result?.kind === 'timer'
+  ) {
+    return completeTimerMissionRunSet(run, block, true, deadlineMilliseconds);
+  }
+
+  return undefined;
+}
+
 export function completeCounterMissionRunSet(
   run: MissionRun,
   block: CounterExecutionBlock,
@@ -214,6 +265,27 @@ export function completeSimpleMissionRunBlock(
   checkpoint.cursor.stage = 'review';
   checkpoint.stageEndsAt = undefined;
   return checkpoint;
+}
+
+/** Completes a non-actionable persisted block and advances without showing a review step. */
+export function skipMissionRunBlock(
+  run: MissionRun,
+  blocks: MissionExecutionBlock[],
+  at: ClockValue,
+): MissionRunTransition | undefined {
+  const checkpoint = cloneMissionRun(run);
+  const target = checkpoint.blockResults[run.cursor.blockIndex];
+  if (!target || !blocks[run.cursor.blockIndex]) return undefined;
+
+  const atTimestamp = clockTimestamp(at);
+  target.startedAt ||= atTimestamp;
+  target.completed = true;
+  target.completedAt = atTimestamp;
+  target.criterionMet = true;
+  checkpoint.cursor.stage = 'review';
+  checkpoint.stageStartedAt = undefined;
+  checkpoint.stageEndsAt = undefined;
+  return continueMissionRunAfterReview(checkpoint, blocks, at);
 }
 
 export function continueMissionRunAfterReview(

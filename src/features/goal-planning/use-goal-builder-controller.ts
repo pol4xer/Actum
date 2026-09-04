@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { checkGoalRisk } from '@/domain/goal-engine';
 import type { GeneratedGoal, GoalInput } from '@/domain/types';
 
 import { AIPlannerError, type AIPlannerErrorCode } from './errors';
@@ -39,7 +38,6 @@ export function useGoalBuilderController({
   const [generationErrorCode, setGenerationErrorCode] = useState<AIPlannerErrorCode>();
   const [savedPreview, setSavedPreview] = useState<GeneratedGoal>();
 
-  const risk = useMemo(() => checkGoalRisk(prompt), [prompt]);
   const input = useMemo<GoalInput>(
     () => ({
       prompt,
@@ -140,7 +138,6 @@ export function useGoalBuilderController({
     savedPreview,
     generationError,
     generationErrorCode,
-    risk,
     detailsComplete,
     continueFromIntent: () => setStage('details'),
     backToIntent: () => setStage('intent'),

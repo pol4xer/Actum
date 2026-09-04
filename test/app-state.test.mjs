@@ -63,16 +63,19 @@ compileModule('src/state/app-commands.ts', 'app-commands.mjs', (source) =>
 
 const {
   createMissionRun,
+  isMissionRun,
   isMissionRunComplete,
   isMissionRunSuccessful,
   missionRunSummary,
 } = await import(pathToFileURL(join(compiledDirectory, 'mission-run.mjs')).href);
 const {
+  advanceMissionRunTimedStage,
   checkpointMissionRunWork,
   completeCounterMissionRunSet,
   completeSimpleMissionRunBlock,
   completeTimerMissionRunSet,
   continueMissionRunAfterReview,
+  skipMissionRunBlock,
   startMissionRunWork,
 } = await import(pathToFileURL(join(compiledDirectory, 'mission-run-machine.mjs')).href);
 const { addCalendarDaysToKey } = await import(
@@ -402,34 +405,40 @@ test('mission-run machine advances timer sets through work, rest, review, and fi
     },
   };
   const initial = createMissionRun(mission, T0);
-  const started = startMissionRunWork(initial, [timerBlock], T0);
-  assert.ok(started);
-  assert.equal(started.cursor.stage, 'work');
-  assert.equal(started.stageEndsAt, '2026-08-01T09:00:30.000Z');
+  const preparing = startMissionRunWork(initial, [timerBlock], T0);
+  assert.ok(preparing);
+  assert.equal(preparing.cursor.stage, 'preparing');
+  assert.equal(preparing.stageEndsAt, '2026-08-01T09:00:03.000Z');
+  assert.equal(preparing.blockResults[0].startedAt, undefined);
+  assert.equal(preparing.blockResults[0].sets[0].startedAt, undefined);
   assert.equal(initial.cursor.stage, 'ready');
 
-  const afterFirst = completeTimerMissionRunSet(
-    started,
-    timerBlock,
-    true,
-    '2026-08-01T09:00:30.000Z',
-  );
+  // A resumed UI uses the persisted absolute deadline, so time spent preparing
+  // never leaks into measured work even when the callback runs after backgrounding.
+  const started = advanceMissionRunTimedStage(preparing, [timerBlock]);
+  assert.ok(started);
+  assert.equal(started.cursor.stage, 'work');
+  assert.equal(started.stageStartedAt, '2026-08-01T09:00:03.000Z');
+  assert.equal(started.stageEndsAt, '2026-08-01T09:00:33.000Z');
+  assert.equal(started.blockResults[0].sets[0].startedAt, '2026-08-01T09:00:03.000Z');
+
+  const afterFirst = advanceMissionRunTimedStage(started, [timerBlock]);
   assert.ok(afterFirst);
   assert.deepEqual(afterFirst.cursor, { blockIndex: 0, setIndex: 1, stage: 'rest' });
-  assert.equal(afterFirst.stageEndsAt, '2026-08-01T09:00:40.000Z');
+  assert.equal(afterFirst.stageEndsAt, '2026-08-01T09:00:43.000Z');
   assert.equal(afterFirst.blockResults[0].sets[0].targetMet, true);
 
-  const secondStarted = startMissionRunWork(
-    afterFirst,
-    [timerBlock],
-    '2026-08-01T09:00:40.000Z',
-  );
+  const secondPreparing = advanceMissionRunTimedStage(afterFirst, [timerBlock]);
+  assert.ok(secondPreparing);
+  assert.equal(secondPreparing.cursor.stage, 'preparing');
+  assert.equal(secondPreparing.stageEndsAt, '2026-08-01T09:00:46.000Z');
+  const secondStarted = advanceMissionRunTimedStage(secondPreparing, [timerBlock]);
   assert.ok(secondStarted);
   const afterSecond = completeTimerMissionRunSet(
     secondStarted,
     timerBlock,
     false,
-    '2026-08-01T09:00:50.000Z',
+    '2026-08-01T09:00:56.000Z',
   );
   assert.ok(afterSecond);
   assert.equal(afterSecond.cursor.stage, 'review');
@@ -445,6 +454,52 @@ test('mission-run machine advances timer sets through work, rest, review, and fi
   assert.equal(transition.kind, 'finish');
   assert.equal(transition.reason, 'completed');
   assert.equal(transition.run.cursor.stage, 'complete');
+});
+
+test('stopping during timer preparation records no completed work', () => {
+  const timerBlock = {
+    kind: 'timer',
+    title: 'Hold',
+    instruction: 'Hold for the prescribed time.',
+    sets: 1,
+    durationSecondsPerSet: 30,
+    restSeconds: 0,
+    successCriterion: 'The set is recorded.',
+  };
+  const mission = {
+    ...generatedGoal().plan.missions[0],
+    id: 'timer-preparation',
+    execution: {
+      kind: 'in_app',
+      successCriterion: 'The set is recorded.',
+      blocks: [timerBlock],
+    },
+  };
+  const initial = createMissionRun(mission, T0);
+  const preparing = startMissionRunWork(initial, [timerBlock], T0);
+  assert.ok(preparing);
+  assert.equal(isMissionRun(preparing), true);
+
+  const stopped = checkpointMissionRunWork(
+    preparing,
+    timerBlock,
+    '2026-08-01T09:00:02.000Z',
+  );
+  assert.equal(stopped.blockResults[0].sets[0].actualDurationSeconds, 0);
+  assert.equal(stopped.blockResults[0].sets[0].startedAt, undefined);
+  assert.equal(stopped.blockResults[0].sets[0].completedAt, undefined);
+});
+
+test('non-actionable persisted blocks can advance without an interactive review', () => {
+  const mission = generatedGoal().plan.missions[0];
+  const blocks = mission.execution.blocks;
+  const initial = createMissionRun(mission, T0);
+  const transition = skipMissionRunBlock(initial, blocks, T0);
+  assert.ok(transition);
+  assert.equal(transition.kind, 'save');
+  assert.deepEqual(transition.run.cursor, { blockIndex: 1, setIndex: 0, stage: 'ready' });
+  assert.equal(transition.run.blockResults[0].completed, true);
+  assert.equal(transition.run.blockResults[0].criterionMet, true);
 });
 
 test('mission-run machine handles counter and simple blocks without React or persistence', () => {

@@ -1,7 +1,8 @@
-import { LinearGradient } from 'expo-linear-gradient';
+import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from 'expo-glass-effect';
 import { PropsWithChildren, ReactNode } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   ScrollView,
   StyleProp,
@@ -15,6 +16,42 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { BottomTabInset, MaxContentWidth, Palette, Radius, Shadow, Spacing } from '@/constants/theme';
 import { impact, ImpactFeedbackStyle } from '@/lib/haptics';
+
+const supportsNativeGlass = (() => {
+  if (Platform.OS !== 'ios') return false;
+
+  try {
+    return isLiquidGlassAvailable() && isGlassEffectAPIAvailable();
+  } catch {
+    // An older development build may not contain the native module yet.
+    return false;
+  }
+})();
+
+export function GlassSurface({
+  children,
+  style,
+  fallbackStyle,
+  tintColor = 'rgba(255, 255, 255, 0.2)',
+}: PropsWithChildren<{
+  style?: StyleProp<ViewStyle>;
+  fallbackStyle?: StyleProp<ViewStyle>;
+  tintColor?: string;
+}>) {
+  if (supportsNativeGlass) {
+    return (
+      <GlassView
+        colorScheme="light"
+        glassEffectStyle="regular"
+        tintColor={tintColor}
+        style={style}>
+        {children}
+      </GlassView>
+    );
+  }
+
+  return <View style={[style, fallbackStyle]}>{children}</View>;
+}
 
 export function Screen({
   children,
@@ -40,8 +77,6 @@ export function Screen({
 
   return (
     <View style={[styles.screen, style]}>
-      <View pointerEvents="none" style={[styles.glow, styles.glowOne]} />
-      <View pointerEvents="none" style={[styles.glow, styles.glowTwo]} />
       {scroll ? (
         <ScrollView
           contentInsetAdjustmentBehavior="never"
@@ -91,11 +126,19 @@ export function Card({
   style,
   accent = false,
 }: PropsWithChildren<{ style?: StyleProp<ViewStyle>; accent?: boolean }>) {
-  return (
-    <View style={[styles.card, accent && styles.cardAccent, style]}>
+  const content = (
+    <>
       {accent ? <View style={styles.accentLine} /> : null}
       {children}
-    </View>
+    </>
+  );
+
+  return (
+    <GlassSurface
+      fallbackStyle={styles.cardFallback}
+      style={[styles.card, accent && styles.cardAccent, style]}>
+      {content}
+    </GlassSurface>
   );
 }
 
@@ -187,13 +230,7 @@ export function AppButton({
         pressed && styles.buttonPressed,
         style,
       ]}>
-      {variant === 'primary' ? (
-        <LinearGradient colors={[Palette.goldBright, Palette.gold]} style={styles.buttonGradient}>
-          {content}
-        </LinearGradient>
-      ) : (
-        content
-      )}
+      {content}
     </Pressable>
   );
 }
@@ -254,25 +291,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     gap: Spacing.three,
   },
-  glow: {
-    position: 'absolute',
-    borderRadius: 999,
-    opacity: 0.09,
-  },
-  glowOne: {
-    width: 380,
-    height: 380,
-    backgroundColor: Palette.violet,
-    top: -190,
-    right: -170,
-  },
-  glowTwo: {
-    width: 300,
-    height: 300,
-    backgroundColor: Palette.gold,
-    bottom: -220,
-    left: -150,
-  },
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -293,7 +311,6 @@ const styles = StyleSheet.create({
   card: {
     position: 'relative',
     overflow: 'hidden',
-    backgroundColor: Palette.surface,
     borderColor: Palette.line,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.large,
@@ -301,17 +318,20 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
     ...Shadow,
   },
+  cardFallback: {
+    backgroundColor: Palette.surface,
+  },
   cardAccent: {
-    borderColor: '#52462F',
+    borderColor: 'rgba(0, 122, 255, 0.28)',
   },
   accentLine: {
     position: 'absolute',
     top: 0,
     left: 24,
     right: 24,
-    height: 2,
+    height: StyleSheet.hairlineWidth,
     backgroundColor: Palette.gold,
-    opacity: 0.75,
+    opacity: 0.5,
   },
   pill: {
     alignSelf: 'flex-start',
@@ -320,38 +340,32 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  pillNeutral: { backgroundColor: '#1C2335', borderColor: Palette.line },
-  pillGold: { backgroundColor: '#2B2418', borderColor: '#5C4929' },
-  pillSuccess: { backgroundColor: '#142A24', borderColor: '#295543' },
-  pillWarning: { backgroundColor: '#2D2319', borderColor: '#59402B' },
-  pillDanger: { backgroundColor: '#301C24', borderColor: '#633342' },
-  pillViolet: { backgroundColor: '#201D38', borderColor: '#453D76' },
+  pillNeutral: { backgroundColor: 'rgba(118, 118, 128, 0.1)', borderColor: Palette.line },
+  pillGold: { backgroundColor: 'rgba(0, 122, 255, 0.1)', borderColor: 'rgba(0, 122, 255, 0.2)' },
+  pillSuccess: { backgroundColor: 'rgba(52, 199, 89, 0.1)', borderColor: 'rgba(36, 138, 61, 0.22)' },
+  pillWarning: { backgroundColor: 'rgba(255, 149, 0, 0.1)', borderColor: 'rgba(199, 120, 0, 0.22)' },
+  pillDanger: { backgroundColor: 'rgba(255, 59, 48, 0.1)', borderColor: 'rgba(215, 0, 21, 0.2)' },
+  pillViolet: { backgroundColor: 'rgba(118, 118, 128, 0.1)', borderColor: Palette.line },
   button: {
     minHeight: 54,
     borderRadius: Radius.medium,
     overflow: 'hidden',
     justifyContent: 'center',
-  },
-  buttonGradient: {
-    minHeight: 54,
     paddingHorizontal: Spacing.three,
-    justifyContent: 'center',
+    backgroundColor: Palette.gold,
   },
   buttonSecondary: {
-    paddingHorizontal: Spacing.three,
     backgroundColor: Palette.surfaceSoft,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: Palette.line,
   },
   buttonGhost: {
-    paddingHorizontal: Spacing.three,
     backgroundColor: 'transparent',
   },
   buttonDanger: {
-    paddingHorizontal: Spacing.three,
-    backgroundColor: '#2D1820',
-    borderWidth: 1,
-    borderColor: '#5E2B39',
+    backgroundColor: 'rgba(255, 59, 48, 0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(215, 0, 21, 0.24)',
   },
   buttonContent: {
     minHeight: 52,
@@ -361,7 +375,7 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   buttonText: { color: Palette.text },
-  buttonTextPrimary: { color: '#1D1609' },
+  buttonTextPrimary: { color: Palette.white },
   buttonTextDanger: { color: Palette.danger },
   buttonIcon: { fontSize: 18 },
   buttonDisabled: { opacity: 0.42 },

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, Linking, StyleSheet, Switch, View } from 'react-native';
+import { Alert, StyleSheet, Switch, View } from 'react-native';
 
 import { HeroSigil } from '@/components/hero-sigil';
 import { ThemedText } from '@/components/themed-text';
@@ -7,7 +7,6 @@ import { InfoPopover } from '@/components/ui/info-popover';
 import { AppButton, Card, Pill, Screen, ScreenHeader } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import { disableDailyReminder, enableDailyReminder } from '@/lib/notifications';
-import { archetypeLabel } from '@/shared/presentation/archetypes';
 import type { ContextInfoSection } from '@/shared/presentation/context-info';
 import { useApp } from '@/state';
 
@@ -86,7 +85,7 @@ export default function SettingsScreen() {
     const firstMissionTitle = plan.missions[0]?.title;
     Alert.alert(
       'Начать текущий план заново?',
-      'Сам план, research и ответы GPT останутся. Выполненные дни, сессии, check-in и комментарии будут очищены. Профиль, уровень и XP сохранятся. OpenAI не вызывается.',
+      'Прогресс очистится, а план останется. Новый запрос к GPT не отправится.',
       [
         { text: 'Отмена', style: 'cancel' },
         {
@@ -107,62 +106,38 @@ export default function SettingsScreen() {
                 reminderUpdated = false;
               }
             }
-            Alert.alert(
-              'Текущий план перезапущен',
-              reminderUpdated
-                ? 'День 1 назначен на сегодня. Новый запрос к GPT не выполнялся.'
-                : 'День 1 назначен на сегодня без запроса к GPT. Ежедневное напоминание обновить не удалось.',
-            );
+            Alert.alert('План перезапущен', reminderUpdated ? 'Открыт День 1.' : 'Открыт День 1. Напоминание не обновилось.');
           },
         },
       ],
     );
   };
 
-  const appInfo: ContextInfoSection[] = [
+  const legalInfo: ContextInfoSection[] = [
+    {
+      heading: 'Ответственность',
+      body:
+        'Actum автоматически предлагает справочный план. Пользователь сам выбирает действия и принимает на себя риски. Actum не несёт ответственности за вред или последствия самостоятельного выполнения.',
+    },
+    {
+      heading: 'Статус сервиса',
+      body:
+        'Actum не является медицинской услугой, не ставит диагнозы, не лечит и не гарантирует достижение цели.',
+    },
     {
       heading: 'Данные',
-      body: `Профиль, миссии, результаты и check-in хранятся на этом устройстве. При создании плана цель и выбранные ограничения отправляются в OpenAI через локальный AI-сервер; журнал выполнения не отправляется. Облачного аккаунта нет. Schema v${state.schemaVersion}.`,
-    },
-    {
-      heading: 'Техническая схема MVP',
-      body:
-        'Expo SDK 57 · React Native · AsyncStorage · modular prompts · локальный Node AI gateway · Responses API с web research. Supabase sync и iOS Widget пока не подключены.',
-    },
-    {
-      heading: 'Ограничения',
-      body:
-        'Actum показывает предупреждения, но не выбирает цель за пользователя. Это не медицинский продукт: приложение не диагностирует, не лечит и не гарантирует физический результат.',
-      tone: 'warning',
+      body: `Прогресс хранится на устройстве. При создании плана текст цели отправляется в OpenAI через локальный сервер; журнал выполнения не отправляется. Версия данных: ${state.schemaVersion}.`,
     },
   ];
 
   return (
     <Screen>
-      <ScreenHeader
-        eyebrow="Профиль и система"
-        title="Настройки"
-        action={
-          <InfoPopover
-            accessibilityLabel="О данных и устройстве Actum"
-            sections={appInfo}
-            title="О приложении"
-          />
-        }
-      />
+      <ScreenHeader title="Настройки" />
 
       <Card style={styles.profileCard}>
-        <HeroSigil archetype={state.profile?.archetype} size={88} level={state.character.level} />
+        <HeroSigil archetype={state.profile?.archetype} size={68} level={state.character.level} />
         <View style={styles.profileCopy}>
           <ThemedText type="subtitle">{state.profile?.name ?? 'Путник'}</ThemedText>
-          <ThemedText type="small" style={styles.muted}>
-            {state.profile ? archetypeLabel(state.profile.archetype) : 'Герой'} · Режим{' '}
-            {state.profile?.strictness === 'gentle'
-              ? 'бережный'
-              : state.profile?.strictness === 'strict'
-                ? 'строгий'
-                : 'равновесие'}
-          </ThemedText>
           <View style={styles.badges}>
             <Pill tone="gold">уровень {state.character.level}</Pill>
             <Pill tone="neutral">{state.character.xp} XP</Pill>
@@ -176,8 +151,8 @@ export default function SettingsScreen() {
         </ThemedText>
         <SettingRow
           icon="◷"
-          title="Миссия дня"
-          subtitle={`Каждый день в ${String(state.settings.reminderHour).padStart(2, '0')}:${String(
+          title="Напоминание"
+          subtitle={`${String(state.settings.reminderHour).padStart(2, '0')}:${String(
             state.settings.reminderMinute,
           ).padStart(2, '0')}`}
           control={
@@ -185,8 +160,8 @@ export default function SettingsScreen() {
               accessibilityLabel="Ежедневное напоминание"
               disabled={notificationBusy}
               onValueChange={toggleNotifications}
-              trackColor={{ false: Palette.line, true: '#7C672F' }}
-              thumbColor={state.settings.notificationsEnabled ? Palette.goldBright : Palette.textMuted}
+              trackColor={{ false: Palette.line, true: Palette.accent }}
+              thumbColor={Palette.white}
               value={state.settings.notificationsEnabled}
             />
           }
@@ -195,26 +170,37 @@ export default function SettingsScreen() {
 
       <View style={styles.section}>
         <ThemedText type="eyebrow" style={styles.sectionTitle}>
-          Проект
+          План
         </ThemedText>
-        <AppButton
-          label="Открыть документацию Expo"
-          variant="secondary"
-          onPress={() => Linking.openURL('https://docs.expo.dev/versions/v57.0.0/')}
-        />
         {state.activeGoal && state.activePlan ? (
           <AppButton
-            label="Начать текущий план заново · без GPT"
+            label="Начать план заново"
             variant="secondary"
             onPress={confirmRestartPlan}
           />
         ) : null}
         {state.activeGoal ? (
-          <AppButton label="Начать другую цель" variant="secondary" onPress={confirmNewGoal} />
+          <AppButton label="Новая цель" variant="secondary" onPress={confirmNewGoal} />
         ) : null}
-        <AppButton label="Удалить локальные данные" variant="danger" onPress={confirmReset} />
       </View>
 
+      <View style={styles.section}>
+        <ThemedText type="eyebrow" style={styles.sectionTitle}>
+          Данные и правила
+        </ThemedText>
+        <SettingRow
+          icon="§"
+          title="Legal & Service"
+          control={
+            <InfoPopover
+              accessibilityLabel="Открыть Legal & Service"
+              sections={legalInfo}
+              title="Legal & Service"
+            />
+          }
+        />
+        <AppButton label="Удалить все данные" variant="danger" onPress={confirmReset} />
+      </View>
     </Screen>
   );
 }
@@ -227,7 +213,7 @@ function SettingRow({
 }: {
   icon: string;
   title: string;
-  subtitle: string;
+  subtitle?: string;
   control: React.ReactNode;
 }) {
   return (
@@ -237,9 +223,11 @@ function SettingRow({
       </View>
       <View style={styles.profileCopy}>
         <ThemedText type="smallBold">{title}</ThemedText>
-        <ThemedText type="small" style={styles.muted}>
-          {subtitle}
-        </ThemedText>
+        {subtitle ? (
+          <ThemedText type="small" style={styles.muted}>
+            {subtitle}
+          </ThemedText>
+        ) : null}
       </View>
       {control}
     </View>
@@ -248,7 +236,7 @@ function SettingRow({
 
 const styles = StyleSheet.create({
   muted: { color: Palette.textMuted },
-  profileCard: { flexDirection: 'row', alignItems: 'center' },
+  profileCard: { flexDirection: 'row', alignItems: 'center', gap: Spacing.twoHalf },
   profileCopy: { flex: 1, gap: 4 },
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, marginTop: Spacing.two },
   section: { gap: Spacing.two },
@@ -268,9 +256,9 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: '#211D35',
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconText: { color: Palette.violetSoft, fontSize: 20 },
+  iconText: { color: Palette.accent, fontSize: 18 },
 });

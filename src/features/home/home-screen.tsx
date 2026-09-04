@@ -1,11 +1,9 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { CheckInModal } from '@/features/check-in';
 import { GoalBuilder } from '@/features/goal-planning';
-import { HeroSigil } from '@/components/hero-sigil';
 import { MissionRunner } from '@/features/mission-session';
 import { ThemedText } from '@/components/themed-text';
 import { InfoPopover } from '@/components/ui/info-popover';
@@ -16,11 +14,9 @@ import {
   ProgressBar,
   Screen,
   ScreenHeader,
-  Stat,
 } from '@/components/ui/primitives';
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import { calendarDateRelation, formatCalendarDate } from '@/lib/calendar-date';
-import { archetypeLabel } from '@/shared/presentation/archetypes';
 import { missionContextSections } from '@/shared/presentation/context-info';
 import { formatMissionDuration } from '@/shared/presentation/plan-formatters';
 import { useApp } from '@/state';
@@ -29,7 +25,6 @@ export default function HomeScreen() {
   const {
     state,
     currentMission,
-    completedCount,
     mutateMissionRun,
     reportMission,
     startNewGoal,
@@ -44,7 +39,6 @@ export default function HomeScreen() {
   const reported = state.activePlan.missions.filter((mission) => mission.outcome !== 'pending').length;
   const planProgress = reported / total;
   const xpInLevel = state.character.xp % 100;
-  const firstName = state.profile?.name.split(' ')[0] ?? 'Путник';
   const missionDate = formatCalendarDate(currentMission?.scheduledDate);
   const missionTiming = calendarDateRelation(currentMission?.scheduledDate);
   const currentRun = currentMission ? state.missionRuns[currentMission.id] : undefined;
@@ -59,64 +53,42 @@ export default function HomeScreen() {
       <Screen>
         <ScreenHeader
           eyebrow={today}
-          title={`С возвращением, ${firstName}`}
+          title="Сегодня"
           action={
             <View style={styles.levelChip}>
-              <ThemedText type="eyebrow" style={styles.levelChipLabel}>
-                ур.
-              </ThemedText>
               <ThemedText type="smallBold" style={styles.gold}>
-                {state.character.level}
+                Ур. {state.character.level}
               </ThemedText>
             </View>
           }
         />
 
-        <LinearGradient colors={['#201D39', '#131827', '#181716']} style={styles.heroCard}>
-          <View style={styles.heroSky}>
-            <View style={styles.heroCopy}>
-              <Pill tone={state.character.debuffs.length ? 'warning' : 'violet'}>
-                {state.character.debuffs[0] ?? archetypeLabel(state.profile?.archetype ?? 'pathfinder')}
-              </Pill>
-              <ThemedText type="subtitle">Реальный герой</ThemedText>
-              <ThemedText type="small" style={styles.muted}>
-                Мир освещён на {state.character.worldLight}%
-              </ThemedText>
-            </View>
-            <HeroSigil
-              archetype={state.profile?.archetype}
-              level={state.character.level}
-              size={124}
-            />
+        <View style={styles.statusStrip}>
+          <View style={styles.statusItem}>
+            <ThemedText type="small" style={styles.muted}>Серия</ThemedText>
+            <ThemedText type="smallBold">{state.character.streak} дн.</ThemedText>
           </View>
-          <View style={styles.statsRow}>
-            <Stat label="энергия" value={`${state.character.energy}%`} />
-            <Stat label="серия" value={`${state.character.streak} дн.`} />
-            <Stat label="опыт" value={`${xpInLevel}/100`} valueStyle={styles.gold} />
+          <View style={styles.statusDivider} />
+          <View style={styles.statusItem}>
+            <ThemedText type="small" style={styles.muted}>Опыт</ThemedText>
+            <ThemedText type="smallBold">{xpInLevel}/100</ThemedText>
           </View>
-          <ProgressBar value={xpInLevel / 100} color={Palette.violetSoft} />
-        </LinearGradient>
+          <View style={styles.statusProgress}>
+            <ProgressBar value={xpInLevel / 100} color={Palette.accent} height={6} />
+          </View>
+        </View>
 
         {currentMission ? (
           <Card accent style={styles.missionCard}>
             <View style={styles.sectionTop}>
               <Pill tone="gold">
-                {missionTiming === 'future'
-                  ? 'следующий день'
-                  : missionTiming === 'past'
-                    ? 'незавершённый день'
-                    : missionTiming === 'today'
-                      ? 'сегодня'
-                      : 'день'}{' '}
-                · {currentMission.dayNumber ?? currentMission.sequence}/{total}
-                {missionDate ? ` · ${missionDate}` : ''}
+                {missionTiming === 'today' ? 'сегодня · ' : ''}день{' '}
+                {currentMission.dayNumber ?? currentMission.sequence} из {total}
               </Pill>
               <ThemedText type="small" style={styles.muted}>
+                {missionDate ? `${missionDate} · ` : ''}
                 {formatMissionDuration(currentMission, { approximateFallback: true })}
               </ThemedText>
-            </View>
-            <View style={styles.questMark}>
-              <ThemedText style={styles.questGlyph}>✦</ThemedText>
             </View>
             <View style={styles.missionCopy}>
               <View style={styles.missionTitleRow}>
@@ -130,32 +102,13 @@ export default function HomeScreen() {
                 />
               </View>
             </View>
-            <View style={styles.rewardRow}>
-              <View>
-                <ThemedText type="eyebrow" style={styles.muted}>
-                  награда
-                </ThemedText>
-                <ThemedText type="smallBold" style={styles.gold}>
-                  +{currentMission.xp} XP · Свет мира
-                </ThemedText>
-              </View>
-              <View style={styles.typeBadge}>
-                <ThemedText type="small">{currentMission.type}</ThemedText>
-              </View>
-            </View>
             <AppButton
               label={
                 currentRun?.status === 'running'
-                  ? 'Продолжить сессию Actum'
+                  ? 'Продолжить'
                   : currentRun?.status === 'awaiting_checkin'
-                    ? 'Открыть журнал и check-in'
-                    : currentMission.execution?.kind === 'in_app'
-                      ? 'Открыть сессию Actum'
-                  : currentMission.execution?.kind === 'timer'
-                  ? 'Открыть таймер'
-                  : currentMission.execution?.kind === 'routine'
-                    ? 'Открыть комплекс'
-                    : 'Начать миссию'
+                    ? 'Записать результат'
+                    : 'Начать'
               }
               onPress={() => setRunnerVisible(true)}
               icon="→"
@@ -196,9 +149,6 @@ export default function HomeScreen() {
               </ThemedText>
             </View>
             <ProgressBar value={planProgress} />
-            <ThemedText type="small" style={styles.muted}>
-              {completedCount} полных побед
-            </ThemedText>
           </View>
           <ThemedText style={styles.chevron}>›</ThemedText>
         </Pressable>
@@ -241,72 +191,45 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   muted: { color: Palette.textMuted },
   gold: { color: Palette.goldBright },
-  warning: { color: Palette.warning },
   center: { textAlign: 'center' },
   flex: { flex: 1 },
   pressed: { opacity: 0.72 },
   levelChip: {
-    minWidth: 54,
-    height: 46,
-    borderRadius: Radius.medium,
+    minWidth: 58,
+    height: 36,
+    borderRadius: Radius.pill,
     borderWidth: 1,
-    borderColor: '#5A492B',
-    backgroundColor: '#2A2418',
+    borderColor: Palette.line,
+    backgroundColor: Palette.surfaceSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  levelChipLabel: { color: Palette.textMuted, lineHeight: 12 },
-  heroCard: {
+  statusStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    minHeight: 64,
+    paddingHorizontal: Spacing.three,
     borderRadius: Radius.large,
-    padding: Spacing.three,
-    gap: Spacing.three,
-    borderWidth: 1,
-    borderColor: '#343550',
-    overflow: 'hidden',
-  },
-  heroSky: { minHeight: 128, flexDirection: 'row', alignItems: 'center' },
-  heroCopy: { flex: 1, gap: Spacing.two },
-  statsRow: {
-    flexDirection: 'row',
-    paddingTop: Spacing.three,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#FFFFFF18',
-  },
-  sectionTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  missionCard: { paddingTop: Spacing.four },
-  questMark: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: '#2B251A',
-    borderWidth: 1,
-    borderColor: '#5A492B',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  questGlyph: { fontSize: 25, color: Palette.goldBright },
-  missionCopy: { gap: Spacing.two },
-  missionTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two },
-  rewardRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: Spacing.two,
-  },
-  typeBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: Radius.small,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Palette.line,
     backgroundColor: Palette.surfaceSoft,
   },
+  statusItem: { minWidth: 58, gap: 2 },
+  statusDivider: { width: StyleSheet.hairlineWidth, height: 28, backgroundColor: Palette.line },
+  statusProgress: { flex: 1 },
+  sectionTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  missionCard: { paddingTop: Spacing.three },
+  missionCopy: { gap: Spacing.two },
+  missionTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two },
   completedCard: { alignItems: 'center', paddingVertical: Spacing.five },
   victoryIcon: {
     width: 82,
     height: 82,
     borderRadius: 41,
-    backgroundColor: '#1B3027',
-    borderWidth: 1,
-    borderColor: '#36634E',
+    backgroundColor: 'rgba(52, 199, 89, 0.1)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(36, 138, 61, 0.22)',
     alignItems: 'center',
     justifyContent: 'center',
   },
