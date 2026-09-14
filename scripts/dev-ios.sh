@@ -106,18 +106,18 @@ restart_project_listener "${ai_port}" 'Actum AI server'
 restart_project_listener "${metro_port}" 'Expo dev server'
 
 if ((rebuild)); then
-  app_task='corepack pnpm ios'
+  app_task='pnpm ios'
   app_description='native rebuild + iOS Simulator'
 else
   # Metro must stay alive even when a cold Simulator times out while opening the deep link.
-  app_task='corepack pnpm exec expo start --dev-client'
+  app_task='pnpm exec expo start --dev-client'
   app_description='Expo dev server + iOS Simulator'
 fi
 
 if ((dry_run)); then
   printf 'Project: %s\n' "${project_dir}"
   printf 'Node: nvm use %s\n' "$(tr -d '[:space:]' < "${project_dir}/.nvmrc")"
-  printf 'Terminal 1: corepack pnpm ai:server\n'
+  printf 'Terminal 1: pnpm ai:server\n'
   printf 'Terminal 2: %s\n' "${app_task}"
   exit 0
 fi
@@ -129,7 +129,7 @@ on run argv
   set appTask to item 3 of argv
 
   set commonCommand to "cd " & quoted form of projectDir & " && export NVM_DIR=" & quoted form of nvmRoot & " && . " & quoted form of (nvmRoot & "/nvm.sh") & " && nvm use && "
-  set aiCommand to commonCommand & "printf '\\033]0;Actum - AI server\\007' && clear && corepack pnpm ai:server"
+  set aiCommand to commonCommand & "printf '\\033]0;Actum - AI server\\007' && clear && pnpm ai:server"
   set appCommand to commonCommand & "printf '\\033]0;Actum - iOS app\\007' && clear && " & appTask
 
   tell application "Terminal"

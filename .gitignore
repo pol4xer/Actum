@@ -1,43 +1,69 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
-
-# dependencies
+# Dependencies
 node_modules/
 .pnpm-store/
 
-# Expo
+# Expo and generated output
 .expo/
 dist/
 web-build/
 expo-env.d.ts
+/build/
 
-# Native
+# Generated native projects and local build files
+/ios/
+/android/
 .kotlin/
+.gradle/
+DerivedData/
+*.ipa
+*.apk
+*.aab
+*.xcarchive/
 *.orig.*
+
+# Signing keys and per-developer service credentials
+credentials.json
 *.jks
+*.keystore
 *.p8
 *.p12
 *.key
+*.pem
 *.mobileprovision
+GoogleService-Info.plist
+google-services.json
 
-# Metro
+# Local environment and AI requests, plans, cache, and job state
+.env
+.env.*
+!.env.example
+.envrc
+.actum/
+/eas.local.json
+
+# Metro, caches, logs, and test output
 .metro-health-check*
-
-# debug
+.cache/
+coverage/
+.nyc_output/
+*.log
+logs/
 npm-debug.*
 yarn-debug.*
 yarn-error.*
-
-# macOS
-.DS_Store
-*.pem
-
-# local env files
-.env*.local
-.actum/
-
-# typescript
+pnpm-debug.*
 *.tsbuildinfo
 
-# generated native folders
-/ios
-/android
+# Local editor state (keep shared VS Code defaults and recommendations)
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+._*
+Thumbs.db

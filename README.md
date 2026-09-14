@@ -1,294 +1,115 @@
 # Actum
 
-Actum — iPhone-first MVP life-RPG приложения. Пользователь пишет цель обычными словами, GPT превращает её в подневный маршрут, а каждое действие выполняется и фиксируется внутри приложения.
+[![CI](https://github.com/pol4xer/Actum/actions/workflows/ci.yml/badge.svg)](https://github.com/pol4xer/Actum/actions/workflows/ci.yml)
 
-Это намеренно простой MVP: Expo-приложение, локальное хранение и маленький Node-прокси к OpenAI. Supabase, аккаунты, сложный research pipeline и production-инфраструктура пока не нужны.
+**Turn a personal goal into a daily quest.**
 
-## Что уже работает
+Actum is an iPhone-first life RPG that connects AI-assisted planning with the work of following a plan. Set a measurable goal, record your starting point, and choose a daily time budget. Actum researches the goal, builds a 30-day program, and guides each session with built-in timers, counters, checklists, and a progress journal.
 
-- онбординг, герой, архетип и режим строгости;
-- свободная формулировка одной главной цели;
-- запрос цели в OpenAI Responses API с видимым request ID и usage-метаданными;
-- фиксированный предел продолжения: остановиться после месяца, продолжать до полугода или до года — без искусственного растягивания цели;
-- настоящий web-research с цитируемыми источниками при создании новой цели;
-- полная дорожная карта на 1, 6 или 12 месячных циклов и подробный календарь ближайших 30 дней;
-- адаптация следующего цикла по фактическому контрольному результату без повторного web-research;
-- GPT-план из трёх фаз: исходная и конечная метрика, самый ранний обоснованный месяц достижения, ежедневная целевая практика, подходы, точный объём, паузы между подходами и проверяемый критерий;
-- компактный экран «План готов» и отдельный просмотр полного календаря по дням;
-- закрытый runner из встроенных таймеров, счётчиков, чек-листов и текстовых полей — без внешних записей и инструментов;
-- подготовительный отсчёт `3 → 2 → 1` перед каждым таймерным подходом;
-- после плановой отметки рабочий таймер продолжает считать вверх до ручного завершения, поэтому личный рекорд и досрочное достижение цели не обрезаются;
-- автоматическое сохранение фактического времени, количества, ответов, критериев, комментариев и недочётов;
-- check-in: «выполнено», «частично», «не выполнено» с привязкой к конкретной сохранённой сессии;
-- XP, уровень, энергия, серия, свет мира и buffs/debuffs;
-- отдельный прогресс текущего месяца и измеримый прогресс к большой цели;
-- сворачиваемые дорожная карта и план по дням, журнал сессий и сравнение «сейчас vs по плану»;
-- светлый iOS-интерфейс с системным синим акцентом, прозрачными поверхностями и пояснениями за кнопкой `?`;
-- AsyncStorage на iOS/Android, `localStorage` в web;
-- локальные уведомления и haptics;
-- development build для iOS через Expo/Xcode.
+**Status: local MVP.** This repository contains the app and its local AI gateway. There is no hosted service or store release. The current interface is primarily in Russian; the web version provides a way to explore the UI.
 
-## Требования
+![Actum onboarding in the web preview](docs/images/actum-web-onboarding.png)
 
-- macOS;
-- Node.js 22.13+; проект закреплён на Node 22.22.3;
-- pnpm 11;
-- Xcode 26.4+ для Expo SDK 57 и iOS Simulator;
-- собственный OpenAI API key для GPT-планов.
+*Actual onboarding screen from the web export. Native iOS presentation differs.*
 
-Проверь версии:
-
-```bash
-nvm use
-node --version
-pnpm --version
-xcodebuild -version
-```
-
-## Первый запуск
-
-Открой проект в VS Code:
-
-```bash
-cd ~/Actum
-code .
-```
-
-Все команды `pnpm` ниже запускай только из этой папки. Перед запуском можно проверить `pwd`: он должен вернуть `/Users/pol4xer/Actum`. Если в выводе появляются `opencv`, `webdriverio` или предложение `pnpm approve-builds`, останови команду — это зависимости другого проекта из домашней папки, к Actum они не относятся.
-
-Установи зависимости:
-
-```bash
-nvm use
-corepack enable pnpm
-pnpm install
-```
-
-Создай локальный env-файл, который Git не коммитит:
-
-```bash
-cp .env.example .env.local
-```
-
-Открой `.env.local` в VS Code и вставь свой ключ:
-
-```dotenv
-OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-5.6
-EXPO_PUBLIC_ACTUM_AI_URL=http://127.0.0.1:8787
-EXPO_PUBLIC_ACTUM_MODE=development
-```
-
-Ключ создаётся в [OpenAI API dashboard](https://platform.openai.com/api-keys). Не вставляй его в `EXPO_PUBLIC_*`: тогда он попадёт в мобильный bundle.
-
-## Запуск MVP
-
-Обычный запуск теперь делается одной командой:
-
-```bash
-cd ~/Actum
-./scripts/dev-ios.sh
-```
-
-Скрипт сам применит Node из `.nvmrc`, откроет два окна macOS Terminal, запустит AI-сервер, Metro и iOS Simulator. Перед запуском он корректно перезапустит старые процессы Actum на портах `8787` и `8081`; процесс из другой папки скрипт не завершит.
-
-Если development build ещё не установлен в Simulator или после добавления нативной зависимости нужна пересборка:
-
-```bash
-./scripts/dev-ios.sh --rebuild
-```
-
-Проверить конфигурацию без открытия Terminal и Simulator:
-
-```bash
-./scripts/dev-ios.sh --dry-run
-```
-
-То же самое можно запустить как `pnpm dev:ios`, если текущий терминал уже использует Node 22. Основной вариант `./scripts/dev-ios.sh` сам загружает nvm и не зависит от Node, выбранного в исходном терминале.
-
-Ручной запуск остаётся запасным вариантом.
-
-Терминал 1 — локальный AI-сервер:
-
-```bash
-nvm use
-pnpm ai:server
-```
-
-Успешный старт выглядит так:
+## The product loop
 
 ```text
-Actum AI server: http://127.0.0.1:8787 · gpt-5.6 · OpenAI key loaded
-[actum-ai] prompt=actum-plan-2026-09-04-direct-practice-v4 research_prompt=actum-research-2026-09-04-fastest-program-v5 contract=plan-v7 validator=plan-validator-v9 baseline_parser=numeric-metric-v2 transport=background-polling durable_state=ready
+Goal + baseline + time budget
+             ↓
+Research with sources → validated 30-day plan → review and accept
+                                                   ↓
+                                   Daily quest → result → check-in
+                                                   ↓
+                                 Progress, XP, and session history
+                                                   ↓
+                         Assessment → explicitly request the next cycle
 ```
 
-Терминал 2 — приложение:
+- **Plan a program:** choose a continuation limit of 1, 6, or 12 months, with a roadmap and detailed assignments for the current 30-day cycle.
+- **Do the work inside the app:** follow measurable timer and counter exercises, with supporting checklists and text responses. Timers retain actual work beyond the planned duration.
+- **Keep the evidence:** save session checkpoints, measured results, comments, and completion status locally. Resume an interrupted session without losing its progress.
+- **See both kinds of progress:** track the current cycle and the overall goal alongside XP, levels, energy, streaks, and a comparison with the accepted plan.
+- **Adapt deliberately:** use the cycle assessment to request the next month. Research is reused across the program; another paid planning request requires an explicit action.
+
+## Engineering decisions
+
+| Area | Implementation |
+| --- | --- |
+| Client | Expo SDK 57, React Native 0.86, React 19.2, TypeScript, Expo Router |
+| Boundaries | Thin routes, feature modules with public APIs, a platform-independent domain layer, and automated dependency checks |
+| Session execution | A deterministic state machine with an injected clock, persisted checkpoints, and timer recovery |
+| Local state | Reducer and application commands, versioned codecs and migrations, serialized writes; AsyncStorage on native and localStorage on web |
+| AI integration | A Node.js gateway using the OpenAI Responses API; separate research and structured planning stages |
+| Validation | Server JSON Schema, independent semantic validation, client Zod contracts, and contract parity tests |
+| Request recovery | Durable state written before paid requests, saved response IDs, resumable polling, and versioned caches |
+| Native experience | Local reminders, haptics, and an iOS-focused visual system with platform adapters |
+
+The validator checks more than JSON shape: day numbering, measurable assignments, baseline arithmetic, daily time limits, and consistency between the roadmap and assessment. An uncertain provider request is guarded against an automatic duplicate charge.
+
+```text
+src/app → src/features → src/state → src/domain
+               ↓            ↓
+         shared UI      platform adapters
+
+scripts/ai-server.mjs → research / contracts / provider / durable state
+```
+
+See the [architecture](docs/ARCHITECTURE.md) and [product scope](docs/PRODUCT_SCOPE.md) for detailed design notes in Russian.
+
+## Run locally
+
+Use **Node.js 22.22.3** (`.nvmrc`) and **pnpm 11.9.0** (`packageManager` in `package.json`). Node 22.13 is the declared minimum. The web UI does not require Xcode or an API key to open.
 
 ```bash
+git clone https://github.com/pol4xer/Actum.git
+cd Actum
+nvm install
 nvm use
-pnpm ios
-```
-
-После первой нативной сборки обычно достаточно:
-
-```bash
-pnpm start
-```
-
-и клавиши `i` в терминале Expo.
-
-Для быстрой проверки интерфейса в браузере:
-
-```bash
+npm install --global pnpm@11.9.0
+pnpm install --frozen-lockfile
+cp .env.example .env.local
 pnpm web
 ```
 
-Если AI-сервер или ключ недоступны, экран покажет понятную ошибку и request ID. Расплывчатый локальный шаблон больше не подменяет исследованный GPT-план.
+If you use another Node version manager, select the version in `.nvmrc`. If pnpm is already available at the pinned version, skip its installation.
 
-Haptics автоматически отключены в Simulator и остаются включены на физическом iPhone, поэтому симулятор больше не должен заполнять терминал ошибками `hapticpatternlibrary.plist`.
-
-Подготовка, работа и отдых считаются по абсолютному времени: если приложение ненадолго свернуть, после возврата оно покажет правильный этап и остаток. Подготовительные три секунды не попадают в рабочий результат. Runner сохраняет checkpoint после каждого подхода, изменения счётчика, пункта чек-листа, ответа и комментария. Запись сериализована и объединяет быстрые изменения; статус «журнал сохранён / сохраняю / ошибка» виден в приложении. При ошибке Actum останавливает интерфейс и предлагает повторить локальную запись, поэтому потеря данных не маскируется.
-
-При каждом реальном запросе сервер печатает этапы `received → researching → planning → completed`, локальный request ID, OpenAI response ID, фоновые статусы `queued/in_progress/completed`, количество web-поисков, токены и время. Сетевой сбой теперь содержит `stage`, `operation`, HTTP/status code и безопасную цепочку причины — например `UND_ERR_HEADERS_TIMEOUT`; ключ, Authorization header и текст цели в лог не попадают. Usage нужно смотреть в том OpenAI API Project, которому принадлежит `sk-proj-...` ключ; это не история и не подписка ChatGPT.
-
-Защита от повторных списаний работает на нескольких уровнях:
-
-- уже идущий одинаковый запрос получает `inflight_join` и не запускает вторую генерацию;
-- завершённый program-level web-research сохраняется на 400 дней, поэтому ошибки planning, повторы и следующие месячные циклы используют тот же бриф без нового поиска (`research_cache_hit`); если совместимый кэш исчез, следующий цикл останавливается до любого нового POST;
-- созданный background response сохраняется по его OpenAI ID: после сбоя polling повтор продолжает GET того же задания (`resume_pending`), а не делает новый платный POST;
-- завершённый ответ платного этапа хранится 7 дней: если локальная проверка не прошла, кнопка «Проверить сохранённый ответ · без GPT» отправляет защищённый reuse-only запрос, проверяет тот же response (`stage_result_cache_hit`) и физически не может создать новый платный POST;
-- готовый план сохраняется на 30 минут и возвращается как `cache_hit` без обращения к OpenAI.
-
-Состояние защиты атомарно хранится в локальном `.actum/ai-state.json` (файл исключён из Git), поэтому `response_id`, кэши и блокировка неоднозначного POST переживают обычный перезапуск сервера и launcher. Завершённые ответы старого двухчасового формата автоматически восстанавливаются в пределах нового семидневного окна. Перед каждым новым платным POST guard записывается на диск; после получения ID он заменяется resumable-заданием. Неистёкшие записи не вытесняются при большом числе целей. Если state-файл повреждён или недоступен для записи, сервер работает fail-closed и блокирует новые платные запросы с кодом `durable_state_unavailable`. Если соединение оборвалось до получения response ID, одинаковый запрос блокируется на 2 часа (`ambiguous_create`): Actum не пытается угадать, принял ли OpenAI платное задание, и не рискует вторым списанием. Безопасно повторяются только GET-проверки уже созданного background response. Одновременно сервер допускает не больше двух разных генераций.
-Кэш исследования привязан к стабильному обезличенному `researchAnchor`: разные цели, исходные точки и дневные лимиты не смешиваются, а смена только retry cap не повторяет research. Следующий цикл той же программы повторно использует один бриф. Версии research-промпта, parser и модели остаются частью ключа, поэтому anchor не обходит инвалидацию при обновлении.
-
-Research возвращает отдельный строгий вывод о самом раннем обоснованном цикле. Если он выходит за выбранный предел или исследование не подтверждает достижимость в пределах 12 циклов, сервер останавливается до planning-запроса. Research остаётся сохранённым; при изменении только предела продолжения он переиспользуется без нового web-поиска.
-
-Если приложение перезапустилось до принятия плана и React-форма очистилась, экран новой цели читает локальный `GET /saved-plan/latest`, повторно проверяет последний completed plan-v7 response и открывает его ревью автоматически. Этот маршрут read-only: он не вызывает OpenAI и восстанавливает исходный input snapshot. Старые provider-ответы plan-v5/v6 остаются на диске, но не маскируются под новый контракт.
-
-Сохранённые локальные plan-v1–plan-v6 не удаляются и продолжают открываться через совместимый runner; в календаре они помечены компактным бейджем «Старый план». Для старой годовой цели Actum отделит первый 30-дневный цикл от всей программы и больше не отметит цель завершённой только из-за окончания этого цикла. Старые упражнения не переписываются задним числом: чтобы получить ежедневный primary-блок, ранний целевой цикл и остальные гарантии plan-v7, нужна новая явная генерация.
-
-Для повторного теста уже оплаченного и сохранённого маршрута используй «Настройки» → «Начать текущий месяц заново». Эта операция не удаляет большую цель, roadmap или research и не обращается к OpenAI: она очищает только результат активного цикла, его сессии, check-in и комментарии, сохраняет профиль/уровень/XP и переносит День 1 на текущую дату.
-
-### Быстрый пропуск дней при тестировании
-
-В локальной development-сборке можно последовательно пропускать дни через «Настройки» → «Тестирование» → «Пропустить день». Для этого в `.env.local` должно быть точное значение:
-
-```dotenv
-EXPO_PUBLIC_ACTUM_MODE=development
-```
-
-После изменения переменной полностью останови Metro и снова запусти `./scripts/dev-ios.sh`: Expo встраивает `EXPO_PUBLIC_*` в JavaScript bundle, поэтому одного перехода между экранами недостаточно. Чтобы получить обычное приложение без тестовой секции, поставь `EXPO_PUBLIC_ACTUM_MODE=production` (или удали строку) и также перезапусти Metro.
-
-Режим fail-closed: кнопка появляется только при сочетании точного значения `development` и системного `__DEV__`. Поэтому preview/production bundle не покажет её даже при ошибочной конфигурации. Тестовый пропуск открывает следующий день, но не начисляет XP, не меняет остальные RPG-метрики и не подделывает контрольный результат. «Начать текущий месяц заново» сбрасывает такие пропуски, сохраняя уже оплаченный план.
-
-### Физический iPhone
-
-Для Simulator подходит `127.0.0.1`. Для физического iPhone телефон и Mac должны быть в одной доверенной Wi-Fi сети. В `.env.local` укажи LAN IP Mac и разреши серверу слушать локальную сеть:
-
-```dotenv
-EXPO_PUBLIC_ACTUM_AI_URL=http://192.168.x.x:8787
-ACTUM_AI_HOST=0.0.0.0
-```
-
-Это только dev-режим. Не открывай порт 8787 в интернет.
-
-## Как проходит запрос
-
-```text
-цель + измеренная исходная точка + предел повторных циклов (1 / 6 / 12 месяцев) + время в день
-→ локальный scripts/ai-server.mjs
-→ OpenAI Responses API + web_search
-→ строгий research JSON: бриф + earliestTargetCycleNumber + обоснование + URL-цитаты
-→ проверка, что целевой цикл помещается в выбранный предел
-→ отдельный structured-output запрос планировщика
-→ строгий JSON plan-v7: конечная метрика + самый ранний целевой цикл + roadmap + текущий цикл
-→ локальная проверка конечной цели, ежедневного основного упражнения, roadmap, контрольного замера и дневного лимита
-→ три фазы и ровно 30 явных календарных дней текущего цикла
-→ только встроенные блоки Actum: timer / counter / checklist / text_log
-→ пользователь принимает план
-→ план сохраняется локально
-→ runner проводит по блокам и сохраняет фактические результаты
-→ пользователь отмечает критерий, комментарий и итоговый check-in
-→ цель закрывается сразу, если primary-блок уже достиг её; иначе День 30 делает assessment
-→ следующий цикл строится от результата по кнопке пользователя, используя сохранённый research
-```
-
-Промпты лежат в `scripts/ai/prompts/plan-v1.mjs`, JSON-контракт — в `scripts/ai/contracts/plan-v1.mjs`, а независимая локальная проверка результата — в `scripts/ai/contracts/validate-plan.mjs`. Их версии входят в cache key: после изменения промпта старый ответ не будет выдан как новый план.
-
-`plan-v7` не принимает общую фразу вместо тренировки и не хранит срок как свободный текст. Пользователь вводит измеренную исходную точку — например, «обычно 40 секунд; рекорд 1:20» — и выбирает лишь предел продолжения после первой месячной попытки. Structured research отдельно называет самый ранний обоснованный цикл, а validator требует от плана тот же номер; если он не помещается в retry cap, planning-запрос не запускается. Локальный parser до платного планирования отдельно нормализует baseline и числовую конечную цель: `1:20 → 80 seconds`, `10 минут → 600 seconds`. GPT не может заменить эти числа собственными. Если значение неоднозначно, parser не угадывает его.
-
-Модель обязана вернуть roadmap до выбранного предела и ровно 30 самостоятельных объектов `days` текущего цикла с номерами `1…30`; `repeatCount`, «повтори вчера», скрытое клонирование и локальная перенумерация перепутанных дней не используются. Числовая roadmap ведёт к цели в самом раннем обоснованном `targetCycleNumber` и после него не растягивает достижение. Каждый день содержит `execution.kind = in_app`, не больше трёх блоков и `primaryBlockIndex`, указывающий на реальный измеримый `timer` или `counter`, непосредственно двигающий к цели. Checklist и text-log могут быть только вспомогательными и не заменяют практику:
-
-- `timer` — инструкция, подходы, секунды работы и отдыха, встроенный отсчёт и фактическое время;
-- `counter` — инструкция, подходы, цель, единица, плановое время, встроенный счётчик и фактическое количество;
-- `checklist` — полностью сформулированные пункты, которые отмечаются в Actum;
-- `text_log` — конкретный вопрос и проверяемый диапазон длины ответа, сохраняемый в Actum.
-
-Промпт и локальный validator отклоняют дни только отдыха, обычного дыхания, наблюдения, проверки симптомов или записи состояния, а также задания, требующие внешние инструменты или людей. Для breath-hold цели primary-блок обязан явно содержать действие задержки; пассивное «полежи/расслабься до сигнала» также не проходит как работа для планки и других активных целей. У растущей числовой цели каждый день 1–29 получает дозу не ниже максимума из 25% текущего baseline и 10% цели текущего месяца, а день 29 — не ниже 25% месячной цели. Низкоинтенсивный день всё равно содержит конкретную целевую практику; `restSeconds` остаётся паузой между рабочими подходами. Источники research сохраняются в досье внутри «Пути», но их не нужно открывать для выполнения назначений.
-
-Если назначение рассчитано от baseline, GPT обязан вернуть строгий объект `{ percentage, baseValue, baseUnit, result }`, а приложение показывает формулу `45% × 80 seconds = 36 seconds` в контекстной подсказке `?`. Сервер независимо сверяет исходное значение с локальным parser, пересчитывает процент, проверяет единицу и требует, чтобы `result` совпадал с исполняемым `durationSecondsPerSet` или `targetPerSet`. Динамическая JSON-схема заранее фиксирует число дней и допустимые блоки; суммарная работа и отдых не могут превышать ни дневной лимит, ни заявленное `estimatedMinutes`. Несогласованный план отклоняется с точным путём поля, а завершённый OpenAI-этап остаётся в кэше и не вызывается повторно.
-
-День 30 содержит явный assessment-блок timer/counter. Actum сохраняет фактическое значение из `MissionRun` и показывает его рядом с ориентиром месяца. Если успешно выполненный основной timer/counter раньше достиг конечной числовой цели, программа может завершиться сразу; иначе окончание первого цикла само по себе не завершает многомесячную цель. Кнопка «Собрать месяц N» отправляет новый planning-запрос только после подтверждения пользователя; сохранённый program-level web-research переиспользуется, завершённые этапы roadmap не переписываются, а подробные нагрузки следующих 30 дней адаптируются к новому baseline.
-
-Для каждой новой цели `Web research` обязателен: модель сначала выполняет не меньше трёх различающихся поисков и анализирует источники, а затем отдельным запросом строит JSON-план. Исследовательский этап считается успешным только при наличии минимум двух реальных URL citation. Внутренний режим без нового поиска оставлен только для продолжения старых plan-v1–plan-v6, чей прежний research нельзя надёжно связать с новым контрактом; отдельного переключателя в интерфейсе нет. OpenAI-этапы запускаются через background mode и опрашиваются по response ID, поэтому многоминутная работа не держится на одном хрупком HTTP-соединении. Даже terminal/refusal с известным response ID остаётся привязан к этому ID: повтор делает GET того же результата, а не новый POST.
-
-Служебные предупреждения из ответа не становятся обязательными заданиями и не занимают основной экран. Для старых уже оплаченных планов presentation-слой скрывает такие чек-листы без регенерации. Общая ответственность и статус сервиса вынесены в «Настройки» → `Legal & Service`.
-
-## Проверки
+**To generate a plan**, add your own `OPENAI_API_KEY` to `.env.local`, review the model configuration in that file, and start the gateway in a second terminal:
 
 ```bash
-pnpm typecheck
-pnpm test:ai
-pnpm check
+pnpm ai:server
 ```
 
-`pnpm test:ai` использует фальшивый OpenAI, не открывает внешнюю сеть и не тратит API-деньги. Он воспроизводит сбои POST и polling, проверяет guard/response ID/кэши, reuse-only, resume, `inflight_join`, 400-дневное переиспользование research, связанное восстановление источников и блокировку неразрешимого assessment до платного запроса. Также проверяются structured research, строгий plan-v7, содержательная целевая дозировка каждого дня, запрет пустых восстановительных дней, самый ранний целевой цикл, roadmap 1/6/12 циклов, раннее достижение цели, неизменность завершённых этапов, адаптация следующего baseline, миграции, MissionRun, подготовка `3 → 2 → 1`, overtime таймера, DEV-пропуск дней, совместимость старых планов, DTO/server parity и архитектурные границы. `pnpm check` запускает TypeScript, все локальные тесты и production export web-версии.
+The default local gateway address is `http://127.0.0.1:8787`. Research and planning call a paid external API. The key belongs only in the server environment: Expo embeds `EXPO_PUBLIC_*` values into the client bundle, so those variables must never contain secrets. Goal inputs are sent to OpenAI when planning; accepted plans and session history are stored locally.
 
-## Expo Application Services
-
-Проект связан с EAS-проектом `@pol4xer/actum`. Профили находятся в `eas.json`: `development` включает тестовые элементы, а `preview` и `production` явно используют production-режим.
-
-Проверить привязку:
+**For iOS development**, use macOS with Xcode and an installed iOS Simulator. Start the gateway as above, then build the native development app:
 
 ```bash
-npx eas-cli@latest whoami
-npx eas-cli@latest project:info
+pnpm ios
 ```
 
-Облачная development-сборка запускается отдельно:
+Use `pnpm start` for later Metro sessions and rebuild after changing native dependencies. The [development guide](docs/DEVELOPMENT.md) covers the optional macOS launcher, physical devices, runtime configuration, request recovery, and EAS setup. Android has a build command (`pnpm android`), but iOS is the primary development target; a successful web export does not verify native behavior.
+
+## Checks
 
 ```bash
-npx eas-cli@latest build --platform ios --profile development
+pnpm typecheck  # TypeScript
+pnpm test:ai    # Domain, state, contracts, architecture, and gateway tests
+pnpm check     # Both checks above, then a production web export
 ```
 
-Текущий локальный AI-сервер не доступен такой сборке извне. Для TestFlight его позже нужно будет развернуть как маленький backend; для локального MVP это не требуется.
+The automated gateway tests use a fake provider and do not make paid OpenAI requests. They cover request failures and recovery, cache behavior, contract parity, migrations, session execution, and module boundaries. These commands do not replace a native device walkthrough.
 
-## Структура
+## Current limits
 
-```text
-scripts/ai-server.mjs      # process/composition root локального gateway
-scripts/ai/config/         # runtime config и cache identity
-scripts/ai/cache/          # детерминированные ключи платных этапов
-scripts/ai/http/           # HTTP boundary, input и request IDs
-scripts/ai/state/          # durable billing ledger и кэши
-scripts/ai/contracts/      # provider schema, baseline parser и validator
-scripts/ai/prompts/        # независимо редактируемые research/plan prompts
-scripts/ai/providers/      # адаптер Responses API
-src/
-├── app/                   # тонкие Expo Router entrypoints
-├── config/                # fail-closed runtime mode и feature flags
-├── features/              # автономные пользовательские сценарии и публичные index.ts
-│   ├── goal-planning/     # порт, DTO contract, HTTP adapter, mapper, controller и view
-│   ├── mission-session/   # runner и журнал одной сессии
-│   └── home|journey|twin|settings|onboarding|check-in|dev-tools
-├── domain/                # чистые rules, reward policy и mission-run state machine
-├── state/                 # reducer, codec, commands, repository и persistence queue
-├── shared/presentation/   # общие display-справочники и formatters
-├── lib/                   # platform storage, notifications и haptics adapters
-├── components/            # только общий design system и переиспользуемая графика
-├── constants/theme.ts     # палитра, шрифты, интервалы и радиусы для смены visual style
-└── hooks/                 # общие platform/theme hooks
-```
+- One active goal, local storage, and no accounts or cross-device synchronization.
+- AI planning requires the local gateway and a compatible model available to your API account. The gateway is a development service without production authentication or deployment infrastructure.
+- Detailed assignments cover the current 30-day cycle; later cycles are generated explicitly from updated results.
+- The runner currently supports numeric goals achieved by reaching or exceeding a target; recognized decreasing-target goals are rejected before paid planning.
+- HealthKit, widgets, App Intents, and a distributed mobile release are outside the current MVP.
 
-Правила зависимостей и карта владельцев описаны в [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), а дальнейшие границы MVP — в [`docs/PRODUCT_SCOPE.md`](docs/PRODUCT_SCOPE.md). `test/architecture.test.mjs` автоматически запрещает обратные зависимости, deep-import между feature и утолщение route-файлов.
+The next product step is to validate daily use and cycle transitions, then provide a secured hosted backend for distribution. See [product scope](docs/PRODUCT_SCOPE.md) for the existing roadmap.
+
+## License
+
+[MIT](LICENSE). Copyright 2026 pol4xer; the Expo starter's license notice is retained.
