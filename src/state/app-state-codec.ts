@@ -103,6 +103,44 @@ function isCheckIn(value: unknown): boolean {
 
 const LEGACY_DEV_SKIP_NOTE = 'Пропущено в DEV-режиме.';
 
+// Translate only built-in labels from earlier releases, never user-authored content.
+const LEGACY_CHARACTER_LABELS = new Map([
+  ['Первый шаг', 'First step'],
+  ['Ясное намерение', 'Clear intention'],
+  ['Импульс', 'Momentum'],
+  ['Туман сомнений', 'Fog of doubt'],
+]);
+
+function withEnglishBuiltInLabels(state: AppState): { state: AppState; migrated: boolean } {
+  let migrated = false;
+  const translateEffect = (label: string) => {
+    const english = LEGACY_CHARACTER_LABELS.get(label);
+    if (english) migrated = true;
+    return english ?? label;
+  };
+  const buffs = state.character.buffs.map(translateEffect);
+  const debuffs = state.character.debuffs.map(translateEffect);
+  const checkIns = state.checkIns.map((checkIn) => {
+    if (checkIn.provenance !== 'dev-skip') return checkIn;
+    const translateNote = (note: string | undefined) => {
+      if (note !== LEGACY_DEV_SKIP_NOTE) return note;
+      migrated = true;
+      return 'Skipped in development mode.';
+    };
+    return {
+      ...checkIn,
+      comment: translateNote(checkIn.comment) ?? '',
+      note: translateNote(checkIn.note),
+    };
+  });
+  return {
+    state: migrated
+      ? { ...state, character: { ...state.character, buffs, debuffs }, checkIns }
+      : state,
+    migrated,
+  };
+}
+
 function withLegacyDevSkipProvenance(checkIns: CheckIn[]): {
   checkIns: CheckIn[];
   migrated: boolean;
@@ -146,7 +184,7 @@ function withConciseLegacyCycleGoal(state: AppState): {
   const conciseCycleGoal = plan.missions[0]?.title?.trim()
     || legacyChapterTitle
     || goal.title.trim()
-    || `Цикл ${plan.cycleNumber ?? goal.program.activeCycle}`;
+    || `Cycle ${plan.cycleNumber ?? goal.program.activeCycle}`;
   if (conciseCycleGoal === cycleGoal) return { state, migrated: false };
   return {
     state: { ...state, activePlan: { ...plan, cycleGoal: conciseCycleGoal } },
@@ -336,7 +374,7 @@ function migrateLegacyGoalAndPlan(
     || plan.missions[0]?.title?.trim()
     || plan.chapters?.[0]?.title?.trim()
     || goal.title.trim()
-    || 'Первый цикл';
+    || 'First cycle';
   const migratedPlan: PlanVersion = {
     ...plan,
     cycleNumber: 1,
@@ -400,14 +438,14 @@ function migrateLegacyState(
           value.lastUpdatedAt,
         )
       : undefined;
-  return {
+  return withEnglishBuiltInLabels({
     ...value,
     schemaVersion: APP_STATE_SCHEMA_VERSION,
     activeGoal: pair?.goal ?? value.activeGoal,
     activePlan: pair?.plan ?? value.activePlan,
     checkIns: normalizedCheckIns.checkIns,
     missionRuns,
-  };
+  }).state;
 }
 
 /**
@@ -477,10 +515,11 @@ export function restoreAppState(raw: string | null): RestoreAppStateResult {
     ? { ...state, checkIns: normalizedCheckIns.checkIns }
     : state;
   const conciseCycleGoal = withConciseLegacyCycleGoal(normalizedState);
+  const englishLabels = withEnglishBuiltInLabels(conciseCycleGoal.state);
   return {
     status: 'ready',
     source: 'stored',
-    state: conciseCycleGoal.state,
-    migrated: normalizedCheckIns.migrated || conciseCycleGoal.migrated,
+    state: englishLabels.state,
+    migrated: normalizedCheckIns.migrated || conciseCycleGoal.migrated || englishLabels.migrated,
   };
 }

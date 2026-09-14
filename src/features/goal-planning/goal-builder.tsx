@@ -104,31 +104,31 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <Screen>
         <ScreenHeader
-          eyebrow={`Новая цель · ${stage === 'intent' ? '1' : stage === 'details' ? '2' : '3'} из 3`}
+          eyebrow={`New goal · ${stage === 'intent' ? '1' : stage === 'details' ? '2' : '3'} of 3`}
           title={
             stage === 'intent'
-              ? 'Что хочешь изменить?'
+              ? 'What would you like to change?'
               : stage === 'details'
-                ? 'Настроим план'
+                ? 'Set up your plan'
                 : stage === 'generating'
-                  ? 'Собираю план'
+                  ? 'Creating your plan'
                   : stage === 'error'
-                    ? 'План пока не пришёл'
+                    ? 'Still waiting for your plan'
                     : showPlanDetails
-                      ? 'План по дням'
-                      : 'План готов'
+                      ? 'Your daily plan'
+                      : 'Your plan is ready'
           }
-          action={stage === 'review' ? undefined : <InfoPopover title="Об этом шаге" sections={screenContext} />}
+          action={stage === 'review' ? undefined : <InfoPopover title="About this step" sections={screenContext} />}
         />
 
         {stage === 'intent' ? (
           <>
             <TextInput
-              accessibilityLabel="Формулировка цели"
+              accessibilityLabel="Your goal"
               autoFocus
               multiline
               onChangeText={setPrompt}
-              placeholder="Например: хочу дочитать книгу, научиться готовить пять блюд или разобрать документы"
+              placeholder="For example: finish a book, learn to cook five meals, or organize my documents"
               placeholderTextColor={Palette.textDim}
               style={styles.promptInput}
               textAlignVertical="top"
@@ -136,10 +136,10 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
             />
             <View style={styles.exampleBlock}>
               <ThemedText type="eyebrow" style={styles.muted}>
-                Примеры
+                Examples
               </ThemedText>
               <View style={styles.exampleWrap}>
-                {['Дочитать книгу', 'Выучить основы испанского', 'Разобрать документы'].map(
+                {['Finish a book', 'Learn basic Spanish', 'Organize documents'].map(
                   (example) => (
                     <Pressable
                       key={example}
@@ -154,21 +154,21 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
             {savedPreview ? (
               <Card accent>
                 <View style={styles.cardTop}>
-                  <ThemedText type="smallBold">План уже сохранён</ThemedText>
+                  <ThemedText type="smallBold">Your plan is saved</ThemedText>
                   <InfoPopover
-                    title="Почему это бесплатно?"
+                    title="Why is this free?"
                     sections={[
                       {
-                        body: `${savedPreview.goal.title} · ${savedPreview.plan.targetCycleNumber ? `лимит ${retryLimitLabel(savedPreview.goal.program.duration)}` : `срок старого плана ${goalDurationLabel(savedPreview.goal.program.duration)}`}. План уже сохранён на устройстве и откроется без повторного web-поиска или GPT-запроса.`,
+                        body: `${savedPreview.goal.title} · ${savedPreview.plan.targetCycleNumber ? `limit ${retryLimitLabel(savedPreview.goal.program.duration)}` : `legacy plan duration ${goalDurationLabel(savedPreview.goal.program.duration)}`}. This plan is saved on your device and opens without another web search or GPT request.`,
                       },
                     ]}
                   />
                 </View>
-                <AppButton label="Открыть план" onPress={openSavedPlan} />
+                <AppButton label="Open plan" onPress={openSavedPlan} />
               </Card>
             ) : null}
             <AppButton
-              label="Продолжить"
+              label="Continue"
               disabled={prompt.trim().length < 5}
               onPress={continueFromIntent}
             />
@@ -178,18 +178,18 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
         {stage === 'details' ? (
           <>
             <Question
-              title="С чего начинаешь? · обязательно"
+              title="Where are you starting? · required"
               help={[
                 {
-                  body: 'Укажи число и единицу, если они известны. GPT сохранит исходную формулировку и отдельно нормализует метрику.',
+                  body: 'Include a number and unit if you know them. GPT will keep your original description and identify a measurable baseline.',
                 },
               ]}>
               <TextInput
-                accessibilityLabel="Текущая измеренная точка"
+                accessibilityLabel="Current measured baseline"
                 maxLength={500}
                 multiline
                 onChangeText={setBaseline}
-                placeholder="Например: сейчас читаю 8 страниц за 20 минут или удерживаю планку 45 секунд"
+                placeholder="For example: I read 8 pages in 20 minutes, or hold a plank for 45 seconds"
                 placeholderTextColor={Palette.textDim}
                 style={[styles.detailInput, styles.baselineInput]}
                 textAlignVertical="top"
@@ -216,12 +216,12 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
               </View>
             </Question>
 
-            <Question title="Сколько минут в день?">
+            <Question title="How many minutes a day?">
               <ChoiceRow>
                 {MINUTES.map((value) => (
                   <Choice
                     key={value}
-                    label={`${value} мин`}
+                    label={`${value} min`}
                     selected={dailyMinutes === value}
                     onPress={() => setDailyMinutes(value)}
                   />
@@ -229,20 +229,20 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
               </ChoiceRow>
             </Question>
 
-            <Question title="Твой опыт">
+            <Question title="Your experience">
               <View style={styles.levelList}>
                 <LevelChoice
-                  label="Начинаю с нуля"
+                  label="Starting from scratch"
                   selected={currentLevel === 'starting'}
                   onPress={() => setCurrentLevel('starting')}
                 />
                 <LevelChoice
-                  label="Есть небольшой опыт"
+                  label="Some experience"
                   selected={currentLevel === 'some-experience'}
                   onPress={() => setCurrentLevel('some-experience')}
                 />
                 <LevelChoice
-                  label="Возвращаюсь после паузы"
+                  label="Returning after a break"
                   selected={currentLevel === 'returning'}
                   onPress={() => setCurrentLevel('returning')}
                 />
@@ -250,9 +250,9 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
             </Question>
 
             <View style={styles.buttonRow}>
-              <AppButton label="Назад" variant="ghost" onPress={backToIntent} />
+              <AppButton label="Back" variant="ghost" onPress={backToIntent} />
               <AppButton
-                label="Собрать план"
+                label="Create plan"
                 disabled={!detailsComplete}
                 onPress={generateGoal}
                 style={styles.flex}
@@ -265,7 +265,7 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
           <Card accent style={styles.generatingCard}>
             <ActivityIndicator color={Palette.goldBright} size="large" />
             <ThemedText type="subtitle" style={styles.center}>
-              Собираю реальные шаги…
+              Creating practical steps…
             </ThemedText>
           </Card>
         ) : null}
@@ -274,7 +274,7 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
           <Card style={styles.errorCard}>
             <View style={styles.cardTop}>
               <Pill tone="warning">{generationErrorBadge(generationErrorCode)}</Pill>
-              <InfoPopover title="Что произошло?" sections={screenContext} />
+              <InfoPopover title="What happened?" sections={screenContext} />
             </View>
             <ThemedText type="subtitle">{generationErrorTitle(generationErrorCode)}</ThemedText>
             {shouldOfferPlannerRetry(generationErrorCode) ? (
@@ -282,12 +282,12 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
                 label={
                   generationErrorCode === 'INVALID_RESPONSE'
                     ? SAVED_RESPONSE_RETRY_LABEL
-                    : 'Повторить запрос к GPT'
+                    : 'Retry GPT request'
                 }
                 onPress={retryGeneration}
               />
             ) : null}
-            <AppButton label="Изменить параметры" variant="ghost" onPress={editDetails} />
+            <AppButton label="Edit settings" variant="ghost" onPress={editDetails} />
           </Card>
         ) : null}
 
@@ -298,7 +298,7 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
                 <ThemedText type="smallBold" style={styles.flex}>
                   {preview.goal.title}
                 </ThemedText>
-                <InfoPopover title="О плане" sections={planInfoWithoutSafety(preview)} />
+                <InfoPopover title="About this plan" sections={planInfoWithoutSafety(preview)} />
               </View>
 
               <ProgramRoadmap
@@ -325,14 +325,14 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
 
               <View style={styles.buttonRow}>
                 <AppButton
-                  label="Назад"
+                  label="Back"
                   variant="ghost"
                   onPress={() => {
                     setShowPlanDetails(false);
                     setExpandedPreviewMissionId(undefined);
                   }}
                 />
-                <AppButton label="Начать" onPress={acceptPlan} style={styles.flex} />
+                <AppButton label="Start" onPress={acceptPlan} style={styles.flex} />
               </View>
             </>
           ) : (
@@ -342,29 +342,29 @@ export function GoalBuilder({ planner }: { planner?: GoalPlanner } = {}) {
                   <ThemedText type="subtitle" numberOfLines={2} style={styles.flex}>
                     {preview.goal.title}
                   </ThemedText>
-                  <InfoPopover title="О плане" sections={planInfoWithoutSafety(preview)} />
+                  <InfoPopover title="About this plan" sections={planInfoWithoutSafety(preview)} />
                 </View>
                 <View style={styles.planMeta}>
                   <Meta
                     value={estimatedTargetCycleLabel(preview.plan.targetCycleNumber) ?? '—'}
-                    label="ориентир"
+                    label="target"
                   />
                   <Meta
                     value={retryLimitLabel(preview.goal.program.duration)}
-                    label="лимит"
+                    label="limit"
                   />
-                  <Meta value={`${preview.plan.dailyMinutes} мин`} label="в день" />
+                  <Meta value={`${preview.plan.dailyMinutes} min`} label="per day" />
                 </View>
               </Card>
 
               <View style={styles.reviewActions}>
-                <AppButton label="Начать" onPress={acceptPlan} />
+                <AppButton label="Start" onPress={acceptPlan} />
                 <AppButton
-                  label="Посмотреть план"
+                  label="View plan"
                   variant="secondary"
                   onPress={() => setShowPlanDetails(true)}
                 />
-                <AppButton label="Изменить" variant="ghost" onPress={editDetails} />
+                <AppButton label="Edit" variant="ghost" onPress={editDetails} />
               </View>
             </>
           )
@@ -391,7 +391,7 @@ function PlanDayPreview({
       <View style={styles.dayHeaderRow}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${expanded ? 'Свернуть' : 'Раскрыть'} день ${mission.dayNumber ?? index + 1}: ${mission.title}`}
+          accessibilityLabel={`${expanded ? 'Collapse' : 'Expand'} day ${mission.dayNumber ?? index + 1}: ${mission.title}`}
           accessibilityState={{ expanded }}
           onPress={onToggle}
           style={({ pressed }) => [styles.dayHeaderButton, pressed && styles.pressed]}>
@@ -406,15 +406,15 @@ function PlanDayPreview({
             </ThemedText>
             <ThemedText type="smallBold">{mission.title}</ThemedText>
             <ThemedText type="small" style={styles.muted}>
-              {formatMissionDuration(mission, { inAppRecordLabel: 'отметок' })}
+              {formatMissionDuration(mission, { inAppRecordLabel: 'check-ins' })}
             </ThemedText>
           </View>
           <ThemedText style={styles.dayChevron}>{expanded ? '⌃' : '⌄'}</ThemedText>
         </Pressable>
         {expanded ? (
           <InfoPopover
-            title={`О дне ${mission.dayNumber ?? index + 1}`}
-            accessibilityLabel={`Показать пояснения к дню ${mission.dayNumber ?? index + 1}`}
+            title={`About day ${mission.dayNumber ?? index + 1}`}
+            accessibilityLabel={`Show details for day ${mission.dayNumber ?? index + 1}`}
             sections={missionPreviewContextSections(mission)}
           />
         ) : null}
@@ -470,7 +470,7 @@ function Criterion({ text, day = false }: { text?: string; day?: boolean }) {
   return (
     <View style={day ? styles.dayCriterion : styles.criterion}>
       <ThemedText type="eyebrow" style={styles.muted}>
-        {day ? 'День выполнен' : 'Готово, если'}
+        {day ? 'Day complete' : 'Done when'}
       </ThemedText>
       <ThemedText type="small">{text}</ThemedText>
     </View>
@@ -481,7 +481,7 @@ function planInfoWithoutSafety(preview: GeneratedGoal): ContextInfoSection[] {
   return planContextSections(preview.plan, {
     baseline: preview.goal.baseline,
     targetTimeline: preview.goal.targetTimeline,
-  }).filter((section) => section.heading !== 'Безопасность' && section.tone !== 'warning');
+  }).filter((section) => section.heading !== 'Safety' && section.tone !== 'warning');
 }
 
 function Question({
@@ -501,8 +501,8 @@ function Question({
         </ThemedText>
         {help ? (
           <InfoPopover
-            title={title.replace(' · обязательно', '')}
-            accessibilityLabel={`Показать пояснение: ${title}`}
+            title={title.replace(' · required', '')}
+            accessibilityLabel={`Show explanation: ${title}`}
             sections={help}
           />
         ) : null}
@@ -593,29 +593,29 @@ function goalBuilderContextSections({
 }): ContextInfoSection[] {
   const sections: ContextInfoSection[] = [];
   if (stage === 'intent') {
-    sections.push({ body: 'Опиши одну главную цель обычными словами.' });
+    sections.push({ body: 'Describe one main goal in your own words.' });
   } else if (stage === 'details') {
-    sections.push({ body: 'Ограничения нужны, чтобы получить конкретный подневный план.' });
+    sections.push({ body: 'These details help create a specific plan for each day.' });
   } else if (stage === 'generating') {
     sections.push({
       body:
         researchMode === 'web'
-          ? 'Сначала идёт web-поиск, затем отдельная сборка плана. Это может занять несколько минут.'
-          : 'Выполняется один GPT-запрос без web-поиска.',
+          ? 'Web research comes first, followed by plan creation. This may take a few minutes.'
+          : 'One GPT request is running without web research.',
     });
   } else if (stage === 'error' && generationError) {
-    sections.push({ heading: 'Техническая деталь', body: generationError, tone: 'warning' });
+    sections.push({ heading: 'Technical details', body: generationError, tone: 'warning' });
     const retryContext = errorRetryContext(generationErrorCode);
     if (retryContext) sections.push(retryContext);
   } else if (stage === 'review') {
-    sections.push({ body: 'Проверь календарь действий и прими его, если нагрузка подходит.' });
+    sections.push({ body: 'Review the daily activities and start when the workload feels right.' });
   }
   return sections;
 }
 
 function missionPreviewContextSections(mission: Mission): ContextInfoSection[] {
   const sections = missionContextSections(mission).filter(
-    (section) => section.heading !== 'Предупреждение' && section.heading !== 'Критерий дня',
+    (section) => section.heading !== 'Warning' && section.heading !== 'Daily completion criterion',
   );
   if (mission.execution?.kind !== 'in_app') return sections;
 
@@ -624,7 +624,7 @@ function missionPreviewContextSections(mission: Mission): ContextInfoSection[] {
     ...actionableExecutionBlocks(mission.execution.blocks).flatMap((block) =>
       executionBlockContextSections(block).map((section) => ({
         ...section,
-        heading: `${block.title} · ${section.heading ?? 'расчёт'}`,
+        heading: `${block.title} · ${section.heading ?? 'calculation'}`,
       })),
     ),
   ];
@@ -633,25 +633,25 @@ function missionPreviewContextSections(mission: Mission): ContextInfoSection[] {
 function errorRetryContext(code?: AIPlannerErrorCode): ContextInfoSection | undefined {
   if (isFeasibilityPlannerError(code)) {
     return {
-      heading: 'Без нового запроса к планировщику',
+      heading: 'No new planning request',
       body:
         code === 'RETRY_CAP_TOO_SHORT'
-          ? 'Research сохранён, а сборка плана не запускалась. При смене только лимита Actum переиспользует этот research.'
-          : 'Research сохранён, а сборка плана не запускалась. Измени цель или исходный результат, если хочешь выполнить новый расчёт.',
+          ? 'Research is saved, and plan creation has not started. If you only change the continuation limit, Actum will reuse this research.'
+          : 'Research is saved, and plan creation has not started. Change your goal or baseline to request a new calculation.',
     };
   }
   if (code === 'INVALID_RESPONSE') {
     return {
-      heading: 'Без нового платного запроса',
+      heading: 'No new paid request',
       body:
-        'Ответ OpenAI уже сохранён. Кнопка повторно проверит именно его в reuse-only режиме и не создаст новый OpenAI response.',
+        'The OpenAI response is already saved. This button validates that same response again without creating a new OpenAI response.',
     };
   }
   if (code === 'SAVED_RESPONSE_UNAVAILABLE') {
     return {
-      heading: 'Новый запрос не отправлен',
+      heading: 'No new request sent',
       body:
-        'Сохранённый ответ уже нельзя бесплатно восстановить, поэтому автоматического повтора нет. Новый платный запрос возможен только после явного возвращения к параметрам и запуска генерации.',
+        'The saved response can no longer be recovered for free, so there is no automatic retry. To start a new paid request, return to settings and choose Create plan.',
     };
   }
   if (
@@ -661,15 +661,15 @@ function errorRetryContext(code?: AIPlannerErrorCode): ContextInfoSection | unde
     code === 'GATEWAY_UNREACHABLE'
   ) {
     return {
-      heading: 'Что сделает повтор',
+      heading: 'What retrying does',
       body:
-        'AI gateway переиспользует сохранённые research, response ID и завершённые платные этапы, если они уже существуют. Если платный этап ещё не был создан, явный повтор может запустить его.',
+        'The AI gateway reuses saved research, response IDs, and completed paid stages when available. Retrying may start a paid stage if it has not been created yet.',
     };
   }
   if (code) {
     return {
-      heading: 'Стоимость повтора',
-      body: 'Эта ошибка не гарантирует сохранённый ответ. Явный повтор может создать новый платный OpenAI response.',
+      heading: 'Retry cost',
+      body: 'This error does not guarantee a saved response. Retrying may create a new paid OpenAI response.',
       tone: 'warning',
     };
   }
@@ -679,22 +679,22 @@ function errorRetryContext(code?: AIPlannerErrorCode): ContextInfoSection | unde
 function generationErrorBadge(code?: AIPlannerErrorCode): string {
   switch (code) {
     case 'INVALID_RESPONSE':
-      return 'Ответ не прочитан';
+      return 'Response could not be read';
     case 'SAVED_RESPONSE_UNAVAILABLE':
-      return 'Ответ уже не сохранён';
+      return 'Saved response unavailable';
     case 'RETRY_CAP_TOO_SHORT':
-      return 'Срок слишком короткий';
+      return 'Time limit too short';
     case 'GOAL_NOT_FEASIBLE':
-      return 'Цель не подтверждена';
+      return 'Goal not confirmed';
     case 'TIMEOUT':
     case 'UPSTREAM_TIMEOUT':
-      return 'Долгая генерация';
+      return 'Generation taking longer';
     case 'CONNECTION_INTERRUPTED':
-      return 'Связь прервана';
+      return 'Connection interrupted';
     case 'GATEWAY_UNREACHABLE':
-      return 'Сервер недоступен';
+      return 'Server unavailable';
     default:
-      return 'Ошибка OpenAI';
+      return 'OpenAI error';
   }
 }
 
@@ -703,24 +703,24 @@ function generationErrorTitle(code?: AIPlannerErrorCode): string {
     case 'INVALID_RESPONSE':
       return SAVED_RESPONSE_REVIEW_MESSAGE;
     case 'SAVED_RESPONSE_UNAVAILABLE':
-      return 'Новый запрос не был отправлен';
+      return 'No new request was sent';
     case 'RETRY_CAP_TOO_SHORT':
       return RETRY_CAP_TOO_SHORT_MESSAGE;
     case 'GOAL_NOT_FEASIBLE':
       return GOAL_NOT_FEASIBLE_MESSAGE;
     case 'TIMEOUT':
     case 'UPSTREAM_TIMEOUT':
-      return 'План ещё не завершён';
+      return 'Plan is not finished yet';
     default:
-      return 'Не удалось получить план';
+      return 'Could not get a plan';
   }
 }
 
 function missionCalendarLabel(mission: Mission, index: number) {
   const dayNumber = mission.dayNumber ?? index + 1;
   const dateLabel = formatCalendarDate(mission.scheduledDate, 'long');
-  if (!dateLabel) return `День ${dayNumber}`;
-  return `День ${dayNumber} · ${dateLabel}`;
+  if (!dateLabel) return `Day ${dayNumber}`;
+  return `Day ${dayNumber} · ${dateLabel}`;
 }
 
 const styles = StyleSheet.create({

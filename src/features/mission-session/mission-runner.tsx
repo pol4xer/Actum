@@ -89,7 +89,7 @@ function LegacyMissionRunner({
   const steps = useMemo(() => {
     if (explicitSteps.length) return explicitSteps;
     if (mission?.description.trim()) return [mission.description];
-    return ['Выполни миссию в своём темпе.'];
+    return ['Complete the mission at your own pace.'];
   }, [explicitSteps, mission?.description]);
 
   const routineActions = useMemo(
@@ -296,8 +296,8 @@ function LegacyMissionRunner({
   const modeSummary = isLegacyTimed
     ? formatDuration(timerSeconds)
     : isRoutine
-      ? `${formatCount(routineActions.length, ['действие', 'действия', 'действий'])} · ${formatCount(routineTotalSets, ['подход', 'подхода', 'подходов'])}`
-      : `${formatCount(steps.length, ['шаг', 'шага', 'шагов'])}`;
+      ? `${formatCount(routineActions.length, ['action', 'actions'])} · ${formatCount(routineTotalSets, ['set', 'sets'])}`
+      : `${formatCount(steps.length, ['step', 'steps'])}`;
   const legacyRepeatRemaining =
     typeof mission.repeatTotal === 'number'
       ? Math.max(0, mission.repeatTotal - (mission.repeatIndex ?? 1))
@@ -363,30 +363,30 @@ function LegacyMissionRunner({
           <View style={styles.headerCopy}>
             <Pill tone={phase === 'running' ? 'success' : readOnly ? 'neutral' : 'gold'}>
               {readOnly
-                ? 'просмотр'
+                ? 'preview'
                 : phase === 'instructions'
-                  ? 'готово к старту'
+                  ? 'ready to start'
                   : phase === 'countdown'
-                    ? 'приготовься'
+                    ? 'get ready'
                   : phase === 'running'
-                    ? 'выполнение'
-                    : 'готово'}
+                    ? 'in progress'
+                    : 'done'}
             </Pill>
             <ThemedText type="small" style={styles.muted}>
-              День {mission.dayNumber ?? mission.sequence}
+              Day {mission.dayNumber ?? mission.sequence}
               {scheduledDate ? ` · ${scheduledDate}` : ''}
               {typeof mission.repeatTotal === 'number' && mission.repeatTotal > 1
-                ? ` · повтор ${mission.repeatIndex ?? 1}/${mission.repeatTotal}`
+                ? ` · repeat ${mission.repeatIndex ?? 1}/${mission.repeatTotal}`
                 : ''}
               </ThemedText>
             </View>
           <InfoPopover
-            title="О миссии"
-            accessibilityLabel="Показать пояснение к миссии"
+            title="About this mission"
+            accessibilityLabel="Show mission details"
             sections={legacyContext}
           />
           <Pressable
-            accessibilityLabel={readOnly ? 'Закрыть просмотр дня' : 'Закрыть миссию'}
+            accessibilityLabel={readOnly ? 'Close day preview' : 'Close mission'}
             accessibilityRole="button"
             onPress={onClose}
             style={({ pressed }) => [styles.close, pressed && styles.pressed]}>
@@ -406,19 +406,19 @@ function LegacyMissionRunner({
 
               {isRoutine ? <RoutinePlan actions={routineActions} /> : <MissionSteps steps={steps} />}
               {isRoutine && explicitSteps.length ? (
-                <MissionSteps steps={explicitSteps} title="техника и порядок" />
+                <MissionSteps steps={explicitSteps} title="technique and sequence" />
               ) : null}
               <View style={styles.footerActions}>
                 {readOnly ? (
-                  <AppButton label="Закрыть просмотр" variant="secondary" onPress={onClose} />
+                  <AppButton label="Close preview" variant="secondary" onPress={onClose} />
                 ) : (
                   <AppButton
                     label={
                       isLegacyTimed
-                        ? `Запустить ${formatDuration(timerSeconds)}`
+                        ? `Start ${formatDuration(timerSeconds)}`
                         : isRoutine
-                          ? 'Начать первый подход'
-                          : 'Начать выполнение'
+                          ? 'Start the first set'
+                          : 'Start mission'
                     }
                     icon="→"
                     onPress={start}
@@ -430,14 +430,14 @@ function LegacyMissionRunner({
 
           {phase === 'countdown' ? (
             <View style={styles.countdownStage}>
-              <ThemedText type="subtitle">Приготовься</ThemedText>
+              <ThemedText type="subtitle">Get ready</ThemedText>
               <ThemedText accessibilityLiveRegion="assertive" style={styles.countdownNumber}>
                 {countdownSeconds}
               </ThemedText>
               <ThemedText type="small" style={styles.muted} numberOfLines={2}>
                 {isRoutine ? routineActions[0]?.title : activeStep}
               </ThemedText>
-              <AppButton label="Отмена" variant="secondary" onPress={restart} />
+              <AppButton label="Cancel" variant="secondary" onPress={restart} />
             </View>
           ) : null}
 
@@ -454,28 +454,28 @@ function LegacyMissionRunner({
                 </ThemedText>
                 <ThemedText style={styles.center}>
                   {isRoutine && routineStage === 'rest'
-                    ? 'отдых'
+                    ? 'rest'
                     : hasStageCountdown
                       ? isRoutine
-                        ? 'осталось в подходе'
-                        : 'осталось'
-                      : 'прошло с начала'}
+                        ? 'remaining in this set'
+                        : 'remaining'
+                      : 'elapsed'}
                 </ThemedText>
               </View>
 
               <View style={styles.progressBlock}>
                 <View style={styles.progressLabelRow}>
                   <ThemedText type="eyebrow" style={styles.muted}>
-                    прогресс
+                    progress
                   </ThemedText>
                   <ThemedText type="small" style={styles.muted}>
                     {isRoutine
                       ? routineStage === 'rest'
-                        ? `отдых · дальше ${routineActionIndex + 1}/${routineActions.length}`
-                        : `действие ${routineActionIndex + 1}/${routineActions.length} · подход ${routineSetIndex + 1}/${activeRoutineAction?.sets ?? 1}`
+                        ? `rest · up next ${routineActionIndex + 1}/${routineActions.length}`
+                        : `action ${routineActionIndex + 1}/${routineActions.length} · set ${routineSetIndex + 1}/${activeRoutineAction?.sets ?? 1}`
                       : isLegacyTimed
                         ? `${Math.round(timerProgress * 100)}%`
-                        : `шаг ${stepIndex + 1} из ${steps.length}`}
+                        : `step ${stepIndex + 1} of ${steps.length}`}
                   </ThemedText>
                 </View>
                 <ProgressBar
@@ -495,7 +495,7 @@ function LegacyMissionRunner({
               ) : (
                 <View style={styles.activeStepCard}>
                   <ThemedText type="eyebrow" style={styles.gold}>
-                    {isLegacyTimed ? 'сейчас' : `шаг ${stepIndex + 1}`}
+                    {isLegacyTimed ? 'now' : `step ${stepIndex + 1}`}
                   </ThemedText>
                   <ThemedText type="subtitle">{activeStep}</ThemedText>
                 </View>
@@ -504,7 +504,7 @@ function LegacyMissionRunner({
               <View style={styles.footerActions}>
                 {isRoutine && routineStage === 'rest' ? (
                   <AppButton
-                    label="Пропустить отдых"
+                    label="Skip rest"
                     onPress={() => startRoutineWork(activeRoutineAction, Date.now())}
                     icon="→"
                   />
@@ -513,7 +513,7 @@ function LegacyMissionRunner({
                 routineStage === 'work' &&
                 !getRoutineActionSeconds(activeRoutineAction) ? (
                   <AppButton
-                    label="Подход выполнен"
+                    label="Set complete"
                     onPress={() => completeRoutineSet(Date.now())}
                     icon="→"
                   />
@@ -522,7 +522,7 @@ function LegacyMissionRunner({
                 routineStage === 'work' &&
                 getRoutineActionSeconds(activeRoutineAction) ? (
                   <AppButton
-                    label="Завершить подход сейчас"
+                    label="Finish set now"
                     onPress={() => completeRoutineSet(Date.now(), false)}
                     icon="→"
                   />
@@ -531,8 +531,8 @@ function LegacyMissionRunner({
                   <AppButton
                     label={
                       stepIndex < steps.length - 1
-                        ? 'Этот шаг выполнен — дальше'
-                        : 'Закончить выполнение'
+                        ? 'Step complete — next'
+                        : 'Finish mission'
                     }
                     onPress={advanceManualStep}
                     icon="→"
@@ -541,10 +541,10 @@ function LegacyMissionRunner({
                 <AppButton
                   label={
                     isRoutine
-                      ? 'Остановить весь комплекс'
+                      ? 'Stop the routine'
                       : isLegacyTimed
-                        ? 'Остановить раньше'
-                        : 'Остановить и оценить результат'
+                        ? 'Stop early'
+                        : 'Stop and review result'
                   }
                   variant="secondary"
                   onPress={() => finish('stopped')}
@@ -563,14 +563,14 @@ function LegacyMissionRunner({
               <View style={styles.titleBlock}>
                 <ThemedText type="title" style={styles.center}>
                   {finishReason === 'elapsed'
-                    ? 'Время вышло'
+                    ? 'Time is up'
                     : finishReason === 'completed'
                       ? isRoutine
                         ? routineShortSets > 0
-                          ? 'Комплекс пройден с сокращениями'
-                          : 'Все подходы выполнены'
-                        : 'Все шаги пройдены'
-                      : 'Выполнение остановлено'}
+                          ? 'Routine finished with shortened sets'
+                          : 'All sets completed'
+                        : 'All steps completed'
+                      : 'Mission stopped'}
                 </ThemedText>
                 <ThemedText type="small" style={[styles.muted, styles.center]}>
                   {formatDuration(Math.max(1, Math.round(elapsedMs / 1000)))}
@@ -579,11 +579,11 @@ function LegacyMissionRunner({
 
               <View style={styles.footerActions}>
                 {readOnly ? (
-                  <AppButton label="Закрыть просмотр" variant="secondary" onPress={onClose} />
+                  <AppButton label="Close preview" variant="secondary" onPress={onClose} />
                 ) : (
-                  <AppButton label="Перейти к check-in" icon="→" onPress={onCheckIn} />
+                  <AppButton label="Continue to check-in" icon="→" onPress={onCheckIn} />
                 )}
-                <AppButton label="Повторить миссию" variant="ghost" onPress={restart} />
+                <AppButton label="Repeat mission" variant="ghost" onPress={restart} />
               </View>
             </>
           ) : null}
@@ -597,7 +597,7 @@ function RoutinePlan({ actions }: { actions: RoutineAction[] }) {
   return (
     <View style={styles.stepsBlock}>
       <ThemedText type="eyebrow" style={styles.muted}>
-        точный порядок
+        sequence
       </ThemedText>
       <View style={styles.actionCards}>
         {actions.map((action, index) => (
@@ -642,11 +642,11 @@ function ActiveRoutineAction({
     return (
       <View style={[styles.activeStepCard, styles.restCard]}>
         <ThemedText type="eyebrow" style={styles.cyan}>
-          отдых · затем действие {actionIndex + 1}
+          rest · next action {actionIndex + 1}
         </ThemedText>
-        <ThemedText type="subtitle">Дальше: {action.title}</ThemedText>
+        <ThemedText type="subtitle">Next: {action.title}</ThemedText>
         <ThemedText style={styles.muted}>
-          Подход {setIndex + 1} из {action.sets} · {formatRoutineQuantity(action)}
+          Set {setIndex + 1} of {action.sets} · {formatRoutineQuantity(action)}
         </ThemedText>
         <RoutineActionInfo action={action} />
       </View>
@@ -656,7 +656,7 @@ function ActiveRoutineAction({
   return (
     <View style={styles.activeStepCard}>
       <ThemedText type="eyebrow" style={styles.gold}>
-        действие {actionIndex + 1} · подход {setIndex + 1} из {action.sets}
+        action {actionIndex + 1} · set {setIndex + 1} of {action.sets}
       </ThemedText>
       <View style={styles.actionTitleRow}>
         <ThemedText type="subtitle" style={styles.actionTitle}>
@@ -675,21 +675,21 @@ function ActiveRoutineAction({
 function RoutineActionInfo({ action }: { action: RoutineAction }) {
   const sections: ContextInfoSection[] = [];
   if (action.successCriterion.trim()) {
-    sections.push({ heading: 'Когда засчитано', body: action.successCriterion.trim() });
+    sections.push({ heading: 'Completion criterion', body: action.successCriterion.trim() });
   }
   if (action.loadBasis) {
-    sections.push({ heading: 'Расчёт нагрузки', body: formatLoadBasis(action.loadBasis) });
+    sections.push({ heading: 'Load calculation', body: formatLoadBasis(action.loadBasis) });
   }
   return (
     <InfoPopover
       title={action.title}
-      accessibilityLabel={`Показать пояснение для ${action.title}`}
+      accessibilityLabel={`Show details for ${action.title}`}
       sections={sections}
     />
   );
 }
 
-function MissionSteps({ steps, title = 'что делать' }: { steps: string[]; title?: string }) {
+function MissionSteps({ steps, title = 'what to do' }: { steps: string[]; title?: string }) {
   return (
     <View style={styles.stepsBlock}>
       <ThemedText type="eyebrow" style={styles.muted}>
@@ -718,20 +718,20 @@ function legacyMissionContextSections(
 ): ContextInfoSection[] {
   const sections: ContextInfoSection[] = [];
   if (descriptionIsContext && mission.description.trim()) {
-    sections.push({ heading: 'О миссии', body: mission.description.trim() });
+    sections.push({ heading: 'About this mission', body: mission.description.trim() });
   }
   sections.push(...missionContextSections(mission));
   if (mission.completionCriterion?.trim()) {
-    sections.push({ heading: 'Когда день засчитан', body: mission.completionCriterion.trim() });
+    sections.push({ heading: 'Daily completion criterion', body: mission.completionCriterion.trim() });
   }
   if (legacyRepeatRemaining && legacyRepeatRemaining > 0) {
     sections.push({
-      heading: 'Повторение нагрузки',
-      body: `После check-in впереди ещё ${formatCount(legacyRepeatRemaining, ['такая же сессия', 'такие же сессии', 'таких же сессий'])}. Числа останутся прежними.`,
+      heading: 'Repeating the load',
+      body: `After check-in, ${formatCount(legacyRepeatRemaining, ['identical session', 'identical sessions'])} will remain. The prescribed quantities will stay the same.`,
     });
   } else if (mission.progressionRule?.trim()) {
     sections.push({
-      heading: 'Правило следующей нагрузки',
+      heading: 'Next load rule',
       body: mission.progressionRule.trim(),
     });
   }
@@ -752,11 +752,11 @@ function formatClock(totalSeconds: number) {
 
 function formatDuration(totalSeconds: number) {
   const safeSeconds = Math.max(0.01, totalSeconds);
-  if (safeSeconds < 60) return `${formatNumber(safeSeconds)} сек`;
+  if (safeSeconds < 60) return `${formatNumber(safeSeconds)} sec`;
   const minutes = Math.floor(safeSeconds / 60);
   const seconds = safeSeconds - minutes * 60;
-  if (Math.abs(seconds) < 0.001) return `${minutes} мин`;
-  return `${minutes} мин ${formatNumber(seconds)} сек`;
+  if (Math.abs(seconds) < 0.001) return `${minutes} min`;
+  return `${minutes} min ${formatNumber(seconds)} sec`;
 }
 
 function getRoutineActionSeconds(action?: RoutineAction) {
@@ -773,15 +773,15 @@ function formatRoutineQuantity(action: RoutineAction) {
 
   const quantity = formatNumber(action.quantity);
   const units: Record<RoutineAction['unit'], string> = {
-    reps: 'повт.',
-    seconds: 'сек',
-    minutes: 'мин',
-    pages: 'стр.',
-    items: 'элементов',
-    words: 'слов',
-    meters: 'м',
-    attempts: 'попыток',
-    custom: action.unitLabel?.trim() || 'ед.',
+    reps: action.quantity === 1 ? 'rep' : 'reps',
+    seconds: 'sec',
+    minutes: 'min',
+    pages: action.quantity === 1 ? 'page' : 'pages',
+    items: action.quantity === 1 ? 'item' : 'items',
+    words: action.quantity === 1 ? 'word' : 'words',
+    meters: 'm',
+    attempts: action.quantity === 1 ? 'attempt' : 'attempts',
+    custom: action.unitLabel?.trim() || (action.quantity === 1 ? 'unit' : 'units'),
   };
   return `${quantity} ${units[action.unit]}`;
 }
@@ -789,7 +789,7 @@ function formatRoutineQuantity(action: RoutineAction) {
 function formatRoutinePrescription(action: RoutineAction) {
   return [
     `${action.sets} × ${formatRoutineQuantity(action)}`,
-    action.restSeconds > 0 ? `отдых ${formatDuration(action.restSeconds)}` : undefined,
+    action.restSeconds > 0 ? `rest ${formatDuration(action.restSeconds)}` : undefined,
     action.tempo?.trim() || undefined,
   ]
     .filter((value): value is string => Boolean(value))
@@ -806,22 +806,12 @@ function formatLoadBasis(value: RoutineLoadBasis | string) {
 
 function formatNumber(value: number) {
   if (Number.isInteger(value)) return String(value);
-  return String(Number(value.toFixed(4))).replace('.', ',');
+  return String(Number(value.toFixed(4)));
 }
 
-function formatCount(value: number, forms: [string, string, string]) {
+function formatCount(value: number, forms: [string, string]) {
   const safeValue = Math.max(0, Math.round(value));
-  const lastTwo = safeValue % 100;
-  const last = safeValue % 10;
-  const form =
-    lastTwo >= 11 && lastTwo <= 14
-      ? forms[2]
-      : last === 1
-        ? forms[0]
-        : last >= 2 && last <= 4
-          ? forms[1]
-          : forms[2];
-  return `${safeValue} ${form}`;
+  return `${safeValue} ${safeValue === 1 ? forms[0] : forms[1]}`;
 }
 
 const styles = StyleSheet.create({

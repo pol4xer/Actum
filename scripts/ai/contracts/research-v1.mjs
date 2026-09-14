@@ -21,21 +21,21 @@ export function parseResearchConclusion(outputText) {
   try {
     value = JSON.parse(outputText);
   } catch (cause) {
-    throw new ResearchContractError('Web-research вернул нечитаемый JSON.', {
+    throw new ResearchContractError('Web research returned unreadable JSON.', {
       code: 'upstream_invalid_research_json',
       cause,
     });
   }
 
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    fail('research', 'ожидается объект');
+    fail('research', 'expected an object');
   }
   const expectedKeys = new Set(RESEARCH_SCHEMA.required);
   for (const key of Object.keys(value)) {
-    if (!expectedKeys.has(key)) fail(`research.${key}`, 'поле не поддерживается');
+    if (!expectedKeys.has(key)) fail(`research.${key}`, 'field is not supported');
   }
   for (const key of expectedKeys) {
-    if (!Object.hasOwn(value, key)) fail(`research.${key}`, 'обязательное поле отсутствует');
+    if (!Object.hasOwn(value, key)) fail(`research.${key}`, 'required field is missing');
   }
 
   assertBoundedString(value.brief, 'research.brief', 80, 12_000);
@@ -48,7 +48,7 @@ export function parseResearchConclusion(outputText) {
   ) {
     fail(
       'research.earliestTargetCycleNumber',
-      `ожидается целый номер цикла от 1 до ${MAX_RESEARCH_CYCLES} или null`,
+      `expected an integer cycle number from 1 to ${MAX_RESEARCH_CYCLES} or null`,
     );
   }
   return value;
@@ -64,7 +64,7 @@ export class ResearchContractError extends Error {
 
 function assertBoundedString(value, path, minimum, maximum) {
   if (typeof value !== 'string' || value.trim().length < minimum || value.length > maximum) {
-    fail(path, `ожидается строка длиной от ${minimum} до ${maximum} символов`);
+    fail(path, `expected a string of ${minimum} to ${maximum} characters`);
   }
 }
 

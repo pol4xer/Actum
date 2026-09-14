@@ -74,7 +74,7 @@ export function useGoalBuilderController({
         setSavedPreview(saved);
         setPreview(saved);
         setPrompt(saved.goal.rawPrompt);
-        setBaseline(saved.plan.baseline?.userStatement ?? 'Сохранённая исходная точка');
+        setBaseline(saved.plan.baseline?.userStatement ?? 'Saved baseline');
         setDuration(saved.goal.program.duration);
         setDailyMinutes(saved.plan.dailyMinutes);
         setCurrentLevel(recoveredCurrentLevel(saved.plan));
@@ -106,7 +106,7 @@ export function useGoalBuilderController({
       } catch (error) {
         setGenerationErrorCode(error instanceof AIPlannerError ? error.code : 'UPSTREAM_ERROR');
         setGenerationError(
-          error instanceof AIPlannerError ? error.message : 'Не удалось получить план от GPT.',
+          error instanceof AIPlannerError ? error.message : 'Could not get a plan from GPT.',
         );
         setStage('error');
       }

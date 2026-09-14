@@ -18,7 +18,7 @@ export function DevToolsSection() {
     <View style={styles.section}>
       <View style={styles.headingRow}>
         <ThemedText type="eyebrow" style={styles.heading}>
-          Тестирование
+          Testing
         </ThemedText>
         <Pill tone="neutral">DEV</Pill>
       </View>
@@ -27,16 +27,16 @@ export function DevToolsSection() {
         {currentMission ? (
           <>
             <ThemedText type="smallBold">
-              День {currentDay} из {totalDays}
+              Day {currentDay} of {totalDays}
             </ThemedText>
             <AppButton
-              label="Пропустить день"
+              label="Skip day"
               variant="secondary"
               onPress={() => skipMissionForTesting(currentMission.id)}
             />
           </>
         ) : (
-          <ThemedText type="smallBold">План завершён</ThemedText>
+          <ThemedText type="smallBold">Plan complete</ThemedText>
         )}
       </Card>
     </View>

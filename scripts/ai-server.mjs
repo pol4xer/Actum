@@ -31,6 +31,7 @@ import {
 } from './ai/contracts/validate-plan.mjs';
 import {
   buildPlanInstructions,
+  COMPATIBLE_RESEARCH_PROMPT_VERSIONS,
   PROMPT_VERSION,
   RESEARCH_PROMPT_VERSION,
   RESEARCH_INSTRUCTIONS,
@@ -74,6 +75,31 @@ export function createResearchCacheKey(input, identity = AI_PIPELINE_CACHE_IDENT
   return createResearchCacheKeyForIdentity(input, identity);
 }
 
+function reusableResearchCacheKey(input) {
+  const currentKey = createResearchCacheKey(input);
+  // Only the output language changed in the compatible revision. Research is an
+  // internal factual input: the new planner translates it into English. Keep the
+  // original stage key so completed work, pending responses and billing guards
+  // all survive this update without creating another paid research request.
+  for (const key of [
+    currentKey,
+    ...COMPATIBLE_RESEARCH_PROMPT_VERSIONS.map((researchPromptVersion) =>
+      createResearchCacheKey(input, { ...AI_PIPELINE_CACHE_IDENTITY, researchPromptVersion }),
+    ),
+  ]) {
+    const stageKey = providerStageKey(key, 'research');
+    if (
+      durableState.readResearch(key) ||
+      durableState.readStageResult(stageKey) ||
+      durableState.readBackgroundJob(stageKey) ||
+      durableState.readCreateGuard(stageKey)
+    ) {
+      return key;
+    }
+  }
+  return currentKey;
+}
+
 export async function handleRequest(request, response) {
   setCors(response);
 
@@ -110,7 +136,7 @@ export async function handleRequest(request, response) {
   if (request.method === 'GET' && pathname === '/saved-plan/latest') {
     if (!durableState.isHealthy()) {
       sendJson(response, 503, {
-        error: 'Локальное состояние сохранённых AI-ответов недоступно.',
+        error: 'Local saved AI response state is unavailable.',
         code: 'durable_state_unavailable',
       });
       return;
@@ -118,7 +144,7 @@ export async function handleRequest(request, response) {
     try {
       const saved = readLatestSavedPlan();
       if (!saved) {
-        sendJson(response, 404, { error: 'Сохранённый plan-v7 не найден.' });
+        sendJson(response, 404, { error: 'Saved plan-v7 not found.' });
         return;
       }
       sendJson(response, 200, saved);
@@ -127,7 +153,7 @@ export async function handleRequest(request, response) {
         `[actum-ai] saved_plan_recovery_failed message=${JSON.stringify(error instanceof Error ? error.message : 'unknown')}`,
       );
       sendJson(response, 422, {
-        error: 'Последний сохранённый ответ не прошёл локальную проверку.',
+        error: 'The latest saved response failed local validation.',
         code: 'saved_plan_invalid',
       });
     }
@@ -144,7 +170,7 @@ export async function handleRequest(request, response) {
     sendJson(response, 503, {
       requestId,
       error:
-        'Actum заблокировал платный запрос: локальное состояние защиты `.actum/ai-state.json` не удалось прочитать или надёжно сохранить.',
+        'Actum blocked a paid request because the billing protection state in `.actum/ai-state.json` could not be read or reliably saved.',
       code: 'durable_state_unavailable',
     });
     return;
@@ -152,7 +178,7 @@ export async function handleRequest(request, response) {
   if (!OPENAI_API_KEY) {
     sendJson(response, 503, {
       requestId,
-      error: 'Добавь OPENAI_API_KEY в файл .env.local и перезапусти AI-сервер.',
+      error: 'Add OPENAI_API_KEY to .env.local and restart the AI server.',
     });
     return;
   }
@@ -172,7 +198,7 @@ export async function handleRequest(request, response) {
     validateInput(input);
     const reuseOnly = request.headers?.['x-actum-reuse-only'] === 'true';
     cacheKey = createPlanCacheKey(input);
-    researchCacheKey = createResearchCacheKey(input);
+    researchCacheKey = reusableResearchCacheKey(input);
     const cached = durableState.readPlan(cacheKey);
     if (cached) {
       console.log(
@@ -191,7 +217,7 @@ export async function handleRequest(request, response) {
       if (inFlightPlans.size >= MAX_CONCURRENT_PLANS) {
         sendJson(response, 429, {
           requestId,
-          error: 'AI-сервер уже собирает два плана. Дождись завершения одного из них.',
+          error: 'The AI server is already creating two plans. Wait for one to finish.',
           code: 'gateway_busy',
         });
         return;
@@ -220,7 +246,7 @@ export async function handleRequest(request, response) {
     const result = await active.promise;
     sendJson(response, 200, result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Неизвестная ошибка AI-сервера.';
+    const message = error instanceof Error ? error.message : 'Unknown AI server error.';
     const providerCode = error instanceof OpenAIRequestError ? error.code : undefined;
     const researchPreserved = Boolean(
       researchCacheKey && durableState.readResearch(researchCacheKey),
@@ -249,9 +275,9 @@ export async function handleRequest(request, response) {
     );
     const publicMessage =
       retryGuarded
-        ? `${message} Actum не создаст такой же OpenAI response в течение 2 часов, чтобы исключить двойное списание.`
+        ? `${message} Actum will not create the same OpenAI response for 2 hours to prevent duplicate billing.`
         : researchPreserved && error?.stage === 'planning'
-          ? `${message} Web-research сохранён: повтор не запустит новый поиск.`
+          ? `${message} Web research is saved: retrying will not run another search.`
           : message;
     sendJson(response, providerHttpStatus(error), {
       requestId,
@@ -297,9 +323,13 @@ async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKe
         `[actum-ai] ${requestId} research_cache_hit response=${research.meta.providerResponseId || 'unknown'} searches=${research.meta.webSearchCount} sources=${research.sources.length}`,
       );
     } else {
-      if ((input.cycleNumber ?? 1) > 1) {
+      const researchStageKey = providerStageKey(researchCacheKey, 'research');
+      const savedResearchResponse =
+        durableState.readStageResult(researchStageKey) ||
+        durableState.readBackgroundJob(researchStageKey);
+      if ((input.cycleNumber ?? 1) > 1 && !savedResearchResponse) {
         throw new OpenAIRequestError(
-          'Сохранённое исследование для следующего цикла недоступно. Actum не запустил новый web-поиск, чтобы избежать повторного списания.',
+          'Saved research for the next cycle is unavailable. Actum did not start a new web search to prevent duplicate billing.',
           {
             status: 409,
             code: 'research_cache_unavailable',
@@ -314,8 +344,10 @@ async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKe
         input,
         trustedBaseline,
         requestId,
-        providerStageKey(researchCacheKey, 'research'),
-        reuseOnly,
+        researchStageKey,
+        // A saved artifact can expire between the guard above and the stage read.
+        // Later cycles may only recover existing research, never create a new POST.
+        reuseOnly || (input.cycleNumber ?? 1) > 1,
       );
       durableState.saveResearch(researchCacheKey, research);
       console.log(
@@ -342,7 +374,7 @@ async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKe
   const outputText = extractOutputText(planResponse);
   if (!outputText) {
     throw invalidProviderOutput(
-      'OpenAI завершил запрос без структурированного плана.',
+      'OpenAI completed the request without a structured plan.',
       'upstream_missing_plan',
       'planning',
       planResponse,
@@ -354,7 +386,7 @@ async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKe
     plan = JSON.parse(outputText);
   } catch (cause) {
     throw invalidProviderOutput(
-      'OpenAI завершил запрос, но вернул нечитаемый JSON-план.',
+      'OpenAI completed the request but returned an unreadable JSON plan.',
       'upstream_invalid_plan_json',
       'planning',
       planResponse,
@@ -375,7 +407,7 @@ async function createPlan(input, requestId, startedAt, cacheKey, researchCacheKe
     });
   } catch (cause) {
     throw invalidProviderOutput(
-      cause instanceof Error ? cause.message : 'План не прошёл локальную проверку.',
+      cause instanceof Error ? cause.message : 'The plan failed local validation.',
       'upstream_invalid_plan_contract',
       'planning',
       planResponse,
@@ -455,7 +487,7 @@ async function requestResearch(input, trustedBaseline, requestId, stageKey, reus
   const outputText = extractOutputText(payload);
   if (!outputText) {
     throw invalidProviderOutput(
-      'Web-research завершился без итогового брифа.',
+      'Web research completed without a final brief.',
       'upstream_missing_research_brief',
       'research',
       payload,
@@ -467,7 +499,7 @@ async function requestResearch(input, trustedBaseline, requestId, stageKey, reus
     conclusion = parseResearchConclusion(outputText);
   } catch (cause) {
     throw invalidProviderOutput(
-      cause instanceof Error ? cause.message : 'Web-research не прошёл локальную проверку.',
+      cause instanceof Error ? cause.message : 'Web research failed local validation.',
       cause?.code || 'upstream_invalid_research_contract',
       'research',
       payload,
@@ -479,7 +511,7 @@ async function requestResearch(input, trustedBaseline, requestId, stageKey, reus
   const meta = responseMeta(payload);
   if ((meta.webSearchCount || 0) < 3) {
     throw invalidProviderOutput(
-      'Web-research выполнил меньше трёх независимых поисков.',
+      'Web research performed fewer than three independent searches.',
       'upstream_insufficient_research_searches',
       'research',
       payload,
@@ -487,7 +519,7 @@ async function requestResearch(input, trustedBaseline, requestId, stageKey, reus
   }
   if (sources.length < 2) {
     throw invalidProviderOutput(
-      'Web-research завершился без двух проверяемых URL-источников.',
+      'Web research completed without two verifiable source URLs.',
       'upstream_missing_research_sources',
       'research',
       payload,
@@ -583,7 +615,7 @@ async function executeProviderStage({ stageKey, stage, timeoutMs, requestId, reu
   } else {
     if (reuseOnly) {
       throw new OpenAIRequestError(
-        'Сохранённый ответ для бесплатной повторной проверки больше недоступен.',
+        'The saved response for free revalidation is no longer available.',
         {
           status: 409,
           code: 'saved_response_unavailable',
@@ -596,7 +628,7 @@ async function executeProviderStage({ stageKey, stage, timeoutMs, requestId, reu
     const guarded = durableState.readCreateGuard(stageKey);
     if (guarded) {
       throw new OpenAIRequestError(
-        'Предыдущий POST к OpenAI оборвался до получения response ID, поэтому его платный статус неизвестен.',
+        'The previous POST to OpenAI disconnected before receiving a response ID, so its billing status is unknown.',
         {
           status: 409,
           code: 'ambiguous_create',
@@ -655,9 +687,12 @@ function sumNumbers(...values) {
 }
 
 function readLatestSavedPlan() {
-  const planning = durableState.latestCompletedStage('planning');
+  const planning = durableState.latestCompletedStage(
+    'planning',
+    Number.POSITIVE_INFINITY,
+    (entry) => matchesCurrentPlanningIdentity(entry.inputSnapshot),
+  );
   if (!planning) return undefined;
-  if (!matchesCurrentPlanningIdentity(planning.inputSnapshot)) return undefined;
   const outputText = extractOutputText(planning.payload);
   if (!outputText) return undefined;
   const plan = JSON.parse(outputText);
@@ -821,7 +856,7 @@ function assertResearchFitsRetryCap(research, totalCycles) {
   const earliest = research?.earliestTargetCycleNumber;
   if (earliest === null) {
     throw new OpenAIRequestError(
-      'Исследование не подтвердило достижимость цели в пределах 12 месячных циклов. План не создан.',
+      'Research did not support achieving the goal within 12 monthly cycles. No plan was created.',
       {
         status: 422,
         code: 'research_target_not_feasible',
@@ -832,7 +867,7 @@ function assertResearchFitsRetryCap(research, totalCycles) {
     );
   }
   if (!Number.isInteger(earliest) || earliest < 1 || earliest > MAX_RESEARCH_CYCLES) {
-    throw new OpenAIRequestError('Сохранённый web-research имеет несовместимый формат.', {
+    throw new OpenAIRequestError('Saved web research has an incompatible format.', {
       status: 502,
       code: 'upstream_invalid_research_contract',
       stage: 'research',
@@ -842,7 +877,7 @@ function assertResearchFitsRetryCap(research, totalCycles) {
   }
   if (earliest > totalCycles) {
     throw new OpenAIRequestError(
-      `Исследование оценивает достижение цели не раньше цикла ${earliest}, а выбранный предел — ${totalCycles}. Выбери более длинный срок.`,
+      `Research estimates reaching the goal no earlier than cycle ${earliest}, but the selected limit is ${totalCycles}. Choose a longer duration.`,
       {
         status: 422,
         code: 'research_target_exceeds_retry_cap',

@@ -37,7 +37,7 @@ export function ProgramRoadmap({
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded }}
-        accessibilityLabel={`${expanded ? 'Скрыть' : 'Показать'} ${targetCycleLabel ? 'план по месяцам' : 'весь маршрут'}`}
+        accessibilityLabel={`${expanded ? 'Hide' : 'Show'} ${targetCycleLabel ? 'monthly plan' : 'full roadmap'}`}
         onPress={() => {
           setExpanded((value) => !value);
           if (expanded) setReserveExpanded(false);
@@ -45,14 +45,14 @@ export function ProgramRoadmap({
         style={({ pressed }) => [styles.header, pressed && styles.pressed]}>
         <View style={styles.headerCopy}>
           <ThemedText type="smallBold">
-            {targetCycleLabel ? 'План по месяцам' : 'Весь маршрут'}
+            {targetCycleLabel ? 'Monthly plan' : 'Full roadmap'}
           </ThemedText>
           <ThemedText type="small" style={styles.muted}>
             {achievementCycleLabel
-              ? `Цель достигнута: ${achievementCycleLabel.toLocaleLowerCase('ru-RU')}`
+              ? `Goal achieved: ${achievementCycleLabel.toLocaleLowerCase('en-US')}`
               : targetCycleLabel
-              ? `Ориентир: ${targetCycleLabel.toLocaleLowerCase('ru-RU')} · лимит ${retryLimitLabel(program.duration)}`
-              : `${goalDurationLabel(program.duration)} · ${program.totalCycles} ${program.totalCycles === 1 ? 'цикл' : 'циклов'}`}
+              ? `Target: ${targetCycleLabel.toLocaleLowerCase('en-US')} · limit ${retryLimitLabel(program.duration)}`
+              : `${goalDurationLabel(program.duration)} · ${program.totalCycles} ${program.totalCycles === 1 ? 'cycle' : 'cycles'}`}
           </ThemedText>
         </View>
         <ThemedText style={styles.chevron}>{expanded ? '⌃' : '⌄'}</ThemedText>
@@ -81,12 +81,12 @@ export function ProgramRoadmap({
               <Pressable
                 accessibilityRole="button"
                 accessibilityState={{ expanded: reserveExpanded }}
-                accessibilityLabel={`${reserveExpanded ? 'Скрыть' : 'Показать'} резервные месяцы`}
+                accessibilityLabel={`${reserveExpanded ? 'Hide' : 'Show'} reserve months`}
                 onPress={() => setReserveExpanded((value) => !value)}
                 style={({ pressed }) => [styles.reserveToggle, pressed && styles.pressed]}>
-                <ThemedText type="smallBold">Резерв, если цель не достигнута</ThemedText>
+                <ThemedText type="smallBold">Extra months if you need them</ThemedText>
                 <ThemedText type="small" style={styles.muted}>
-                  {presentation.reserveMilestones.length} мес. {reserveExpanded ? '⌃' : '⌄'}
+                  {presentation.reserveMilestones.length} mo. {reserveExpanded ? '⌃' : '⌄'}
                 </ThemedText>
               </Pressable>
               {reserveExpanded ? (
@@ -135,10 +135,10 @@ function MilestoneRow({
           <ThemedText type="smallBold" numberOfLines={2} style={styles.flex}>
             {milestone.title}
           </ThemedText>
-          {isCurrent ? <Pill tone="gold">сейчас</Pill> : null}
-          {achieved ? <Pill tone="success">цель достигнута</Pill> : null}
-          {completed && !achieved ? <Pill>месяц пройден</Pill> : null}
-          {target ? <Pill>ориентир</Pill> : null}
+          {isCurrent ? <Pill tone="gold">now</Pill> : null}
+          {achieved ? <Pill tone="success">goal achieved</Pill> : null}
+          {completed && !achieved ? <Pill>month complete</Pill> : null}
+          {target ? <Pill>target</Pill> : null}
         </View>
         {metricLabel ? (
           <ThemedText type="small" style={styles.metric}>
@@ -147,8 +147,8 @@ function MilestoneRow({
         ) : null}
       </View>
       <InfoPopover
-        title={`Цикл ${milestone.cycleNumber}`}
-        accessibilityLabel={`Показать фокус цикла ${milestone.cycleNumber}`}
+        title={`Cycle ${milestone.cycleNumber}`}
+        accessibilityLabel={`Show focus for cycle ${milestone.cycleNumber}`}
         sections={[{ body: milestone.focus }]}
       />
     </View>

@@ -3,12 +3,13 @@ import type { MissionExecutionBlock } from '@/domain/types';
 const EXPLICIT_SAFETY_TITLE = /(?:безопасн|safety)/iu;
 const PREFLIGHT_TITLE =
   /(?:провер(?:ка|ь)|чек|готовност|перед\s+(?:началом|стартом)|самочувств|preflight|readiness)/iu;
+// Bound English symptom words so painting and seizing an opportunity remain actionable.
 const SAFETY_COPY =
-  /(?:безопасн|медицин|врач|доктор|инструктор|противопоказ|головокруж|тошнот|боль|судорог|потер[\p{L}]*\s+сознани|одышк|симптом|самочувств|гипервентил|без\s+(?:воды|ванн)|только\s+на\s+суше|устойчив[\p{L}]*\s+положени|dizz|nause|pain|seiz|symptom|hypervent|underwater|dry\s+only)/iu;
+  /(?:безопасн|медицин|врач|доктор|инструктор|противопоказ|головокруж|тошнот|боль|судорог|потер[\p{L}]*\s+сознани|одышк|симптом|самочувств|гипервентил|без\s+(?:воды|ванн)|только\s+на\s+суше|устойчив[\p{L}]*\s+положени|\b(?:dizz(?:y|iness|ier|iest)|nause(?:a|ous(?:ness)?|ate[ds]?|ating|ation)|pain(?:s|ful(?:ly|ness)?)?|seizures?|symptom(?:s|atic(?:ally)?)?|hyperventilat(?:e[ds]?|ing|ions?)|underwater|dry\s+only)\b)/iu;
 const SAFETY_ONLY_ITEM_COPY =
-  /(?:головокруж|тошнот|боль|судорог|потер[\p{L}]*\s+сознани|одышк|симптом|самочувств|гипервентил|без\s+(?:воды|ванн)|только\s+на\s+суше|устойчив[\p{L}]*\s+положени|(?:обычн|спокойн)[\p{L}]*\s+дыхани|глубок[\p{L}]*\s+вдох|dizz|nause|pain|seiz|symptom|hypervent|underwater|dry\s+only)/iu;
+  /(?:головокруж|тошнот|боль|судорог|потер[\p{L}]*\s+сознани|одышк|симптом|самочувств|гипервентил|без\s+(?:воды|ванн)|только\s+на\s+суше|устойчив[\p{L}]*\s+положени|(?:обычн|спокойн)[\p{L}]*\s+дыхани|глубок[\p{L}]*\s+вдох|\b(?:dizz(?:y|iness|ier|iest)|nause(?:a|ous(?:ness)?|ate[ds]?|ating|ation)|pain(?:s|ful(?:ly|ness)?)?|seizures?|symptom(?:s|atic(?:ally)?)?|hyperventilat(?:e[ds]?|ing|ions?)|underwater|dry\s+only)\b)/iu;
 const SAFETY_CLAUSE =
-  /(?:^|[,;]\s*|\s+и\s+|\s+)(?:(?:при|если)\s+(?:головокруж|тошнот|бол|судорог|одышк|потер[\p{L}]*\s+сознани|спутанност|резк[\p{L}]*\s+ухудш)|без\s+(?:гипервентил|тревожн[\p{L}]*\s+симптом|головокруж|тошнот|бол|судорог|воды|ванн)|только\s+на\s+суше|не\s+гипервентил|немедленно\s+прекрат|прекрат[\p{L}]*\s+(?:блок|упражн|практик)|проконсульт|обрат[\p{L}]*\s+к\s+(?:врач|доктор)|найд[\p{L}]*\s+(?:сертифицированн[\p{L}]*\s+)?инструктор|(?:практик|упражн)[\p{L}]*\s+(?:проход|выполня)[\p{L}]*\s+(?:только\s+)?(?:в|на)\s+безопасн[\p{L}]*|dizz|nause|seiz|hypervent)/iu;
+  /(?:^|[,;]\s*|\s+и\s+|\s+)(?:(?:при|если)\s+(?:головокруж|тошнот|бол|судорог|одышк|потер[\p{L}]*\s+сознани|спутанност|резк[\p{L}]*\s+ухудш)|без\s+(?:гипервентил|тревожн[\p{L}]*\s+симптом|головокруж|тошнот|бол|судорог|воды|ванн)|только\s+на\s+суше|не\s+гипервентил|немедленно\s+прекрат|прекрат[\p{L}]*\s+(?:блок|упражн|практик)|проконсульт|обрат[\p{L}]*\s+к\s+(?:врач|доктор)|найд[\p{L}]*\s+(?:сертифицированн[\p{L}]*\s+)?инструктор|(?:практик|упражн)[\p{L}]*\s+(?:проход|выполня)[\p{L}]*\s+(?:только\s+)?(?:в|на)\s+безопасн[\p{L}]*|\b(?:dizz(?:y|iness|ier|iest)|nause(?:a|ous(?:ness)?|ate[ds]?|ating|ation)|seizures?|hyperventilat(?:e[ds]?|ing|ions?))\b)/iu;
 
 /**
  * Detects legacy checklist gates whose only purpose is repeating legal/safety copy.
@@ -54,7 +55,7 @@ export function presentExecutionSection(title: string, context?: string): {
     .replace(/\s+/gu, ' ')
     .trim();
 
-  return { title: neutralTitle || 'Старт', showContext: false };
+  return { title: neutralTitle || 'Start', showContext: false };
 }
 
 /**

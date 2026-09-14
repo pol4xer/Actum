@@ -66,17 +66,17 @@ function AppOverlay() {
     return (
       <View style={styles.overlay}>
         <View style={styles.storageCard}>
-          <Pill tone="danger">локальный журнал не сохранён</Pill>
+          <Pill tone="danger">local journal not saved</Pill>
           <ThemedText type="title">
-            {canRetry ? 'Actum не может записать данные' : 'Локальный журнал повреждён'}
+            {canRetry ? 'Actum cannot save your data' : 'Local journal is corrupted'}
           </ThemedText>
           <ThemedText style={styles.storageCopy}>
             {canRetry
-              ? 'Приложение остановило работу, чтобы не потерять таймеры, результаты и комментарии незаметно.'
-              : 'Actum сохранил исходные байты и не перезаписывает их автоматически. Для продолжения нужен явный локальный сброс.'}
+              ? 'Actum has paused to protect your timers, results, and comments from being lost.'
+              : 'Actum has preserved the original data without overwriting it. Reset the damaged local journal to continue.'}
           </ThemedText>
           <AppButton
-            label={canRetry ? 'Повторить локальное сохранение' : 'Сбросить повреждённый журнал'}
+            label={canRetry ? 'Retry saving locally' : 'Reset damaged journal'}
             variant={canRetry ? 'secondary' : 'danger'}
             onPress={async () => {
               if (canRetry) await retryPersistence();

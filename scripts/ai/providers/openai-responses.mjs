@@ -56,7 +56,7 @@ export async function createOpenAIResponse({
   let responseId = boundedStringOrUndefined(resumeResponseId, 4, 180);
 
   if (resumeResponseId != null && !responseId) {
-    throw providerError('Некорректный ID фонового запроса OpenAI.', {
+    throw providerError('Invalid OpenAI background response ID.', {
       status: 502,
       code: 'upstream_invalid_response_id',
       stage,
@@ -120,7 +120,7 @@ export async function createOpenAIResponse({
   let lastReportedAt = 0;
   while (payload?.status === 'queued' || payload?.status === 'in_progress') {
     if (!responseId) {
-      throw providerError('OpenAI не вернул ID фонового запроса.', {
+      throw providerError('OpenAI did not return a background response ID.', {
         status: 502,
         code: 'upstream_invalid_response',
         stage,
@@ -132,7 +132,7 @@ export async function createOpenAIResponse({
 
     const remainingMs = deadlineAt - performance.now();
     if (remainingMs <= 0) {
-      throw providerError('OpenAI не завершил запрос вовремя.', {
+      throw providerError('OpenAI did not complete the request in time.', {
         status: 504,
         code: 'upstream_timeout',
         stage,
@@ -178,7 +178,7 @@ export async function createOpenAIResponse({
     const terminalMessage =
       payload?.error?.message ||
       payload?.incomplete_details?.reason ||
-      `OpenAI завершил запрос со статусом ${payload.status}.`;
+      `OpenAI finished the request with status ${payload.status}.`;
     throw providerError(terminalMessage, {
       status: 502,
       code: payload?.error?.code || `response_${payload.status}`,
@@ -193,7 +193,7 @@ export async function createOpenAIResponse({
 
   const refusal = contentItems(payload).find((content) => content.type === 'refusal');
   if (refusal) {
-    throw providerError(refusal.refusal || 'OpenAI отказался обработать эту цель.', {
+    throw providerError(refusal.refusal || 'OpenAI declined to process this goal.', {
       status: 422,
       code: 'refusal',
       stage,
@@ -294,8 +294,8 @@ async function requestJson(
     } catch (cause) {
       throw providerError(
         timedOut || controller.signal.aborted
-          ? 'Соединение с OpenAI превысило допустимое время.'
-          : 'Сетевое соединение с OpenAI прервалось.',
+          ? 'The connection to OpenAI timed out.'
+          : 'The network connection to OpenAI was interrupted.',
         {
           status: timedOut || controller.signal.aborted ? 504 : 502,
           code:
@@ -320,8 +320,8 @@ async function requestJson(
       const readTimedOut = timedOut || controller.signal.aborted;
       throw providerError(
         readTimedOut
-          ? 'Чтение ответа OpenAI превысило допустимое время.'
-          : 'Не удалось прочитать ответ OpenAI.',
+          ? 'Reading the OpenAI response timed out.'
+          : 'Could not read the OpenAI response.',
         {
           status: readTimedOut ? 504 : 502,
           code: readTimedOut ? 'upstream_timeout' : 'upstream_read_error',
@@ -339,7 +339,7 @@ async function requestJson(
       try {
         payload = JSON.parse(text);
       } catch (cause) {
-        throw providerError('OpenAI вернул нечитаемый ответ.', {
+        throw providerError('OpenAI returned an unreadable response.', {
           status: 502,
           code: 'upstream_invalid_json',
           stage,
@@ -366,7 +366,7 @@ async function requestJson(
     }
 
     if (!payload || typeof payload !== 'object') {
-      throw providerError('OpenAI вернул пустой ответ.', {
+      throw providerError('OpenAI returned an empty response.', {
         status: 502,
         code: 'upstream_invalid_response',
         stage,

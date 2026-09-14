@@ -122,14 +122,14 @@ test('every day requires a measurable primary goal block', () => {
   delete missing.days[0].execution.primaryBlockIndex;
   assert.throws(
     () => validatePlan(missing),
-    /execution\.primaryBlockIndex: обязательное поле отсутствует/,
+    /execution\.primaryBlockIndex: required field is missing/,
   );
 
   const absent = actionablePlan();
   absent.days[0].execution.primaryBlockIndex = 2;
   assert.throws(
     () => validatePlan(absent),
-    /execution\.primaryBlockIndex: указанный главный блок отсутствует/,
+    /execution\.primaryBlockIndex: the specified primary block is missing/,
   );
 
   const checklistPrimary = actionablePlan();
@@ -143,14 +143,14 @@ test('every day requires a measurable primary goal block', () => {
   checklistPrimary.days[0].execution.primaryBlockIndex = 0;
   assert.throws(
     () => validatePlan(checklistPrimary),
-    /главный блок дня должен быть измеримым timer или counter/,
+    /the primary daily block must be a measurable timer or counter/,
   );
 
   const logPrimary = actionablePlan();
   logPrimary.days[0].execution.blocks = [textLogBlock()];
   assert.throws(
     () => validatePlan(logPrimary),
-    /главный блок дня должен быть измеримым timer или counter/,
+    /the primary daily block must be a measurable timer or counter/,
   );
 });
 
@@ -159,14 +159,14 @@ test('numeric target fixes the primary primitive, unit, and baseline load', () =
   wrongPrimitive.days[0].execution.blocks = [counterBlock()];
   assert.throws(
     () => validatePlan(wrongPrimitive),
-    /для временной цели главным блоком должен быть timer/,
+    /a time goal requires a timer as its primary block/,
   );
 
   const missingLoad = actionablePlan();
   missingLoad.days[12].execution.blocks[0].loadBasis = null;
   assert.throws(
     () => validatePlan(missingLoad),
-    /days\.12\.execution\.blocks\.0\.loadBasis: главный блок должен содержать точную нагрузку от baseline/,
+    /days\.12\.execution\.blocks\.0\.loadBasis: the primary block must contain an exact load calculated from baseline/,
   );
 });
 
@@ -201,7 +201,7 @@ test('a zero baseline uses positive absolute primary doses instead of impossible
         expectedBaselineStatement: baselineStatement,
         trustedBaseline: { value: 0, unit: 'seconds' },
       })),
-    /каждый тренировочный день должен содержать целевую дозу не меньше 12 seconds/,
+    /each training day must have a target dose of at least 12 seconds/,
   );
 });
 
@@ -215,7 +215,7 @@ test('passive recovery, safety gates, and symptom journals cannot consume a miss
   };
   assert.throws(
     () => validatePlan(passive),
-    /пассивное восстановление не может заменять целевую практику/,
+    /passive recovery cannot replace target practice/,
   );
 
   const negatedAction = actionablePlan();
@@ -223,7 +223,7 @@ test('passive recovery, safety gates, and symptom journals cannot consume a miss
     'Не задерживай дыхание; лежи до сигнала таймера.';
   assert.throws(
     () => validatePlan(negatedAction),
-    /пассивное восстановление не может заменять целевую практику/,
+    /passive recovery cannot replace target practice/,
   );
 
   const safetyGate = actionablePlan();
@@ -240,7 +240,7 @@ test('passive recovery, safety gates, and symptom journals cannot consume a miss
   );
   assert.throws(
     () => validatePlan(safetyGate),
-    /проверка безопасности или восстановления не является исполняемой практикой/,
+    /a safety or recovery check is not executable practice/,
   );
 
   const neutralSafetyGate = actionablePlan();
@@ -256,7 +256,7 @@ test('passive recovery, safety gates, and symptom journals cannot consume a miss
   );
   assert.throws(
     () => validatePlan(neutralSafetyGate),
-    /проверка безопасности или восстановления не является исполняемой практикой/,
+    /a safety or recovery check is not executable practice/,
   );
 
   const symptomLog = actionablePlan();
@@ -268,7 +268,7 @@ test('passive recovery, safety gates, and symptom journals cannot consume a miss
   );
   assert.throws(
     () => validatePlan(symptomLog),
-    /журнал симптомов или восстановления должен быть вынесен из исполняемой практики/,
+    /a symptom or recovery log must stay outside executable practice/,
   );
 });
 
@@ -282,7 +282,7 @@ test('passive breathing inflections stay blocked without blacklisting legitimate
     passive.days[6].execution.blocks[0].instruction = instruction;
     assert.throws(
       () => validatePlan(passive),
-      /(?:пассивное восстановление не может заменять целевую практику|обычное дыхание без целевого действия не является практикой)/,
+      /(?:passive recovery cannot replace target practice|normal breathing without a target action is not practice)/,
       instruction,
     );
   }
@@ -330,7 +330,7 @@ test('ordinary breathing is classified by the goal action instead of by a global
     'Сохраняй обычное дыхание до сигнала таймера.';
   assert.throws(
     () => validatePlan(ordinaryBreathingOnly),
-    /обычное дыхание без целевого действия не является практикой/,
+    /normal breathing without a target action is not practice/,
   );
 
   for (const [title, instruction] of [
@@ -345,7 +345,7 @@ test('ordinary breathing is classified by the goal action instead of by a global
       'Назначенный интервал завершён полностью.';
     assert.throws(
       () => validatePlan(filler),
-      /пассивное ожидание, отдых или расслабление не может быть главной целевой практикой/,
+      /passive waiting, rest or relaxation cannot be the primary target practice/,
       title,
     );
   }
@@ -367,7 +367,7 @@ test('ordinary breathing is classified by the goal action instead of by a global
       'Пассивный интервал завершён полностью.';
     assert.throws(
       () => validatePlan(contextualMention),
-      /(?:пассивное ожидание, отдых или расслабление не может быть главной целевой практикой|главный блок дня должен содержать явное действие задержки дыхания непосредственно в instruction)/,
+      /(?:passive waiting, rest or relaxation cannot be the primary target practice|the primary daily block must contain an explicit breath-holding action in its instruction)/,
       instruction,
     );
   }
@@ -393,7 +393,7 @@ test('passive timer work cannot masquerade as an active non-breathing goal', () 
     'Ляг на спину и расслабляй мышцы до сигнала таймера.';
   assert.throws(
     () => validatePlan(passivePlank, { expectedTargetStatement: plankGoal }),
-    /пассивное ожидание, отдых или расслабление не может быть главной целевой практикой/,
+    /passive waiting, rest or relaxation cannot be the primary target practice/,
   );
 
   const activeFromFloor = actionablePlan();
@@ -484,7 +484,7 @@ test('counter goals reject token daily work even when one late day is high', () 
   });
   assert.throws(
     () => validatePlan(tokenWork, options),
-    /каждый тренировочный день должен содержать целевую дозу не меньше 2 reps/,
+    /each training day must have a target dose of at least 2 reps/,
   );
 });
 
@@ -493,28 +493,28 @@ test('plan-v7 rejects legacy day fields and non-exact block shapes', () => {
   legacySteps.days[0].steps = ['Старое свободное указание.'];
   assert.throws(
     () => validatePlan(legacySteps),
-    /days\.0\.steps: поле не поддерживается контрактом plan-v7/,
+    /days\.0\.steps: field is not supported by the plan-v7 contract/,
   );
 
   const legacyProgression = actionablePlan();
   legacyProgression.days[0].progressionRule = 'Если готово, увеличь; иначе повтори.';
   assert.throws(
     () => validatePlan(legacyProgression),
-    /days\.0\.progressionRule: поле не поддерживается контрактом plan-v7/,
+    /days\.0\.progressionRule: field is not supported by the plan-v7 contract/,
   );
 
   const extraTimerField = actionablePlan();
   extraTimerField.days[0].execution.blocks[0].workSecondsPerSet = 36;
   assert.throws(
     () => validatePlan(extraTimerField),
-    /execution\.blocks\.0\.workSecondsPerSet: поле не поддерживается контрактом plan-v7/,
+    /execution\.blocks\.0\.workSecondsPerSet: field is not supported by the plan-v7 contract/,
   );
 
   const wrongExecutionKind = actionablePlan();
   wrongExecutionKind.days[0].execution.kind = 'routine';
   assert.throws(
     () => validatePlan(wrongExecutionKind),
-    /execution\.kind: для plan-v7 ожидается только in_app/,
+    /execution\.kind: plan-v7 only supports in_app/,
   );
 });
 
@@ -533,7 +533,7 @@ test('numeric and estimated block durations must fit the declared day', () => {
   };
   assert.throws(
     () => validatePlan(timerPlan),
-    /известная длительность блоков превышает заявленную длительность дня/,
+    /the known block duration exceeds the stated daily duration/,
   );
 
   const counterPlan = actionablePlan();
@@ -549,7 +549,7 @@ test('numeric and estimated block durations must fit the declared day', () => {
   counterDay.execution.blocks.push(counterBlock({ workSecondsPerSet: 61 }));
   assert.throws(
     () => validatePlan(counterPlan),
-    /известная длительность блоков превышает заявленную длительность дня/,
+    /the known block duration exceeds the stated daily duration/,
   );
 
   const estimatedPlan = actionablePlan();
@@ -568,7 +568,7 @@ test('numeric and estimated block durations must fit the declared day', () => {
   ];
   assert.throws(
     () => validatePlan(estimatedPlan),
-    /известная длительность блоков превышает заявленную длительность дня/,
+    /the known block duration exceeds the stated daily duration/,
   );
 
 });
@@ -578,7 +578,7 @@ test('vague block instructions and delegated choices are rejected', () => {
   vague.days[0].execution.blocks[0].instruction = 'Подготовься.';
   assert.throws(
     () => validatePlan(vague),
-    /execution\.blocks\.0\.instruction: инструкция подменена общей фразой/,
+    /execution\.blocks\.0\.instruction: the instruction is a generic placeholder/,
   );
 
   const delegated = actionablePlan();
@@ -586,7 +586,7 @@ test('vague block instructions and delegated choices are rejected', () => {
     'Choose a suitable exercise and calculate the duration yourself.';
   assert.throws(
     () => validatePlan(delegated),
-    /пользователь не должен сам выбирать или рассчитывать действие/,
+    /the user must not have to choose or calculate the action/,
   );
 });
 
@@ -638,7 +638,7 @@ test('generated instructional text rejects Russian and English off-app dependenc
     plan.days[0].execution.blocks[0].instruction = instruction;
     assert.throws(
       () => validatePlan(plan),
-      /внешняя зависимость: действие должно выполняться внутри Actum/,
+      /external dependency detected: the action must run inside Actum/,
       instruction,
     );
   }
@@ -675,7 +675,7 @@ test('text_log permits in-app notes but still rejects named or explicit external
     plan.days[0].execution.blocks = [textLogBlock({ prompt })];
     assert.throws(
       () => validatePlan(plan),
-      /внешняя зависимость: действие должно выполняться внутри Actum/,
+      /external dependency detected: the action must run inside Actum/,
       prompt,
     );
   }
@@ -688,14 +688,14 @@ test('text_log bounds and checklist item counts are enforced', () => {
   ];
   assert.throws(
     () => validatePlan(invalidLog),
-    /maxCharacters должен быть не меньше minCharacters/,
+    /maxCharacters must be at least minCharacters/,
   );
 
   const invalidChecklist = actionablePlan();
   invalidChecklist.days[0].execution.blocks = [checklistBlock({ items: [] })];
   assert.throws(
     () => validatePlan(invalidChecklist),
-    /checklist должен содержать от одного до восьми пунктов/,
+    /checklist must contain one to eight items/,
   );
 });
 
@@ -713,7 +713,7 @@ test('all user-visible narrative fields reject off-app dependencies', () => {
     mutate(plan);
     assert.throws(
       () => validatePlan(plan),
-      /внешняя зависимость: действие должно выполняться внутри Actum/,
+      /external dependency detected: the action must run inside Actum/,
       label,
     );
   }
@@ -736,7 +736,7 @@ test('safety copy allows prohibitions and risk-triggered escalation but not rout
   plan.safetyNotes = ['Перед следующим днём обязательно посети специалиста.'];
   assert.throws(
     () => validatePlan(plan),
-    /внешняя зависимость: действие должно выполняться внутри Actum/,
+    /external dependency detected: the action must run inside Actum/,
   );
 
   plan.safetyNotes = [
@@ -744,7 +744,7 @@ test('safety copy allows prohibitions and risk-triggered escalation but not rout
   ];
   assert.throws(
     () => validatePlan(plan),
-    /внешняя зависимость: действие должно выполняться внутри Actum/,
+    /external dependency detected: the action must run inside Actum/,
   );
 
   for (const mixedNote of [
@@ -754,7 +754,7 @@ test('safety copy allows prohibitions and risk-triggered escalation but not rout
     plan.safetyNotes = [mixedNote];
     assert.throws(
       () => validatePlan(plan),
-      /внешняя зависимость: действие должно выполняться внутри Actum/,
+      /external dependency detected: the action must run inside Actum/,
       mixedNote,
     );
   }
@@ -802,7 +802,7 @@ test('text_log can mention support without turning it into external contact', ()
     plan.days[0].execution.blocks = [textLogBlock({ prompt })];
     assert.throws(
       () => validatePlan(plan),
-      /внешняя зависимость: действие должно выполняться внутри Actum/,
+      /external dependency detected: the action must run inside Actum/,
       prompt,
     );
   }
@@ -817,7 +817,7 @@ test('calendar-labelled block titles do not become hidden timed work', () => {
   plan.days[0].execution.blocks[0].title = 'Удержание 40 секунд';
   assert.throws(
     () => validatePlan(plan),
-    /временная нагрузка должна быть структурным полем встроенного timer\/counter/,
+    /time dosage must be a structured field of the built-in timer\/counter/,
   );
 });
 
@@ -830,7 +830,7 @@ test('external forms and tables remain forbidden inside executable blocks', () =
     plan.days[0].execution.blocks[0].instruction = instruction;
     assert.throws(
       () => validatePlan(plan),
-      /внешняя зависимость: действие должно выполняться внутри Actum/,
+      /external dependency detected: the action must run inside Actum/,
       instruction,
     );
   }
@@ -850,7 +850,7 @@ test('timed work cannot hide in block free text without an in-app clock', () => 
     mutate(plan);
     assert.throws(
       () => validatePlan(plan),
-      /временная нагрузка должна быть структурным полем встроенного timer\/counter/,
+      /time dosage must be a structured field of the built-in timer\/counter/,
       label,
     );
   }
@@ -860,7 +860,7 @@ test('counter units are non-temporal, custom labels align, and discrete targets 
   for (const unit of ['seconds', 'minutes']) {
     const plan = actionablePlan();
     plan.days[0].execution.blocks = [counterBlock({ unit })];
-    assert.throws(() => validatePlan(plan), /неизвестная единица счётчика/);
+    assert.throws(() => validatePlan(plan), /unknown counter unit/);
   }
 
   const custom = actionablePlan();
@@ -887,7 +887,7 @@ test('counter units are non-temporal, custom labels align, and discrete targets 
     ];
     assert.throws(
       () => validatePlan(temporalCustom),
-      /временная единица должна использовать timer, а не counter/,
+      /a time unit must use timer instead of counter/,
     );
   }
 
@@ -896,7 +896,7 @@ test('counter units are non-temporal, custom labels align, and discrete targets 
     plan.days[0].execution.blocks = [counterBlock({ unit, targetPerSet: 2.5 })];
     assert.throws(
       () => validatePlan(plan),
-      new RegExp(`для единицы ${unit} ожидается целое число`),
+      new RegExp(`expected an integer for unit ${unit}`),
     );
   }
 });
@@ -907,28 +907,28 @@ test('timer baseline arithmetic and executable target equality are enforced', ()
   wrongCalculation.days[0].execution.blocks[0].durationSecondsPerSet = 44;
   assert.throws(
     () => validatePlan(wrongCalculation),
-    /result 44 не соответствует 45% от baseline 80/,
+    /result 44 does not equal 45% of baseline 80/,
   );
 
   const mismatchedDuration = actionablePlan();
   mismatchedDuration.days[0].execution.blocks[0].durationSecondsPerSet = 40;
   assert.throws(
     () => validatePlan(mismatchedDuration),
-    /durationSecondsPerSet 40 не совпадает с loadBasis\.result 36/,
+    /durationSecondsPerSet 40 does not match loadBasis\.result 36/,
   );
 
   const almostEqualDuration = actionablePlan();
   almostEqualDuration.days[0].execution.blocks[0].loadBasis.result = 36.009;
   assert.throws(
     () => validatePlan(almostEqualDuration),
-    /durationSecondsPerSet 36 не совпадает с loadBasis\.result 36\.009/,
+    /durationSecondsPerSet 36 does not match loadBasis\.result 36\.009/,
   );
 
   const wrongUnit = actionablePlan();
   wrongUnit.days[0].execution.blocks[0].loadBasis.baseUnit = 'reps';
   assert.throws(
     () => validatePlan(wrongUnit),
-    /loadBasis\.baseUnit: ожидается локально распознанная единица seconds/,
+    /loadBasis\.baseUnit: expected the locally parsed unit seconds/,
   );
 });
 
@@ -984,7 +984,7 @@ test('counter baseline result equals targetPerSet', () => {
         trustedBaseline: { value: 8, unit: 'reps' },
         trustedTarget: null,
       })),
-    /targetPerSet 7 не совпадает с loadBasis\.result 6/,
+    /targetPerSet 7 does not match loadBasis\.result 6/,
   );
 
   plan.days[0].execution.blocks[0].targetPerSet = 6;
@@ -997,7 +997,7 @@ test('counter baseline result equals targetPerSet', () => {
         trustedBaseline: { value: 8, unit: 'reps' },
         trustedTarget: null,
       })),
-    /targetPerSet 6 не совпадает с loadBasis\.result 6\.009/,
+    /targetPerSet 6 does not match loadBasis\.result 6\.009/,
   );
 });
 
@@ -1008,7 +1008,7 @@ test('trusted move or practice baselines require a load-linked numeric block', (
   });
   assert.throws(
     () => validatePlan(ignoredBaseline),
-    /главный блок должен содержать точную нагрузку от baseline/,
+    /the primary block must contain an exact load calculated from baseline/,
   );
 
   const untrusted = actionablePlan();
@@ -1028,43 +1028,43 @@ test('duration, baseline, exact target, calendar coverage, and phases remain str
   changedDuration.duration = 'half-year';
   assert.throws(
     () => validatePlan(changedDuration),
-    /duration: выбранный срок программы был изменён/,
+    /duration: the selected program duration was changed/,
   );
 
   const changedTarget = actionablePlan();
   changedTarget.target.userStatement = `${USER_PROMPT}.`;
-  assert.throws(() => validatePlan(changedTarget), /цель пользователя должна быть сохранена дословно/);
+  assert.throws(() => validatePlan(changedTarget), /the user goal must be preserved verbatim/);
 
   const changedStatement = actionablePlan();
   changedStatement.baseline.userStatement = 'Другая исходная точка';
   assert.throws(
     () => validatePlan(changedStatement),
-    /baseline\.userStatement: исходная точка пользователя была изменена/,
+    /baseline\.userStatement: the user baseline was changed/,
   );
 
   const selfDeclaredBaseline = actionablePlan();
   selfDeclaredBaseline.baseline.value = 120;
   assert.throws(
     () => validatePlan(selfDeclaredBaseline),
-    /baseline\.value: ожидается локально распознанное значение 80/,
+    /baseline\.value: expected the locally parsed value 80/,
   );
 
   const missingDay = actionablePlan();
   missingDay.days.pop();
-  assert.throws(() => validatePlan(missingDay), /ровно 30 календарных дней/);
+  assert.throws(() => validatePlan(missingDay), /exactly 30 calendar days/);
 
   const reordered = actionablePlan();
   [reordered.days[0], reordered.days[1]] = [reordered.days[1], reordered.days[0]];
   assert.throws(
     () => validatePlan(reordered),
-    /days\.0\.dayNumber: ожидается последовательный день 1/,
+    /days\.0\.dayNumber: expected consecutive day 1/,
   );
 
   const phaseGap = actionablePlan();
   phaseGap.phases[1].startDay = 12;
   assert.throws(
     () => validatePlan(phaseGap),
-    /ожидается день 11 без разрыва или пересечения/,
+    /expected day 11 without a gap or overlap/,
   );
 });
 
@@ -1073,28 +1073,28 @@ test('roadmap is monotonic, reaches the final target, and matches the day-30 ass
   backwards.roadmap[4].targetValue = 200;
   assert.throws(
     () => validatePlan(backwards),
-    /roadmap\.4\.targetValue: этапы должны монотонно приближаться к цели/,
+    /roadmap\.4\.targetValue: milestones must move monotonically toward the goal/,
   );
 
   const missesTarget = actionablePlan();
   missesTarget.roadmap[11].targetValue = 590;
   assert.throws(
     () => validatePlan(missesTarget),
-    /целевой и последующие циклы должны точно совпадать с конечной целью/,
+    /the target cycle and all later cycles must exactly match the final goal/,
   );
 
   const mismatchedAssessment = actionablePlan();
   mismatchedAssessment.assessment.targetValue = 121;
   assert.throws(
     () => validatePlan(mismatchedAssessment),
-    /assessment: контрольный замер должен совпадать с целью текущего цикла/,
+    /assessment: the assessment must match the current cycle target/,
   );
 
   const displayOnlyAssessment = actionablePlan();
   displayOnlyAssessment.days[29].execution.blocks = [checklistBlock()];
   assert.throws(
     () => validatePlan(displayOnlyAssessment),
-    /главный блок дня должен быть измеримым timer или counter/,
+    /the primary daily block must be a measurable timer or counter/,
   );
 
   const timerMismatch = actionablePlan();
@@ -1107,7 +1107,7 @@ test('roadmap is monotonic, reaches the final target, and matches the day-30 ass
   };
   assert.throws(
     () => validatePlan(timerMismatch),
-    /длительность timer не совпадает с целью замера/,
+    /timer duration does not match the assessment target/,
   );
 });
 
@@ -1161,7 +1161,7 @@ test('targetCycleNumber reaches the goal at the earliest declared cycle without 
   });
   assert.throws(
     () => validatePlan(assessmentJump),
-    /каждый тренировочный день должен содержать целевую дозу не меньше 60 seconds \(max из 25% baseline и 10% цели текущего цикла\)/,
+    /each training day must have a target dose of at least 60 seconds \(the maximum of 25% baseline and 10% of the current cycle target\)/,
   );
 
   const lateAssessmentJump = structuredClone(firstMonth);
@@ -1174,7 +1174,7 @@ test('targetCycleNumber reaches the goal at the earliest declared cycle without 
   };
   assert.throws(
     () => validatePlan(lateAssessmentJump),
-    /последний тренировочный день перед замером должен содержать целевую дозу не меньше 150 seconds/,
+    /the last training day before assessment must have a target dose of at least 150 seconds/,
   );
 
   const thirdCycle = actionablePlan();
@@ -1189,35 +1189,35 @@ test('targetCycleNumber reaches the goal at the earliest declared cycle without 
 
   assert.throws(
     () => validatePlan(thirdCycle, { researchTargetCycleNumber: 2 }),
-    /targetCycleNumber: ожидается подтверждённый research цикл 2/,
+    /targetCycleNumber: expected the research-confirmed cycle 2/,
   );
 
   const stretched = structuredClone(thirdCycle);
   stretched.roadmap[2].targetValue = 500;
   assert.throws(
     () => validatePlan(stretched),
-    /целевой и последующие циклы должны точно совпадать с конечной целью/,
+    /the target cycle and all later cycles must exactly match the final goal/,
   );
 
   const declaredLate = structuredClone(thirdCycle);
   declaredLate.targetCycleNumber = 4;
   assert.throws(
     () => validatePlan(declaredLate),
-    /конечная цель достигнута раньше указанного targetCycleNumber/,
+    /the final goal is reached before the specified targetCycleNumber/,
   );
 
   const plateau = structuredClone(thirdCycle);
   plateau.roadmap[1].targetValue = 120;
   assert.throws(
     () => validatePlan(plateau),
-    /промежуточные будущие этапы не должны создавать плато/,
+    /intermediate future milestones must not create plateaus/,
   );
 
   const noCurrentProgress = actionablePlan();
   noCurrentProgress.roadmap[0].targetValue = 80;
   assert.throws(
     () => validatePlan(noCurrentProgress),
-    /текущий и будущие этапы должны строго приближаться к цели/,
+    /current and future milestones must strictly approach the goal/,
   );
 });
 
@@ -1245,7 +1245,7 @@ test('decreasing targets use the same strict earliest-cycle rules', () => {
   plan.roadmap[0].targetValue = 80;
   assert.throws(
     () => validatePlan(plan, { trustedTarget: { value: 50, unit: 'seconds' } }),
-    /текущий и будущие этапы должны строго приближаться к цели/,
+    /current and future milestones must strictly approach the goal/,
   );
 });
 
@@ -1328,7 +1328,7 @@ test('a missed planned target remains frozen while the next cycle retries it', (
       programContext,
       researchTargetCycleNumber: 3,
     })),
-    /targetCycleNumber: после нового замера ожидается цикл не раньше 3/,
+    /targetCycleNumber: after the new assessment, expected a cycle no earlier than 3/,
   );
 });
 
@@ -1336,7 +1336,7 @@ test('quick planning cannot invent a shorter target cycle without research', () 
   const fresh = actionablePlan();
   assert.throws(
     () => validatePlan(fresh, { researchTargetCycleNumber: null }),
-    /без web-research ожидается сохранённый ближайший цикл 1/,
+    /without web research, expected the saved earliest cycle 1/,
   );
 
   const second = actionablePlan();
@@ -1452,20 +1452,20 @@ test('later cycles adapt to a new baseline without rewriting completed roadmap e
   renamedTarget.target.normalizedMetric = 'Другая формулировка той же метрики';
   assert.throws(
     () => validatePlanActionability(renamedTarget, options),
-    /target: цель программы нельзя изменять между циклами/,
+    /target: the program goal cannot change between cycles/,
   );
 
   const aliasedTargetUnit = structuredClone(secondCycle);
   aliasedTargetUnit.target.unit = 'секунд';
   assert.throws(
     () => validatePlanActionability(aliasedTargetUnit, options),
-    /target: цель программы нельзя изменять между циклами/,
+    /target: the program goal cannot change between cycles/,
   );
 
   secondCycle.roadmap[0].focus = 'Переписанный завершённый цикл.';
   assert.throws(
     () => validatePlanActionability(secondCycle, options),
-    /roadmap\.0: завершённый этап программы нельзя изменять/,
+    /roadmap\.0: a completed program milestone cannot change/,
   );
 });
 
@@ -1519,7 +1519,7 @@ test('a migrated legacy roadmap preserves completed null milestones but keeps th
   rewrittenPast.roadmap[0].targetUnit = 'seconds';
   assert.throws(
     () => validatePlanActionability(rewrittenPast, options),
-    /roadmap\.0: завершённый этап программы нельзя изменять/,
+    /roadmap\.0: a completed program milestone cannot change/,
   );
 
   const missingActiveMilestone = structuredClone(secondCycle);
@@ -1529,7 +1529,7 @@ test('a migrated legacy roadmap preserves completed null milestones but keeps th
   missingActiveMilestone.assessment.targetUnit = null;
   assert.throws(
     () => validatePlanActionability(missingActiveMilestone, options),
-    /roadmap\.1\.targetValue: ожидается число/,
+    /roadmap\.1\.targetValue: expected a number/,
   );
 
   const freshPlanWithNullMilestone = actionablePlan();
@@ -1539,7 +1539,7 @@ test('a migrated legacy roadmap preserves completed null milestones but keeps th
   freshPlanWithNullMilestone.assessment.targetUnit = null;
   assert.throws(
     () => validatePlan(freshPlanWithNullMilestone),
-    /roadmap\.0\.targetValue: ожидается число/,
+    /roadmap\.0\.targetValue: expected a number/,
   );
 });
 
@@ -1635,32 +1635,38 @@ test('prompt, research, schema, and validator advertise the direct-practice plan
 
   assert.equal(PLAN_CONTRACT_VERSION, 'plan-v7');
   assert.equal(PLAN_VALIDATOR_VERSION, 'plan-validator-v9');
-  assert.equal(PROMPT_VERSION, 'actum-plan-2026-09-04-direct-practice-v4');
-  assert.equal(RESEARCH_PROMPT_VERSION, 'actum-research-2026-09-04-fastest-program-v5');
+  assert.equal(PROMPT_VERSION, 'actum-plan-2026-09-14-english-v5');
+  assert.equal(RESEARCH_PROMPT_VERSION, 'actum-research-2026-09-14-english-v6');
   assert.ok(PLAN_SCHEMA.required.includes('duration'));
   assert.ok(PLAN_SCHEMA.required.includes('roadmap'));
   assert.ok(PLAN_SCHEMA.required.includes('assessment'));
   assert.ok(PLAN_SCHEMA.required.includes('targetCycleNumber'));
   assert.equal(PLAN_SCHEMA.required.includes('targetTimeline'), false);
-  assert.match(RESEARCH_INSTRUCTIONS, /timer,\s+counter, checklist и text_log/);
-  assert.match(RESEARCH_INSTRUCTIONS, /внутри Actum/);
-  assert.match(RESEARCH_INSTRUCTIONS, /максимальную траекторию: 12/);
-  assert.match(RESEARCH_INSTRUCTIONS, /retry cap исследователь не\s+получает/);
+  assert.match(RESEARCH_INSTRUCTIONS, /timer, counter, checklist and text_log/);
+  assert.match(RESEARCH_INSTRUCTIONS, /inside Actum/);
+  assert.match(RESEARCH_INSTRUCTIONS, /maximum trajectory: 12/);
+  assert.match(RESEARCH_INSTRUCTIONS, /researcher does not receive the selected retry cap/);
   assert.match(RESEARCH_INSTRUCTIONS, /earliestTargetCycleNumber/);
-  assert.match(RESEARCH_INSTRUCTIONS, /отдельный день\s+только отдыха/);
-  assert.match(instructions, /days содержит ровно 30 явных объектов/);
-  assert.match(instructions, /roadmap содержит ровно totalCycles/);
-  assert.match(instructions, /следующий запрос строит новый цикл/);
-  assert.match(instructions, /legacy-записи оба поля targetValue\/targetUnit равны null/);
-  assert.match(instructions, /текущая и все будущие\s+записи roadmap обязаны иметь числовые targetValue/);
-  assert.match(instructions, /durationSecondsPerSet точно равен assessment\.targetValue/);
+  assert.match(RESEARCH_INSTRUCTIONS, /separate day consisting only of rest/);
+  assert.match(instructions, /days contains exactly 30 explicit objects/);
+  assert.match(instructions, /roadmap contains exactly totalCycles/);
+  assert.match(instructions, /next request builds a new cycle/);
+  assert.match(instructions, /both targetValue\/targetUnit are null in a\s+completed legacy entry, preserve both null/);
+  assert.match(instructions, /current and all future\s+roadmap entries must have numeric targetValue/);
+  assert.match(instructions, /durationSecondsPerSet exactly\s+equal to assessment\.targetValue/);
   assert.match(instructions, /primaryBlockIndex/);
-  assert.match(instructions, /дней только отдыха или восстановления нет/);
-  assert.match(instructions, /главный блок каждого дня 1–29\s+имеет дозу не меньше max\(25% trustedBaseline\.value, 10% assessment\.targetValue\)/);
-  assert.match(instructions, /Главный блок дня 29.*не меньше 25% assessment\.targetValue/su);
-  assert.match(instructions, /обязателен именно в instruction/);
-  assert.match(instructions, /одиночную подводную задержку/);
-  assert.match(instructions, /Предупреждения допускаются только в safetyNotes и day\.warning/);
+  assert.match(instructions, /no rest-only or recovery-only days/);
+  assert.match(instructions, /primary block on days 1–29\s+has a dose of at least max\(25% trustedBaseline\.value, 10% assessment\.targetValue\)/);
+  assert.match(instructions, /primary block on day 29.*at least 25%\s+assessment\.targetValue/su);
+  assert.match(instructions, /required in the primary block instruction itself/);
+  assert.match(instructions, /solo underwater breath-holding/);
+  assert.match(instructions, /Warnings are allowed only in safetyNotes and day\.warning/);
+  assert.match(instructions, /all newly generated UI content in English/);
+  assert.match(instructions, /even when user input, legacy\s+research briefs or programContext use another language/);
+  assert.match(instructions, /Preserve target\.userStatement and baseline\.userStatement verbatim/);
+  assert.match(instructions, /completed roadmap entries verbatim/);
+  assert.match(RESEARCH_INSTRUCTIONS, /all generated text in English, even when the user input or sources use\s+another language/);
+  assert.doesNotMatch(instructions + RESEARCH_INSTRUCTIONS, /[А-Яа-яЁё]/u);
   assert.deepEqual(
     execution.properties.blocks.items.anyOf.map((variant) => variant.properties.kind.enum[0]),
     ['timer', 'counter', 'checklist', 'text_log'],

@@ -43,28 +43,28 @@ export default function AppTabs() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Сегодня',
+          title: 'Today',
           tabBarIcon: ({ color }) => <TabIcon name="index" color={color} />,
         }}
       />
       <Tabs.Screen
         name="journey"
         options={{
-          title: 'План',
+          title: 'Plan',
           tabBarIcon: ({ color }) => <TabIcon name="journey" color={color} />,
         }}
       />
       <Tabs.Screen
         name="twin"
         options={{
-          title: 'Двойник',
+          title: 'Twin',
           tabBarIcon: ({ color }) => <TabIcon name="twin" color={color} />,
         }}
       />
       <Tabs.Screen
         name="settings"
         options={{
-          title: 'Настройки',
+          title: 'Settings',
           tabBarIcon: ({ color }) => <TabIcon name="settings" color={color} />,
         }}
       />

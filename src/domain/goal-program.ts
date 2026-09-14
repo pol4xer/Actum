@@ -16,9 +16,9 @@ export const GOAL_DURATION_CONFIG = Object.freeze({
 } satisfies Record<GoalDuration, Readonly<{ totalDays: number; totalCycles: number }>>);
 
 const GOAL_DURATION_LABELS: Record<GoalDuration, string> = {
-  month: 'Месяц',
-  'half-year': 'Полгода',
-  year: 'Год',
+  month: '1 month',
+  'half-year': '6 months',
+  year: '1 year',
 };
 
 export function goalDurationLabel(duration: GoalDuration): string {
@@ -28,12 +28,12 @@ export function goalDurationLabel(duration: GoalDuration): string {
 export function inferGoalDuration(targetTimeline: string | undefined): GoalDuration {
   const normalized = targetTimeline?.trim().toLocaleLowerCase('ru-RU') ?? '';
   if (
-    /(?:полу?\s*-?\s*года?|полугод|6\s*месяц|шесть\s+месяц|six[-\s]+months?|half(?:[-\s]+a)?[-\s]+year)/u
+    /(?:полу?\s*-?\s*года?|полугод|6\s*(?:месяц|months?)|шесть\s+месяц|six[-\s]+months?|half(?:[-\s]+a)?[-\s]+year)/u
       .test(normalized)
   ) {
     return 'half-year';
   }
-  if (/(год|12\s*месяц|\byear\b|twelve\s+months?)/u.test(normalized)) return 'year';
+  if (/(год|12\s*(?:месяц|months?)|\byear\b|twelve\s+months?)/u.test(normalized)) return 'year';
   return 'month';
 }
 
@@ -126,8 +126,8 @@ export function createProgramRoadmap(
     const isFinal = cycleNumber === totalCycles;
     return {
       cycleNumber,
-      title: `Цикл ${cycleNumber}`,
-      focus: isFinal ? 'Итоговый цикл и контрольный замер' : 'Следующий адаптивный цикл',
+      title: `Cycle ${cycleNumber}`,
+      focus: isFinal ? 'Final cycle and assessment' : 'Next adaptive cycle',
       // A legacy migration cannot know evidence-backed intermediate targets.
       targetValue: isFinal ? target.value : null,
       targetUnit: isFinal ? target.unit : null,

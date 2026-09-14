@@ -33,8 +33,8 @@ export default function SettingsScreen() {
         );
         if (!granted) {
           Alert.alert(
-            'Уведомления не включены',
-            'Разрешение не выдано или эта функция недоступна в web-версии.',
+            'Notifications are off',
+            'Permission was not granted, or this feature is unavailable on the web.',
           );
           setNotificationsEnabled(false);
           return;
@@ -44,7 +44,7 @@ export default function SettingsScreen() {
       }
       setNotificationsEnabled(enabled);
     } catch {
-      Alert.alert('Не удалось изменить напоминание', 'Попробуй снова на устройстве или в development build.');
+      Alert.alert('Could not update the reminder', 'Try again on your device or in a development build.');
     } finally {
       setNotificationBusy(false);
     }
@@ -52,16 +52,16 @@ export default function SettingsScreen() {
 
   const confirmReset = () => {
     Alert.alert(
-      'Начать всё заново?',
-      'Будут удалены локальный профиль, цель, миссии и журнал событий на этом устройстве.',
+      'Start over?',
+      'This will delete your local profile, goal, missions, and activity log from this device.',
       [
-        { text: 'Отмена', style: 'cancel' },
+        { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Удалить данные',
+          text: 'Delete data',
           style: 'destructive',
           onPress: () => {
             resetProgress().catch(() => {
-              Alert.alert('Не удалось удалить данные');
+              Alert.alert('Could not delete data');
             });
           },
         },
@@ -71,11 +71,11 @@ export default function SettingsScreen() {
 
   const confirmNewGoal = () => {
     Alert.alert(
-      'Начать другую цель?',
-      'Текущий маршрут и его журнал будут удалены. Профиль, уровень и XP останутся.',
+      'Start a new goal?',
+      'Your current journey and its log will be deleted. Your profile, level, and XP will be kept.',
       [
-        { text: 'Отмена', style: 'cancel' },
-        { text: 'Сменить цель', style: 'destructive', onPress: startNewGoal },
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Change goal', style: 'destructive', onPress: startNewGoal },
       ],
     );
   };
@@ -85,12 +85,12 @@ export default function SettingsScreen() {
     if (!state.activeGoal || !plan) return;
     const firstMissionTitle = plan.missions[0]?.title;
     Alert.alert(
-      'Начать текущий месяц заново?',
-      'Прогресс этого цикла очистится, а большая цель и маршрут останутся. Новый запрос к GPT не отправится.',
+      'Restart this month?',
+      'Progress for this cycle will be cleared. Your overall goal and roadmap will be kept. No new request will be sent to GPT.',
       [
-        { text: 'Отмена', style: 'cancel' },
+        { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Начать с Дня 1',
+          text: 'Restart from Day 1',
           style: 'destructive',
           onPress: async () => {
             restartActivePlan(plan.id);
@@ -107,7 +107,7 @@ export default function SettingsScreen() {
                 reminderUpdated = false;
               }
             }
-            Alert.alert('План перезапущен', reminderUpdated ? 'Открыт День 1.' : 'Открыт День 1. Напоминание не обновилось.');
+            Alert.alert('Plan restarted', reminderUpdated ? 'Day 1 is ready.' : 'Day 1 is ready. The reminder could not be updated.');
           },
         },
       ],
@@ -116,31 +116,31 @@ export default function SettingsScreen() {
 
   const legalInfo: ContextInfoSection[] = [
     {
-      heading: 'Ответственность',
+      heading: 'Responsibility',
       body:
-        'Actum автоматически предлагает справочный план. Пользователь сам выбирает действия и принимает на себя риски. Actum не несёт ответственности за вред или последствия самостоятельного выполнения.',
+        'Actum generates a plan for informational purposes. You choose your own actions and accept the associated risks. Actum is not responsible for harm or consequences resulting from carrying out the plan on your own.',
     },
     {
-      heading: 'Статус сервиса',
+      heading: 'Service status',
       body:
-        'Actum не является медицинской услугой, не ставит диагнозы, не лечит и не гарантирует достижение цели.',
+        'Actum is not a medical service. It does not diagnose or treat conditions, and it does not guarantee that you will reach your goal.',
     },
     {
-      heading: 'Данные',
-      body: `Прогресс хранится на устройстве. При создании плана текст цели отправляется в OpenAI через локальный сервер; журнал выполнения не отправляется. Версия данных: ${state.schemaVersion}.`,
+      heading: 'Data',
+      body: `Your progress is stored on your device. When you create a plan, your goal text is sent to OpenAI through the local server; your activity log is not sent. Data version: ${state.schemaVersion}.`,
     },
   ];
 
   return (
     <Screen>
-      <ScreenHeader title="Настройки" />
+      <ScreenHeader title="Settings" />
 
       <Card style={styles.profileCard}>
         <HeroSigil archetype={state.profile?.archetype} size={68} level={state.character.level} />
         <View style={styles.profileCopy}>
-          <ThemedText type="subtitle">{state.profile?.name ?? 'Путник'}</ThemedText>
+          <ThemedText type="subtitle">{state.profile?.name ?? 'Traveler'}</ThemedText>
           <View style={styles.badges}>
-            <Pill tone="gold">уровень {state.character.level}</Pill>
+            <Pill tone="gold">level {state.character.level}</Pill>
             <Pill tone="neutral">{state.character.xp} XP</Pill>
           </View>
         </View>
@@ -148,17 +148,17 @@ export default function SettingsScreen() {
 
       <View style={styles.section}>
         <ThemedText type="eyebrow" style={styles.sectionTitle}>
-          Ритм
+          Routine
         </ThemedText>
         <SettingRow
           icon="◷"
-          title="Напоминание"
+          title="Reminder"
           subtitle={`${String(state.settings.reminderHour).padStart(2, '0')}:${String(
             state.settings.reminderMinute,
           ).padStart(2, '0')}`}
           control={
             <Switch
-              accessibilityLabel="Ежедневное напоминание"
+              accessibilityLabel="Daily reminder"
               disabled={notificationBusy}
               onValueChange={toggleNotifications}
               trackColor={{ false: Palette.line, true: Palette.accent }}
@@ -171,17 +171,17 @@ export default function SettingsScreen() {
 
       <View style={styles.section}>
         <ThemedText type="eyebrow" style={styles.sectionTitle}>
-          План
+          Plan
         </ThemedText>
         {state.activeGoal && state.activePlan ? (
           <AppButton
-            label="Начать текущий месяц заново"
+            label="Restart this month"
             variant="secondary"
             onPress={confirmRestartPlan}
           />
         ) : null}
         {state.activeGoal ? (
-          <AppButton label="Новая цель" variant="secondary" onPress={confirmNewGoal} />
+          <AppButton label="New goal" variant="secondary" onPress={confirmNewGoal} />
         ) : null}
       </View>
 
@@ -189,20 +189,20 @@ export default function SettingsScreen() {
 
       <View style={styles.section}>
         <ThemedText type="eyebrow" style={styles.sectionTitle}>
-          Данные и правила
+          Data and policies
         </ThemedText>
         <SettingRow
           icon="§"
           title="Legal & Service"
           control={
             <InfoPopover
-              accessibilityLabel="Открыть Legal & Service"
+              accessibilityLabel="Open Legal & Service"
               sections={legalInfo}
               title="Legal & Service"
             />
           }
         />
-        <AppButton label="Удалить все данные" variant="danger" onPress={confirmReset} />
+        <AppButton label="Delete all data" variant="danger" onPress={confirmReset} />
       </View>
     </Screen>
   );

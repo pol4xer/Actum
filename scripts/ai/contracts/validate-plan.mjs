@@ -257,25 +257,25 @@ export function validatePlanActionability(
 ) {
   assertExactObject(plan, 'plan', PLAN_KEYS);
   if (!Number.isInteger(dailyMinutes) || dailyMinutes < 1) {
-    fail('dailyMinutes', 'дневной лимит должен быть целым числом минут');
+    fail('dailyMinutes', 'the daily budget must be an integer number of minutes');
   }
   const durationConfig = programDurationConfig(duration);
   if (!durationConfig) {
-    fail('duration', 'ожидается month, half-year или year');
+    fail('duration', 'expected month, half-year or year');
   }
   assertInteger(cycleNumber, 'cycleNumber', 1, durationConfig.totalCycles);
 
   assertString(plan.title, 'title', 3, 120);
   assertGeneratedText(plan.title, 'title');
-  if (!GOAL_DOMAINS.has(plan.domain)) fail('domain', 'неизвестный домен цели');
+  if (!GOAL_DOMAINS.has(plan.domain)) fail('domain', 'unknown goal domain');
   assertString(plan.targetMetric, 'targetMetric', 3, 220);
   assertGeneratedText(plan.targetMetric, 'targetMetric');
-  if (plan.duration !== duration) fail('duration', 'выбранный срок программы был изменён');
+  if (plan.duration !== duration) fail('duration', 'the selected program duration was changed');
   if (plan.totalCycles !== durationConfig.totalCycles) {
-    fail('totalCycles', `для срока ${duration} ожидается ${durationConfig.totalCycles}`);
+    fail('totalCycles', `expected ${durationConfig.totalCycles} for duration ${duration}`);
   }
   if (plan.cycleNumber !== cycleNumber) {
-    fail('cycleNumber', `ожидается цикл ${cycleNumber}`);
+    fail('cycleNumber', `expected cycle ${cycleNumber}`);
   }
   assertInteger(
     plan.targetCycleNumber,
@@ -293,8 +293,8 @@ export function validatePlanActionability(
       fail(
         'targetCycleNumber',
         cycleNumber === 1
-          ? `ожидается подтверждённый research цикл ${researchTargetCycleNumber}`
-          : `после нового замера ожидается цикл не раньше ${earliestAllowed}`,
+          ? `expected the research-confirmed cycle ${researchTargetCycleNumber}`
+          : `after the new assessment, expected a cycle no earlier than ${earliestAllowed}`,
       );
     }
   } else if (researchTargetCycleNumber === null) {
@@ -306,7 +306,7 @@ export function validatePlanActionability(
     if (plan.targetCycleNumber !== quickTargetCycle) {
       fail(
         'targetCycleNumber',
-        `без web-research ожидается сохранённый ближайший цикл ${quickTargetCycle}`,
+        `without web research, expected the saved earliest cycle ${quickTargetCycle}`,
       );
     }
   }
@@ -342,7 +342,7 @@ export function validatePlanActionability(
   validatePhases(plan.phases, CYCLE_DAYS);
 
   if (!Array.isArray(plan.days) || plan.days.length !== CYCLE_DAYS) {
-    fail('days', `цикл должен содержать ровно ${CYCLE_DAYS} календарных дней`);
+    fail('days', `the cycle must contain exactly ${CYCLE_DAYS} calendar days`);
   }
 
   plan.days.forEach((day, index) => {
@@ -350,12 +350,12 @@ export function validatePlanActionability(
     assertExactObject(day, path, DAY_KEYS);
     assertInteger(day.dayNumber, `${path}.dayNumber`, 1, CYCLE_DAYS);
     if (day.dayNumber !== index + 1) {
-      fail(`${path}.dayNumber`, `ожидается последовательный день ${index + 1}`);
+      fail(`${path}.dayNumber`, `expected consecutive day ${index + 1}`);
     }
     const expectedPhaseIndex = phaseIndexForDay(plan.phases, day.dayNumber);
     assertInteger(day.phaseIndex, `${path}.phaseIndex`, 1, 3);
     if (day.phaseIndex !== expectedPhaseIndex) {
-      fail(`${path}.phaseIndex`, `день ${day.dayNumber} не входит в указанную фазу`);
+      fail(`${path}.phaseIndex`, `day ${day.dayNumber} is outside the specified phase`);
     }
     validateDay(
       day,
@@ -377,14 +377,14 @@ function validateTarget(target, expectedStatement, trustedTarget, previousTarget
   assertExactObject(target, 'target', TARGET_KEYS);
   assertString(target.userStatement, 'target.userStatement', 5, 1000);
   if (typeof expectedStatement === 'string' && target.userStatement !== expectedStatement) {
-    fail('target.userStatement', 'цель пользователя должна быть сохранена дословно');
+    fail('target.userStatement', 'the user goal must be preserved verbatim');
   }
   assertString(target.normalizedMetric, 'target.normalizedMetric', 2, 180);
   assertGeneratedText(target.normalizedMetric, 'target.normalizedMetric');
 
   if (!trustedTarget) {
     if (target.value !== null || target.unit !== null) {
-      fail('target.value', 'нераспознанная числовая цель должна быть null');
+      fail('target.value', 'an unrecognized numeric goal must be null');
     }
     validateFrozenProgramTarget(target, previousTarget);
     return;
@@ -393,10 +393,10 @@ function validateTarget(target, expectedStatement, trustedTarget, previousTarget
   assertFiniteNumber(target.value, 'target.value', 0, 1_000_000_000);
   assertString(target.unit, 'target.unit', 1, 40);
   if (target.value !== trustedTarget.value) {
-    fail('target.value', `ожидается локально распознанное значение ${trustedTarget.value}`);
+    fail('target.value', `expected the locally parsed value ${trustedTarget.value}`);
   }
   if (canonicalUnit(target.unit) !== canonicalUnit(trustedTarget.unit)) {
-    fail('target.unit', `ожидается локально распознанная единица ${trustedTarget.unit}`);
+    fail('target.unit', `expected the locally parsed unit ${trustedTarget.unit}`);
   }
 
   validateFrozenProgramTarget(target, previousTarget);
@@ -436,7 +436,7 @@ function validateFrozenProgramTarget(target, previousTarget) {
     Object.is(target.value, previousTarget.value) &&
     normalizedIdentityUnit(target.unit) === normalizedIdentityUnit(previousTarget.unit);
   if (!sameClientIdentity) {
-    fail('target', 'цель программы нельзя изменять между циклами');
+    fail('target', 'the program goal cannot change between cycles');
   }
 }
 
@@ -454,7 +454,7 @@ function validateRoadmap(
   programContext,
 ) {
   if (!Array.isArray(roadmap) || roadmap.length !== totalCycles) {
-    fail('roadmap', `ожидается ровно ${totalCycles} этапов программы`);
+    fail('roadmap', `expected exactly ${totalCycles} program milestones`);
   }
 
   roadmap.forEach((entry, index) => {
@@ -462,7 +462,7 @@ function validateRoadmap(
     assertExactObject(entry, path, ROADMAP_KEYS);
     assertInteger(entry.cycleNumber, `${path}.cycleNumber`, 1, totalCycles);
     if (entry.cycleNumber !== index + 1) {
-      fail(`${path}.cycleNumber`, `ожидается последовательный цикл ${index + 1}`);
+      fail(`${path}.cycleNumber`, `expected consecutive cycle ${index + 1}`);
     }
     assertString(entry.title, `${path}.title`, 2, 100);
     assertGeneratedText(entry.title, `${path}.title`);
@@ -475,7 +475,7 @@ function validateRoadmap(
   if (currentCycleNumber > 1 && Array.isArray(previousRoadmap)) {
     for (let index = 0; index < currentCycleNumber - 1; index += 1) {
       if (!isSameRoadmapEntry(roadmap[index], previousRoadmap[index])) {
-        fail(`roadmap.${index}`, 'завершённый этап программы нельзя изменять');
+        fail(`roadmap.${index}`, 'a completed program milestone cannot change');
       }
     }
   }
@@ -489,7 +489,7 @@ function validateRoadmap(
       trustedTarget.value - trustedBaseline.value,
     );
     if (currentDirection === 0 && targetCycleNumber !== currentCycleNumber) {
-      fail('targetCycleNumber', 'уже достигнутая цель должна завершаться в текущем цикле');
+      fail('targetCycleNumber', 'an already achieved goal must finish in the current cycle');
     }
     const numericEntries = [];
     roadmap.forEach((entry, index) => {
@@ -506,7 +506,7 @@ function validateRoadmap(
       assertFiniteNumber(entry.targetValue, `${path}.targetValue`, 0, 1_000_000_000);
       assertString(entry.targetUnit, `${path}.targetUnit`, 1, 40);
       if (canonicalUnit(entry.targetUnit) !== canonicalUnit(trustedTarget.unit)) {
-        fail(`${path}.targetUnit`, `ожидается единица ${trustedTarget.unit}`);
+        fail(`${path}.targetUnit`, `expected unit ${trustedTarget.unit}`);
       }
       numericEntries.push({ entry, index, path });
     });
@@ -525,7 +525,7 @@ function validateRoadmap(
       ) {
         fail(
           `${path}.targetValue`,
-          'целевой и последующие циклы должны точно совпадать с конечной целью',
+          'the target cycle and all later cycles must exactly match the final goal',
         );
       }
       if (
@@ -534,47 +534,47 @@ function validateRoadmap(
       ) {
         fail(
           `${path}.targetValue`,
-          'конечная цель достигнута раньше указанного targetCycleNumber',
+          'the final goal is reached before the specified targetCycleNumber',
         );
       }
 
       if (currentDirection > 0 && previousValue != null && entry.targetValue < previousValue) {
-        fail(`${path}.targetValue`, 'этапы должны монотонно приближаться к цели');
+        fail(`${path}.targetValue`, 'milestones must move monotonically toward the goal');
       }
       if (currentDirection < 0 && previousValue != null && entry.targetValue > previousValue) {
-        fail(`${path}.targetValue`, 'этапы должны монотонно приближаться к цели');
+        fail(`${path}.targetValue`, 'milestones must move monotonically toward the goal');
       }
       if (
         currentDirection === 0 &&
         previousValue != null &&
         !nearlyEqual(entry.targetValue, trustedTarget.value)
       ) {
-        fail(`${path}.targetValue`, 'этапы должны монотонно приближаться к цели');
+        fail(`${path}.targetValue`, 'milestones must move monotonically toward the goal');
       }
       if (
         currentDirection > 0 &&
         (entry.targetValue <= trustedBaseline.value || entry.targetValue > trustedTarget.value)
       ) {
-        fail(`${path}.targetValue`, 'текущий и будущие этапы должны строго приближаться к цели');
+        fail(`${path}.targetValue`, 'current and future milestones must strictly approach the goal');
       }
       if (
         currentDirection < 0 &&
         (entry.targetValue >= trustedBaseline.value || entry.targetValue < trustedTarget.value)
       ) {
-        fail(`${path}.targetValue`, 'текущий и будущие этапы должны строго приближаться к цели');
+        fail(`${path}.targetValue`, 'current and future milestones must strictly approach the goal');
       }
       if (
         index < targetCycleNumber - 1 &&
         previousValue != null &&
         nearlyEqual(entry.targetValue, previousValue)
       ) {
-        fail(`${path}.targetValue`, 'промежуточные будущие этапы не должны создавать плато');
+        fail(`${path}.targetValue`, 'intermediate future milestones must not create plateaus');
       }
       if (
         currentDirection === 0 &&
         !nearlyEqual(entry.targetValue, trustedTarget.value)
       ) {
-        fail(`${path}.targetValue`, 'достигнутая цель не должна удаляться от исходной точки');
+        fail(`${path}.targetValue`, 'an achieved goal must not move away from the baseline');
       }
       previousValue = entry.targetValue;
     });
@@ -584,7 +584,7 @@ function validateRoadmap(
 function validateAssessment(assessment, plan, currentCycleNumber) {
   assertExactObject(assessment, 'assessment', ASSESSMENT_KEYS);
   if (assessment.dayNumber !== CYCLE_DAYS) {
-    fail('assessment.dayNumber', `контрольный замер должен быть назначен на день ${CYCLE_DAYS}`);
+    fail('assessment.dayNumber', `the assessment must be scheduled for day ${CYCLE_DAYS}`);
   }
   assertInteger(assessment.blockIndex, 'assessment.blockIndex', 0, 2);
   assertString(assessment.metric, 'assessment.metric', 2, 180);
@@ -600,36 +600,36 @@ function validateAssessment(assessment, plan, currentCycleNumber) {
     !Object.is(assessment.targetValue, currentMilestone.targetValue) ||
     assessment.targetUnit !== currentMilestone.targetUnit
   ) {
-    fail('assessment', 'контрольный замер должен совпадать с целью текущего цикла');
+    fail('assessment', 'the assessment must match the current cycle target');
   }
 
   const finalDay = plan.days[CYCLE_DAYS - 1];
   if (assessment.blockIndex !== finalDay.execution.primaryBlockIndex) {
-    fail('assessment.blockIndex', 'контрольный замер должен быть главным блоком дня 30');
+    fail('assessment.blockIndex', 'the assessment must be the primary block on day 30');
   }
   const block = finalDay.execution.blocks[assessment.blockIndex];
-  if (!block) fail('assessment.blockIndex', 'указанный блок отсутствует в дне 30');
+  if (!block) fail('assessment.blockIndex', 'the specified block is missing from day 30');
   if (block.kind !== 'timer' && block.kind !== 'counter') {
-    fail('assessment.blockIndex', 'контрольный замер должен указывать на timer или counter');
+    fail('assessment.blockIndex', 'the assessment must point to a timer or counter');
   }
   if (assessment.targetValue === null) return;
 
   if (block.kind === 'timer') {
     if (canonicalUnit(assessment.targetUnit) !== 'seconds') {
-      fail('assessment.targetUnit', 'для timer ожидается seconds');
+      fail('assessment.targetUnit', 'expected seconds for timer');
     }
     if (block.durationSecondsPerSet !== assessment.targetValue) {
-      fail('assessment.targetValue', 'длительность timer не совпадает с целью замера');
+      fail('assessment.targetValue', 'timer duration does not match the assessment target');
     }
     return;
   }
 
   const blockUnit = block.unit === 'custom' ? block.unitLabel : block.unit;
   if (canonicalUnit(blockUnit) !== canonicalUnit(assessment.targetUnit)) {
-    fail('assessment.targetUnit', 'единица counter не совпадает с целью замера');
+    fail('assessment.targetUnit', 'counter unit does not match the assessment target');
   }
   if (block.targetPerSet !== assessment.targetValue) {
-    fail('assessment.targetValue', 'targetPerSet не совпадает с целью замера');
+    fail('assessment.targetValue', 'targetPerSet does not match the assessment target');
   }
 }
 
@@ -675,7 +675,7 @@ function validateNumericPracticeTrajectory(
     if (dose < minimumDailyDose) {
       fail(
         `days.${index}.execution.blocks.${day.execution.primaryBlockIndex}.${property}`,
-        `каждый тренировочный день должен содержать целевую дозу не меньше ${formatDose(minimumDailyDose)} ${trustedTarget.unit} (max из 25% baseline и 10% цели текущего цикла)`,
+        `each training day must have a target dose of at least ${formatDose(minimumDailyDose)} ${trustedTarget.unit} (the maximum of 25% baseline and 10% of the current cycle target)`,
       );
     }
   });
@@ -693,7 +693,7 @@ function validateNumericPracticeTrajectory(
   if (preAssessmentDose < minimumPreAssessmentDose) {
     fail(
       `days.${preAssessmentDayIndex}.execution.blocks.${preAssessmentDay.execution.primaryBlockIndex}.${preAssessmentProperty}`,
-      `последний тренировочный день перед замером должен содержать целевую дозу не меньше ${formatDose(minimumPreAssessmentDose)} ${trustedTarget.unit} (25% цели текущего цикла)`,
+      `the last training day before assessment must have a target dose of at least ${formatDose(minimumPreAssessmentDose)} ${trustedTarget.unit} (25% of the current cycle target)`,
     );
   }
 }
@@ -720,7 +720,7 @@ function formatDose(value) {
 function validateNullableMetricPair(value, unit, path) {
   if (value === null && unit === null) return;
   if (value === null || unit === null) {
-    fail(`${path}.targetValue`, 'значение и единица должны быть одновременно null или заполнены');
+    fail(`${path}.targetValue`, 'value and unit must both be null or both be provided');
   }
   assertFiniteNumber(value, `${path}.targetValue`, 0, 1_000_000_000);
   assertString(unit, `${path}.targetUnit`, 1, 40);
@@ -743,12 +743,12 @@ function validateBaseline(baseline, expectedBaselineStatement, trustedBaseline) 
     expectedBaselineStatement &&
     baseline.userStatement.trim() !== expectedBaselineStatement.trim()
   ) {
-    fail('baseline.userStatement', 'исходная точка пользователя была изменена');
+    fail('baseline.userStatement', 'the user baseline was changed');
   }
 
   if (!trustedBaseline) {
     if (baseline.value !== null || baseline.unit !== null) {
-      fail('baseline.value', 'непроверенное числовое значение должно быть null');
+      fail('baseline.value', 'an unverified numeric value must be null');
     }
     return;
   }
@@ -758,17 +758,17 @@ function validateBaseline(baseline, expectedBaselineStatement, trustedBaseline) 
   if (!nearlyEqual(baseline.value, trustedBaseline.value)) {
     fail(
       'baseline.value',
-      `ожидается локально распознанное значение ${trustedBaseline.value}`,
+      `expected the locally parsed value ${trustedBaseline.value}`,
     );
   }
   if (canonicalUnit(baseline.unit) !== canonicalUnit(trustedBaseline.unit)) {
-    fail('baseline.unit', `ожидается локально распознанная единица ${trustedBaseline.unit}`);
+    fail('baseline.unit', `expected the locally parsed unit ${trustedBaseline.unit}`);
   }
 }
 
 function validatePhases(phases, horizonDays) {
   if (!Array.isArray(phases) || phases.length !== 3) {
-    fail('phases', 'план должен содержать ровно три последовательные фазы');
+    fail('phases', 'the plan must contain exactly three consecutive phases');
   }
 
   phases.forEach((phase, index) => {
@@ -780,16 +780,16 @@ function validatePhases(phases, horizonDays) {
     assertGeneratedText(phase.subtitle, `${path}.subtitle`);
     assertInteger(phase.startDay, `${path}.startDay`, 1, horizonDays);
     assertInteger(phase.endDay, `${path}.endDay`, 1, horizonDays);
-    if (phase.endDay < phase.startDay) fail(path, 'конец фазы раньше её начала');
+    if (phase.endDay < phase.startDay) fail(path, 'the phase ends before it starts');
 
     const expectedStart = index === 0 ? 1 : phases[index - 1].endDay + 1;
     if (phase.startDay !== expectedStart) {
-      fail(`${path}.startDay`, `ожидается день ${expectedStart} без разрыва или пересечения`);
+      fail(`${path}.startDay`, `expected day ${expectedStart} without a gap or overlap`);
     }
   });
 
   if (phases[2].endDay !== horizonDays) {
-    fail('phases.2.endDay', `последняя фаза должна завершаться днём ${horizonDays}`);
+    fail('phases.2.endDay', `the last phase must end on day ${horizonDays}`);
   }
 }
 
@@ -812,7 +812,7 @@ function validateDay(
   assertGeneratedText(day.title, `${path}.title`);
   assertString(day.description, `${path}.description`, 5, 560);
   assertGeneratedText(day.description, `${path}.description`);
-  if (!MISSION_TYPES.has(day.type)) fail(`${path}.type`, 'неизвестный тип миссии');
+  if (!MISSION_TYPES.has(day.type)) fail(`${path}.type`, 'unknown mission type');
   assertInteger(day.xp, `${path}.xp`, 5, 60);
   if (day.warning !== null) {
     assertString(day.warning, `${path}.warning`, 3, 300);
@@ -820,13 +820,13 @@ function validateDay(
   }
   assertInteger(day.estimatedMinutes, `${path}.estimatedMinutes`, 1, 120);
   if (day.estimatedMinutes > dailyMinutes) {
-    fail(`${path}.estimatedMinutes`, 'день превышает выбранный дневной лимит');
+    fail(`${path}.estimatedMinutes`, 'the day exceeds the selected daily budget');
   }
 
   const execution = day.execution;
   assertExactObject(execution, `${path}.execution`, EXECUTION_KEYS);
   if (execution.kind !== 'in_app') {
-    fail(`${path}.execution.kind`, 'для plan-v7 ожидается только in_app');
+    fail(`${path}.execution.kind`, 'plan-v7 only supports in_app');
   }
   assertString(execution.successCriterion, `${path}.execution.successCriterion`, 5, 320);
   assertGeneratedText(execution.successCriterion, `${path}.execution.successCriterion`);
@@ -835,12 +835,12 @@ function validateDay(
     `${path}.execution.successCriterion`,
   );
   if (!Array.isArray(execution.blocks) || execution.blocks.length < 1 || execution.blocks.length > 3) {
-    fail(`${path}.execution.blocks`, 'in_app должна содержать от одного до трёх блоков');
+    fail(`${path}.execution.blocks`, 'in_app must contain one to three blocks');
   }
   assertInteger(execution.primaryBlockIndex, `${path}.execution.primaryBlockIndex`, 0, 2);
   const primaryBlock = execution.blocks[execution.primaryBlockIndex];
   if (!primaryBlock) {
-    fail(`${path}.execution.primaryBlockIndex`, 'указанный главный блок отсутствует');
+    fail(`${path}.execution.primaryBlockIndex`, 'the specified primary block is missing');
   }
 
   let knownDurationSeconds = 0;
@@ -860,27 +860,27 @@ function validateDay(
   if (knownDurationSeconds > day.estimatedMinutes * 60) {
     fail(
       `${path}.execution.blocks`,
-      'известная длительность блоков превышает заявленную длительность дня',
+      'the known block duration exceeds the stated daily duration',
     );
   }
 }
 
 function validatePrimaryBlock(block, trustedBaseline, trustedTarget, targetStatement, path) {
   if (block.kind !== 'timer' && block.kind !== 'counter') {
-    fail(path, 'главный блок дня должен быть измеримым timer или counter');
+    fail(path, 'the primary daily block must be a measurable timer or counter');
   }
   const targetUnit = trustedTarget ? canonicalUnit(trustedTarget.unit) : undefined;
   if (trustedTarget) {
     if (targetUnit === 'seconds' && block.kind !== 'timer') {
-      fail(path, 'для временной цели главным блоком должен быть timer');
+      fail(path, 'a time goal requires a timer as its primary block');
     }
     if (targetUnit !== 'seconds') {
       if (block.kind !== 'counter') {
-        fail(path, 'для счётной цели главным блоком должен быть counter');
+        fail(path, 'a count goal requires a counter as its primary block');
       }
       const blockUnit = block.unit === 'custom' ? block.unitLabel : block.unit;
       if (canonicalUnit(blockUnit) !== targetUnit) {
-        fail(path, `единица главного counter должна совпадать с целью ${trustedTarget.unit}`);
+        fail(path, `the primary counter unit must match the target unit ${trustedTarget.unit}`);
       }
     }
   }
@@ -893,7 +893,7 @@ function validatePrimaryBlock(block, trustedBaseline, trustedTarget, targetState
   ) {
     fail(
       path,
-      'главный блок дня должен содержать явное действие задержки дыхания непосредственно в instruction',
+      'the primary daily block must contain an explicit breath-holding action in its instruction',
     );
   }
   if (!trustedTarget) return;
@@ -901,7 +901,7 @@ function validatePrimaryBlock(block, trustedBaseline, trustedTarget, targetState
   const baselineMatchesTarget =
     trustedBaseline && canonicalUnit(trustedBaseline.unit) === targetUnit;
   if (baselineMatchesTarget && trustedBaseline.value > 0 && block.loadBasis === null) {
-    fail(`${path}.loadBasis`, 'главный блок должен содержать точную нагрузку от baseline');
+    fail(`${path}.loadBasis`, 'the primary block must contain an exact load calculated from baseline');
   }
 }
 
@@ -912,12 +912,12 @@ function assertNotPassiveOnlyPrimary(instruction, targetStatement, path) {
     .replace(/\b(?:do\s+not|don't|never)\s+[\p{L}\p{M}-]+/giu, '')
     .replace(/(?:^|[;,.!?]\s*|\s)не\s+[\p{L}\p{M}-]+/giu, ' ');
   if (AFFIRMATIVE_ACTIVE_PRIMARY_PATTERN.test(affirmativeText)) return;
-  fail(path, 'пассивное ожидание, отдых или расслабление не может быть главной целевой практикой');
+  fail(path, 'passive waiting, rest or relaxation cannot be the primary target practice');
 }
 
 function validateBlock(block, trustedBaseline, targetStatement, path) {
   if (!block || typeof block !== 'object' || Array.isArray(block)) {
-    fail(path, 'блок должен быть объектом');
+    fail(path, 'the block must be an object');
   }
 
   if (block.kind === 'timer') {
@@ -928,7 +928,7 @@ function validateBlock(block, trustedBaseline, targetStatement, path) {
   }
   if (block.kind === 'checklist') return validateChecklistBlock(block, path);
   if (block.kind === 'text_log') return validateTextLogBlock(block, path);
-  fail(`${path}.kind`, 'неизвестный вид in_app-блока');
+  fail(`${path}.kind`, 'unknown in_app block kind');
 }
 
 function validateTimerBlock(block, trustedBaseline, targetStatement, path) {
@@ -960,17 +960,17 @@ function validateCounterBlock(block, trustedBaseline, targetStatement, path) {
   assertNotPassiveRecoveryOnlyBlock(block, targetStatement, path);
   assertInteger(block.sets, `${path}.sets`, 1, 20);
   assertFiniteNumber(block.targetPerSet, `${path}.targetPerSet`, 0.01, 1_000_000);
-  if (!COUNTER_UNITS.has(block.unit)) fail(`${path}.unit`, 'неизвестная единица счётчика');
+  if (!COUNTER_UNITS.has(block.unit)) fail(`${path}.unit`, 'unknown counter unit');
   if (DISCRETE_COUNTER_UNITS.has(block.unit) && !Number.isInteger(block.targetPerSet)) {
-    fail(`${path}.targetPerSet`, `для единицы ${block.unit} ожидается целое число`);
+    fail(`${path}.targetPerSet`, `expected an integer for unit ${block.unit}`);
   }
   if (block.unit === 'custom') {
     assertString(block.unitLabel, `${path}.unitLabel`, 1, 40);
     if (isTemporalUnitLabel(block.unitLabel)) {
-      fail(`${path}.unitLabel`, 'временная единица должна использовать timer, а не counter');
+      fail(`${path}.unitLabel`, 'a time unit must use timer instead of counter');
     }
   } else if (block.unitLabel !== null) {
-    fail(`${path}.unitLabel`, 'unitLabel допустим только для custom');
+    fail(`${path}.unitLabel`, 'unitLabel is only allowed for custom');
   }
   assertInteger(block.workSecondsPerSet, `${path}.workSecondsPerSet`, 1, 7200);
   assertInteger(block.restSeconds, `${path}.restSeconds`, 0, 1800);
@@ -1000,7 +1000,7 @@ function validateChecklistBlock(block, path) {
   assertExactObject(block, path, CHECKLIST_BLOCK_KEYS);
   validateCommonBlockText(block, path, false);
   if (!Array.isArray(block.items) || block.items.length < 1 || block.items.length > 8) {
-    fail(`${path}.items`, 'checklist должен содержать от одного до восьми пунктов');
+    fail(`${path}.items`, 'checklist must contain one to eight items');
   }
   block.items.forEach((item, index) => {
     const itemPath = `${path}.items.${index}`;
@@ -1008,11 +1008,11 @@ function validateChecklistBlock(block, path) {
     assertGeneratedText(item, itemPath);
     assertNoEmbeddedTimeQuantity(item, itemPath);
     if (isInsufficientlySpecific(item)) {
-      fail(itemPath, 'пункт checklist подменён общей фразой');
+      fail(itemPath, 'the checklist item is a generic placeholder');
     }
   });
   if (block.items.every((item) => SAFETY_ONLY_ITEM_PATTERN.test(item))) {
-    fail(path, 'проверка безопасности или восстановления не является исполняемой практикой');
+    fail(path, 'a safety or recovery check is not executable practice');
   }
   assertInteger(block.estimatedSeconds, `${path}.estimatedSeconds`, 1, 7200);
   return { durationSeconds: block.estimatedSeconds, loadLinked: false };
@@ -1024,13 +1024,13 @@ function validateTextLogBlock(block, path) {
   assertString(block.prompt, `${path}.prompt`, 5, 360);
   assertGeneratedText(block.prompt, `${path}.prompt`, true);
   if (SYMPTOM_JOURNAL_PATTERN.test(`${block.title} ${block.prompt}`)) {
-    fail(path, 'журнал симптомов или восстановления должен быть вынесен из исполняемой практики');
+    fail(path, 'a symptom or recovery log must stay outside executable practice');
   }
   assertNoEmbeddedTimeQuantity(block.prompt, `${path}.prompt`);
   assertInteger(block.minCharacters, `${path}.minCharacters`, 1, 2000);
   assertInteger(block.maxCharacters, `${path}.maxCharacters`, 1, 4000);
   if (block.maxCharacters < block.minCharacters) {
-    fail(`${path}.maxCharacters`, 'maxCharacters должен быть не меньше minCharacters');
+    fail(`${path}.maxCharacters`, 'maxCharacters must be at least minCharacters');
   }
   assertInteger(block.estimatedSeconds, `${path}.estimatedSeconds`, 1, 7200);
   return { durationSeconds: block.estimatedSeconds, loadLinked: false };
@@ -1039,12 +1039,12 @@ function validateTextLogBlock(block, path) {
 function validateCommonBlockText(block, path, hasInstruction, isInAppTextLog = false) {
   assertString(block.title, `${path}.title`, 2, 100);
   assertGeneratedText(block.title, `${path}.title`, isInAppTextLog);
-  // A title may identify the calendar position (for example, "Итог 30 дней").
+  // A title may identify the calendar position (for example, "30-day review").
   // Sub-day work still belongs in a structural timer/counter field.
   if (EMBEDDED_SUBDAY_TIME_QUANTITY_PATTERN.test(block.title)) {
     fail(
       `${path}.title`,
-      'временная нагрузка должна быть структурным полем встроенного timer/counter, а не свободным текстом',
+      'time dosage must be a structured field of the built-in timer/counter, not free text',
     );
   }
   assertString(block.successCriterion, `${path}.successCriterion`, 5, 260);
@@ -1056,14 +1056,14 @@ function validateCommonBlockText(block, path, hasInstruction, isInAppTextLog = f
   assertGeneratedText(block.instruction, `${path}.instruction`);
   assertNoEmbeddedTimeQuantity(block.instruction, `${path}.instruction`);
   if (isInsufficientlySpecific(block.instruction)) {
-    fail(`${path}.instruction`, 'инструкция подменена общей фразой');
+    fail(`${path}.instruction`, 'the instruction is a generic placeholder');
   }
 }
 
 function assertNotPassiveRecoveryOnlyBlock(block, targetStatement, path) {
   const text = `${block.title} ${block.instruction} ${block.successCriterion}`;
   if (EXPLICIT_NO_PRACTICE_PATTERN.test(text)) {
-    fail(path, 'пассивное восстановление не может заменять целевую практику');
+    fail(path, 'passive recovery cannot replace target practice');
   }
   if (!ORDINARY_BREATHING_PATTERN.test(text)) return;
   if (BREATH_HOLD_ACTION_PATTERN.test(text)) return;
@@ -1071,7 +1071,7 @@ function assertNotPassiveRecoveryOnlyBlock(block, targetStatement, path) {
     BREATHING_GOAL_PATTERN.test(targetStatement) &&
     !BREATH_HOLD_ACTION_PATTERN.test(targetStatement);
   if (!breathingItselfIsGoal) {
-    fail(path, 'обычное дыхание без целевого действия не является практикой');
+    fail(path, 'normal breathing without a target action is not practice');
   }
 }
 
@@ -1079,7 +1079,7 @@ function assertNoEmbeddedTimeQuantity(value, path) {
   if (typeof value === 'string' && EMBEDDED_TIME_QUANTITY_PATTERN.test(value)) {
     fail(
       path,
-      'временная нагрузка должна быть структурным полем встроенного timer/counter, а не свободным текстом',
+      'time dosage must be a structured field of the built-in timer/counter, not free text',
     );
   }
 }
@@ -1092,23 +1092,23 @@ function validateLoadBasis(basis, trustedBaseline, targetUnit, targetValue, path
   assertFiniteNumber(basis.result, `${path}.loadBasis.result`, 0, 1_000_000);
 
   if (!trustedBaseline) {
-    fail(`${path}.loadBasis`, 'процент нельзя считать без локально распознанной исходной величины');
+    fail(`${path}.loadBasis`, 'a percentage cannot be calculated without a locally parsed baseline');
   }
   if (!nearlyEqual(basis.baseValue, trustedBaseline.value)) {
     fail(
       `${path}.loadBasis.baseValue`,
-      `ожидается локально распознанное значение ${trustedBaseline.value}`,
+      `expected the locally parsed value ${trustedBaseline.value}`,
     );
   }
   const trustedUnit = canonicalUnit(trustedBaseline.unit);
   if (canonicalUnit(basis.baseUnit) !== trustedUnit) {
     fail(
       `${path}.loadBasis.baseUnit`,
-      `ожидается локально распознанная единица ${trustedBaseline.unit}`,
+      `expected the locally parsed unit ${trustedBaseline.unit}`,
     );
   }
   if (canonicalUnit(targetUnit) !== trustedUnit) {
-    fail(`${path}.kind`, `процент от baseline нельзя записать в единице ${targetUnit}`);
+    fail(`${path}.kind`, `a baseline percentage cannot be expressed in unit ${targetUnit}`);
   }
 
   const expectedResult = trustedBaseline.value * basis.percentage / 100;
@@ -1118,14 +1118,14 @@ function validateLoadBasis(basis, trustedBaseline, targetUnit, targetValue, path
   if (!exactOrRounded) {
     fail(
       `${path}.loadBasis.result`,
-      `result ${basis.result} не соответствует ${basis.percentage}% от baseline ${trustedBaseline.value}`,
+      `result ${basis.result} does not equal ${basis.percentage}% of baseline ${trustedBaseline.value}`,
     );
   }
   if (targetValue !== basis.result) {
     const targetName = targetUnit === 'seconds' ? 'durationSecondsPerSet' : 'targetPerSet';
     fail(
       `${path}.${targetName}`,
-      `${targetName} ${targetValue} не совпадает с loadBasis.result ${basis.result}`,
+      `${targetName} ${targetValue} does not match loadBasis.result ${basis.result}`,
     );
   }
 }
@@ -1165,7 +1165,7 @@ function isInsufficientlySpecific(value) {
 function assertGeneratedText(value, path, isInAppTextLog = false) {
   if (typeof value !== 'string') return;
   if (DELEGATED_WORK_PATTERNS.some((pattern) => pattern.test(value))) {
-    fail(path, 'пользователь не должен сам выбирать или рассчитывать действие');
+    fail(path, 'the user must not have to choose or calculate the action');
   }
   let dependencyText = value
     .replace(/\b(?:actum|in[- ]app|built[- ]in)\s+counters?\b/giu, '')
@@ -1175,14 +1175,14 @@ function assertGeneratedText(value, path, isInAppTextLog = false) {
     .replace(/(?:встроенн[\p{L}\p{M}]*\s+(?:календар|журнал|таймер|чек-лист|заметк)[\p{L}\p{M}-]*|(?:календар|журнал|таймер|чек-лист|заметк)[\p{L}\p{M}-]*\s+Actum)/giu, '');
   if (isInAppTextLog) {
     if (EXTERNAL_TEXT_LOG_NOTE_PATTERNS.some((pattern) => pattern.test(value))) {
-      fail(path, 'обнаружена внешняя зависимость: действие должно выполняться внутри Actum');
+      fail(path, 'external dependency detected: the action must run inside Actum');
     }
     dependencyText = dependencyText
       .replace(/\bnotes?\b/giu, '')
       .replace(/заметк[\p{L}\p{M}]*/giu, '');
   }
   if (OFF_APP_PATTERNS.some((pattern) => pattern.test(dependencyText))) {
-    fail(path, 'обнаружена внешняя зависимость: действие должно выполняться внутри Actum');
+    fail(path, 'external dependency detected: the action must run inside Actum');
   }
 }
 
@@ -1211,27 +1211,27 @@ function assertSafetyText(value, path) {
 
 function assertExactObject(value, path, expectedKeys) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    fail(path, 'ожидается объект');
+    fail(path, 'expected an object');
   }
   const expected = new Set(expectedKeys);
   for (const key of expectedKeys) {
-    if (!Object.hasOwn(value, key)) fail(`${path}.${key}`, 'обязательное поле отсутствует');
+    if (!Object.hasOwn(value, key)) fail(`${path}.${key}`, 'required field is missing');
   }
   for (const key of Object.keys(value)) {
-    if (!expected.has(key)) fail(`${path}.${key}`, 'поле не поддерживается контрактом plan-v7');
+    if (!expected.has(key)) fail(`${path}.${key}`, 'field is not supported by the plan-v7 contract');
   }
 }
 
 function assertString(value, path, minLength, maxLength = Number.POSITIVE_INFINITY) {
   const length = typeof value === 'string' ? Array.from(value.trim()).length : -1;
   if (length < minLength || length > maxLength) {
-    fail(path, `ожидается строка длиной от ${minLength} до ${maxLength} символов`);
+    fail(path, `expected a string of ${minLength} to ${maxLength} characters`);
   }
 }
 
 function assertStringArray(value, path, minimum, maximum, minLength, maxLength) {
   if (!Array.isArray(value) || value.length < minimum || value.length > maximum) {
-    fail(path, `ожидается массив длиной от ${minimum} до ${maximum}`);
+    fail(path, `expected an array of length ${minimum} to ${maximum}`);
   }
   value.forEach((item, index) =>
     assertString(item, `${path}.${index}`, minLength, maxLength),
@@ -1240,13 +1240,13 @@ function assertStringArray(value, path, minimum, maximum, minLength, maxLength) 
 
 function assertInteger(value, path, minimum, maximum) {
   if (!Number.isInteger(value) || value < minimum || value > maximum) {
-    fail(path, `ожидается целое число от ${minimum} до ${maximum}`);
+    fail(path, `expected an integer from ${minimum} to ${maximum}`);
   }
 }
 
 function assertFiniteNumber(value, path, minimum, maximum) {
   if (!Number.isFinite(value) || value < minimum || value > maximum) {
-    fail(path, `ожидается число от ${minimum} до ${maximum}`);
+    fail(path, `expected a number from ${minimum} to ${maximum}`);
   }
 }
 

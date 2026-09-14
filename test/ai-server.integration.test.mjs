@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -30,6 +30,186 @@ const {
   providerStageKey,
 } = serverModule;
 let gatewayHandler = initialHandleRequest;
+
+for (const artifact of ['brief', 'completed', 'pending', 'guard']) {
+  test(`English update preserves legacy research ${artifact} without another paid search`, async (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'actum-english-research-test-'));
+    const stateFile = join(directory, 'ai-state.json');
+    const oldHandler = gatewayHandler;
+    const oldStateFile = process.env.ACTUM_AI_STATE_FILE;
+    const originalFetch = globalThis.fetch;
+    t.after(() => {
+      gatewayHandler = oldHandler;
+      process.env.ACTUM_AI_STATE_FILE = oldStateFile;
+      globalThis.fetch = originalFetch;
+      rmSync(directory, { recursive: true, force: true });
+    });
+
+    const input = goalInput('Освоить последовательную практику');
+    const legacyIdentity = {
+      ...AI_PIPELINE_CACHE_IDENTITY,
+      promptVersion: 'actum-plan-2026-09-04-direct-practice-v4',
+      researchPromptVersion: 'actum-research-2026-09-04-fastest-program-v5',
+    };
+    const researchKey = createResearchCacheKey(input, legacyIdentity);
+    const stageKey = providerStageKey(researchKey, 'research');
+    assert.notEqual(createResearchCacheKey(input), researchKey);
+    assert.notEqual(createPlanCacheKey(input), createPlanCacheKey(input, legacyIdentity));
+
+    const payload = researchPayload();
+    const conclusion = {
+      brief: 'Подтверждённые данные и точные назначения для первого месячного цикла. '.repeat(2),
+      earliestTargetCycleNumber: 1,
+      feasibilityReason: 'Первый цикл — самый ранний обоснованный ориентир.',
+    };
+    payload.output.find((item) => item.type === 'message').content[0].text = JSON.stringify(conclusion);
+    const state = createDurableState({ stateFile });
+    // A valid old-language plan cache must never satisfy the new planning identity.
+    state.savePlan(createPlanCacheKey(input, legacyIdentity), {
+      plan: { title: 'Старый русский план' },
+      meta: { requestId: 'actum_legacy_plan' },
+    });
+    if (artifact === 'brief') {
+      state.saveResearch(researchKey, {
+        ...conclusion,
+        sources: extractWebSources(payload),
+        meta: responseMeta(payload),
+      });
+    } else if (artifact === 'completed') {
+      state.recordStageResult(stageKey, payload, 'actum_legacy_research');
+    } else if (artifact === 'pending') {
+      state.recordBackgroundJob(stageKey, payload.id, 'actum_legacy_research');
+    } else {
+      state.armCreateGuard(stageKey, 'actum_legacy_research');
+    }
+
+    const calls = [];
+    globalThis.fetch = async (url, options) => {
+      calls.push(options.method);
+      if (options.method === 'GET') {
+        assert.equal(artifact, 'pending');
+        assert.ok(String(url).endsWith(`/${payload.id}`));
+        return jsonResponse(payload);
+      }
+      const body = JSON.parse(options.body);
+      assert.equal(body.tools, undefined, 'no new paid research POST');
+      const providerInput = JSON.parse(body.input);
+      assert.equal(providerInput.researchCacheKey, researchKey);
+      assert.equal(providerInput.researchConclusion.brief, conclusion.brief);
+      assert.match(body.instructions, /all newly generated UI content in English/);
+      assert.match(body.instructions, /legacy\s+research briefs or programContext use another language/);
+      return jsonResponse(planPayload('resp_english_plan', providerInput));
+    };
+    process.env.ACTUM_AI_STATE_FILE = stateFile;
+    gatewayHandler = (
+      await import(`../scripts/ai-server.mjs?english-research=${artifact}-${Date.now()}`)
+    ).handleRequest;
+    const result = await postPlan(input, `actum_english_research_${artifact}`);
+    if (artifact === 'guard') {
+      assert.equal(result.status, 409);
+      assert.equal(result.body.code, 'ambiguous_create');
+      assert.deepEqual(calls, []);
+    } else {
+      assert.equal(result.status, 200);
+      assert.equal(result.body.plan.title, 'Test route');
+      assert.equal(result.body.plan.target.userStatement, input.prompt);
+      assert.equal(result.body.meta.promptVersion, AI_PIPELINE_CACHE_IDENTITY.promptVersion);
+      assert.equal(calls.filter((method) => method === 'POST').length, 1);
+      assert.equal(calls.filter((method) => method === 'GET').length, artifact === 'pending' ? 1 : 0);
+      const recovered = await getSavedPlan();
+      assert.equal(recovered.status, 200);
+      assert.equal(recovered.body.meta.researchResponseId, payload.id);
+    }
+    const persisted = JSON.parse(readFileSync(stateFile, 'utf8'));
+    assert.ok(persisted.planCache.some(([key]) => key === createPlanCacheKey(input, legacyIdentity)));
+  });
+}
+
+for (const artifact of ['completed', 'pending']) {
+  for (const expiresDuringRecovery of [false, true]) {
+    test(`later-cycle research ${artifact} ${expiresDuringRecovery ? 'expiry cannot trigger a paid replacement' : 'recovers without another paid search'}`, async (t) => {
+      const directory = mkdtempSync(join(tmpdir(), 'actum-research-expiry-test-'));
+      const stateFile = join(directory, 'ai-state.json');
+      const oldHandler = gatewayHandler;
+      const oldStateFile = process.env.ACTUM_AI_STATE_FILE;
+      const originalFetch = globalThis.fetch;
+      const baseTime = Date.now();
+      let currentTime = baseTime;
+      let recoveryReached = false;
+      t.mock.method(Date, 'now', () => currentTime);
+      // Advance the clock after the outer existence check, immediately before
+      // executeProviderStage re-reads the artifact. No real timer or sleep is used.
+      t.mock.method(console, 'log', (message) => {
+        if (String(message).includes(' researching model=')) {
+          recoveryReached = true;
+          if (expiresDuringRecovery) currentTime = baseTime + 1001;
+        }
+      });
+      t.after(() => {
+        gatewayHandler = oldHandler;
+        process.env.ACTUM_AI_STATE_FILE = oldStateFile;
+        globalThis.fetch = originalFetch;
+        rmSync(directory, { recursive: true, force: true });
+      });
+
+      const input = { ...goalInput('Continue a measured practice program'), cycleNumber: 2 };
+      const previousPlan = validPlan({ goal: input.prompt });
+      input.programContext = {
+        researchAnchor: 'a'.repeat(64),
+        target: previousPlan.target,
+        roadmap: previousPlan.roadmap,
+        completedCycles: [],
+      };
+      const researchKey = createResearchCacheKey(input, {
+        ...AI_PIPELINE_CACHE_IDENTITY,
+        researchPromptVersion: 'actum-research-2026-09-04-fastest-program-v5',
+      });
+      const stageKey = providerStageKey(researchKey, 'research');
+      const state = createDurableState({
+        stateFile,
+        now: () => currentTime,
+        ttls: { stageResultMs: 1000, backgroundJobMs: 1000 },
+      });
+      const payload = researchPayload();
+      if (artifact === 'completed') {
+        state.recordStageResult(stageKey, payload, 'actum_expiring_research');
+      } else {
+        state.recordBackgroundJob(stageKey, payload.id, 'actum_expiring_research');
+      }
+      const calls = [];
+      globalThis.fetch = async (url, options) => {
+        calls.push(options.method);
+        if (options.method === 'GET') {
+          assert.equal(artifact, 'pending');
+          assert.ok(String(url).endsWith(`/${payload.id}`));
+          return jsonResponse(payload);
+        }
+        const body = JSON.parse(options.body);
+        assert.equal(body.tools, undefined, 'later cycles must never create a paid research POST');
+        return jsonResponse(planPayload('resp_recovered_cycle', JSON.parse(body.input)));
+      };
+      process.env.ACTUM_AI_STATE_FILE = stateFile;
+      gatewayHandler = (
+        await import(`../scripts/ai-server.mjs?research-expiry=${artifact}-${expiresDuringRecovery}-${baseTime}`)
+      ).handleRequest;
+
+      const result = await postPlan(input, 'actum_later_cycle_recovery');
+      assert.equal(recoveryReached, true, 'the artifact existed at the outer recovery guard');
+      if (expiresDuringRecovery) {
+        assert.equal(result.status, 409);
+        assert.equal(result.body.code, 'saved_response_unavailable');
+        assert.equal(result.body.stage, 'research');
+        assert.deepEqual(calls, [], 'an expired recovery artifact must not start a provider request');
+      } else {
+        assert.equal(result.status, 200);
+        assert.equal(result.body.plan.cycleNumber, 2);
+        assert.equal(result.body.meta.researchResponseId, payload.id);
+        assert.equal(calls.filter((method) => method === 'POST').length, 1, 'only planning is generated');
+        assert.equal(calls.filter((method) => method === 'GET').length, artifact === 'pending' ? 1 : 0);
+      }
+    });
+  }
+}
 
 test('research and plan-v7 identity changes invalidate only their paid stage keys', () => {
   const webInput = goalInput('Invalidate the complete pipeline');
@@ -286,8 +466,8 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   assert.equal(health.body.baselineParserVersion, 'numeric-metric-v2');
   assert.equal(health.body.contractVersion, 'plan-v7');
   assert.equal(health.body.validatorVersion, 'plan-validator-v9');
-  assert.equal(health.body.promptVersion, 'actum-plan-2026-09-04-direct-practice-v4');
-  assert.equal(health.body.researchPromptVersion, 'actum-research-2026-09-04-fastest-program-v5');
+  assert.equal(health.body.promptVersion, 'actum-plan-2026-09-14-english-v5');
+  assert.equal(health.body.researchPromptVersion, 'actum-research-2026-09-14-english-v6');
   const noSavedPlan = await getSavedPlan();
   assert.equal(noSavedPlan.status, 404);
 
@@ -297,7 +477,7 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
     'actum_test_zero_counter_target_030',
   );
   assert.equal(zeroCounterTarget.status, 400);
-  assert.match(zeroCounterTarget.body.error, /Цель со счётчиком 0 не создаёт исполняемого действия/);
+  assert.match(zeroCounterTarget.body.error, /A counter goal of 0 does not create an executable action/);
   assert.equal(apiCalls.length, callsBeforeZeroCounter);
 
   const callsBeforeImpossibleAssessment = apiCalls.length;
@@ -310,7 +490,7 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
     'actum_test_impossible_month_026',
   );
   assert.equal(impossibleMonth.status, 400);
-  assert.match(impossibleMonth.body.error, /не помещается в дневной лимит/);
+  assert.match(impossibleMonth.body.error, /does not fit the .*daily budget/);
   assert.equal(apiCalls.length, callsBeforeImpossibleAssessment);
 
   const impossibleYear = await postPlan(
@@ -322,7 +502,7 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
     'actum_test_impossible_year_027',
   );
   assert.equal(impossibleYear.status, 400);
-  assert.match(impossibleYear.body.error, /не помещается в дневной лимит/);
+  assert.match(impossibleYear.body.error, /does not fit the .*daily budget/);
   assert.equal(apiCalls.length, callsBeforeImpossibleAssessment);
 
   const impossibleKnownCycle = await postPlan(
@@ -348,7 +528,7 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
     'actum_test_impossible_cycle_027',
   );
   assert.equal(impossibleKnownCycle.status, 400);
-  assert.match(impossibleKnownCycle.body.error, /не помещается в дневной лимит/);
+  assert.match(impossibleKnownCycle.body.error, /does not fit the .*daily budget/);
   assert.equal(apiCalls.length, callsBeforeImpossibleAssessment);
 
   const firstInput = goalInput('Resume paid background work');
@@ -357,7 +537,7 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   assert.equal(first.body.code, 'overloaded');
   assert.equal(first.body.stage, 'planning');
   assert.equal(first.body.researchPreserved, true);
-  assert.match(first.body.error, /Web-research сохранён/);
+  assert.match(first.body.error, /Web research is saved/);
   assert.deepEqual(
     apiCalls.map((call) => call.kind),
     ['research', 'planning', 'planning_poll', 'planning_poll', 'planning_poll'],
@@ -369,7 +549,7 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   const second = await postPlan(firstInput, 'actum_test_retry_002');
   assert.equal(second.status, 200);
   assert.equal(second.body.meta.contractVersion, 'plan-v7');
-  assert.equal(second.body.meta.promptVersion, 'actum-plan-2026-09-04-direct-practice-v4');
+  assert.equal(second.body.meta.promptVersion, 'actum-plan-2026-09-14-english-v5');
   assert.match(second.body.meta.researchAnchor, /^[a-f0-9]{64}$/);
   assert.equal(second.body.meta.researchResponseId, 'resp_research_test');
   assert.equal(second.body.meta.sources[0].url, 'https://example.com/research');
@@ -432,7 +612,7 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
     'actum_test_missing_research_anchor_034',
   );
   assert.equal(missingResearchAnchor.status, 400);
-  assert.match(missingResearchAnchor.body.error, /новый web-поиск не запущен/);
+  assert.match(missingResearchAnchor.body.error, /no new web search was started/);
   assert.equal(apiCalls.length, callsBeforeMissingResearchAnchor);
   const callsBeforeMissingResearchCache = apiCalls.length;
   const missingResearchCache = await postPlan(
@@ -455,7 +635,7 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   assert.equal(missingResearchCache.body.stage, 'research');
   assert.equal(missingResearchCache.body.researchPreserved, false);
   assert.equal(missingResearchCache.body.retryGuarded, false);
-  assert.match(missingResearchCache.body.error, /не запустил новый web-поиск/);
+  assert.match(missingResearchCache.body.error, /did not start a new web search/);
   assert.equal(apiCalls.length, callsBeforeMissingResearchCache);
   const interleaved = await postPlan(
     goalInput('Interleaved research program'),
@@ -522,7 +702,7 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   assert.equal(limited.body.code, 'research_target_exceeds_retry_cap');
   assert.equal(limited.body.stage, 'planning');
   assert.equal(limited.body.researchPreserved, true);
-  assert.match(limited.body.error, /не раньше цикла 3/);
+  assert.match(limited.body.error, /no earlier than cycle 3/);
   assert.equal(
     apiCalls.filter((call) => call.kind === 'research' && call.input.goal === limitedGoal).length,
     1,
@@ -552,7 +732,7 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   const mismatch = await postPlan(goalInput(mismatchGoal), 'actum_test_research_mismatch_038');
   assert.equal(mismatch.status, 502);
   assert.equal(mismatch.body.code, 'upstream_invalid_plan_contract');
-  assert.match(mismatch.body.error, /ожидается подтверждённый research цикл 3/);
+  assert.match(mismatch.body.error, /expected the research-confirmed cycle 3/);
   assert.equal(
     apiCalls.filter((call) => call.kind === 'research' && call.input.goal === mismatchGoal).length,
     1,
@@ -582,7 +762,7 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   assert.equal(guardedFirst.status, 502);
   assert.equal(guardedFirst.body.code, 'upstream_network_error');
   assert.equal(guardedFirst.body.retryGuarded, true);
-  assert.match(guardedFirst.body.error, /двойное списание/);
+  assert.match(guardedFirst.body.error, /duplicate billing/);
   const guardedCallCount = apiCalls.filter(
     (call) => call.kind === 'planning' && call.input.goal === 'Guard an ambiguous create',
   ).length;
@@ -648,7 +828,7 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   );
   assert.equal(reuseOnlyMiss.status, 409);
   assert.equal(reuseOnlyMiss.body.code, 'saved_response_unavailable');
-  assert.match(reuseOnlyMiss.body.error, /больше недоступен/);
+  assert.match(reuseOnlyMiss.body.error, /no longer available/);
   assert.equal(apiCalls.length, callsBeforeReuseOnlyMiss);
 
   const invalidReuseOnly = await postPlan(
@@ -670,7 +850,7 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   assert.equal(offAppFirst.status, 502);
   assert.equal(offAppFirst.body.code, 'upstream_invalid_plan_contract');
   assert.match(offAppFirst.body.error, /days\.0\.execution\.blocks\.0\.instruction/);
-  assert.match(offAppFirst.body.error, /внешняя зависимость/);
+  assert.match(offAppFirst.body.error, /external dependency/);
   const offAppSecond = await postPlan(offAppInput, 'actum_test_off_app_017');
   assert.equal(offAppSecond.status, 502);
   assert.equal(offAppSecond.body.code, 'upstream_invalid_plan_contract');
@@ -686,7 +866,7 @@ test('AI gateway preserves paid work across failure, restart, cache, and concurr
   assert.equal(passiveResult.status, 502);
   assert.equal(passiveResult.body.code, 'upstream_invalid_plan_contract');
   assert.match(passiveResult.body.error, /days\.28\.execution\.blocks\.0/);
-  assert.match(passiveResult.body.error, /пассивное восстановление/);
+  assert.match(passiveResult.body.error, /passive recovery/);
 
   const scheduleInput = goalInput('Reject mismatched calendar output', 'quick');
   const mismatchedSchedule = await postPlan(scheduleInput, 'actum_test_schedule_018');
@@ -900,7 +1080,7 @@ test('saved-plan recovery ignores an old plan-v5 artifact without deleting it', 
 
   const response = await getSavedPlan();
   assert.equal(response.status, 404);
-  assert.match(response.body.error, /plan-v7 не найден/);
+  assert.match(response.body.error, /plan-v7 not found/);
 });
 
 test('saved-plan recovery never relabels an old pipeline response as current plan-v7', async (t) => {
@@ -960,7 +1140,37 @@ test('saved-plan recovery never relabels an old pipeline response as current pla
   ).handleRequest;
   const response = await getSavedPlan();
   assert.equal(response.status, 404);
-  assert.match(response.body.error, /plan-v7 не найден/);
+  assert.match(response.body.error, /plan-v7 not found/);
+
+  const currentIdentity = planningIdentity('quick');
+  const snapshot = {
+    ...input,
+    researchCacheKey: providerInput.researchCacheKey,
+    pipelineIdentity: currentIdentity,
+  };
+  state.recordStageResult(
+    providerStageKey(createPlanCacheKey(input), 'planning'),
+    planPayload('resp_current_english_plan', { ...providerInput, pipelineIdentity: currentIdentity }),
+    'actum_current_english_plan',
+    snapshot,
+  );
+  // An older server can finish its Russian-language request after an English
+  // response. Recovery must select the latest matching identity, not relabel or
+  // delete that legacy response and not hide the valid English response.
+  state.recordStageResult(
+    providerStageKey('old-prompt-plan-v7', 'planning'),
+    planPayload('resp_later_legacy_plan', providerInput),
+    'actum_later_legacy_plan',
+    { ...snapshot, pipelineIdentity: oldIdentity },
+  );
+  gatewayHandler = (
+    await import(`../scripts/ai-server.mjs?mixed-language-recovery=${Date.now()}`)
+  ).handleRequest;
+  const current = await getSavedPlan();
+  assert.equal(current.status, 200);
+  assert.equal(current.body.meta.providerResponseId, 'resp_current_english_plan');
+  const persisted = JSON.parse(readFileSync(stateFile, 'utf8'));
+  assert.ok(persisted.stageResults.some(([, entry]) => entry.payload.id === 'resp_later_legacy_plan'));
 });
 
 test('saved cycle recovery keeps its linked research after thirty days', async (t) => {

@@ -6,11 +6,14 @@
 
 Actum is an iPhone-first life RPG that connects AI-assisted planning with the work of following a plan. Set a measurable goal, record your starting point, and choose a daily time budget. Actum researches the goal, builds a 30-day program, and guides each session with built-in timers, counters, checklists, and a progress journal.
 
-**Status: local MVP.** This repository contains the app and its local AI gateway. There is no hosted service or store release. The current interface is primarily in Russian; the web version provides a way to explore the UI.
+**Status: local MVP.** This repository contains the app and its local AI gateway. There is no hosted service or store release. The interface and newly generated plans are in English; the web version provides a way to explore the UI.
 
-![Actum onboarding in the web preview](docs/images/actum-web-onboarding.png)
+<p>
+  <img src="docs/images/actum-web-onboarding.png" width="280" alt="English Actum onboarding: one goal, one step at a time" />
+  <img src="docs/images/actum-web-planning.png" width="280" alt="English goal setup with an example reading baseline, time budget, and continuation limit" />
+</p>
 
-*Actual onboarding screen from the web export. Native iOS presentation differs.*
+*Actual English screens from the web export at phone width, using example data. Native iOS presentation differs.*
 
 ## The product loop
 

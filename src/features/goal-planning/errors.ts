@@ -13,13 +13,13 @@ export type AIPlannerErrorCode =
   | 'INVALID_RESPONSE';
 
 export const RESEARCH_CACHE_UNAVAILABLE_MESSAGE =
-  'Сохранённый research недоступен. Новый поиск не запускался.';
-export const RETRY_CAP_TOO_SHORT_MESSAGE = 'Выбери более длинный срок.';
+  'Saved research is unavailable. No new search was started.';
+export const RETRY_CAP_TOO_SHORT_MESSAGE = 'Choose a longer time limit.';
 export const GOAL_NOT_FEASIBLE_MESSAGE =
-  'Достижимость цели в пределах года не подтверждена.';
+  'Research could not confirm that this goal is achievable within a year.';
 export const SAVED_RESPONSE_REVIEW_MESSAGE =
-  'Ответ сохранён и ждёт повторной проверки';
-export const SAVED_RESPONSE_RETRY_LABEL = 'Проверить сохранённый ответ · без GPT';
+  'The response is saved and ready for another validation attempt';
+export const SAVED_RESPONSE_RETRY_LABEL = 'Validate saved response · no GPT request';
 
 export function isFeasibilityPlannerError(
   code: AIPlannerErrorCode | undefined,

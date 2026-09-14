@@ -18,7 +18,7 @@ export function createInitialAppState(now: Date | string = new Date(0)): AppStat
       energy: REWARD_POLICY.initialEnergy,
       streak: 0,
       worldLight: REWARD_POLICY.initialWorldLight,
-      buffs: ['Первый шаг'],
+      buffs: ['First step'],
       debuffs: [],
     },
     checkIns: [],

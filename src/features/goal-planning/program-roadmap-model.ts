@@ -33,11 +33,11 @@ export function roadmapMilestoneMetricLabel(
   );
 
   if (!item.result && !item.achievement) {
-    return target ? `Ориентир ${target}` : undefined;
+    return target ? `Target ${target}` : undefined;
   }
-  if (actual && target) return `Факт ${actual} · ориентир ${target}`;
-  if (actual) return `Факт ${actual}`;
-  return target ? `Месяц пройден · ориентир ${target}` : 'Месяц пройден';
+  if (actual && target) return `Actual ${actual} · target ${target}`;
+  if (actual) return `Actual ${actual}`;
+  return target ? `Month completed · target ${target}` : 'Month completed';
 }
 
 /** Separates the estimated route from optional retries without changing persisted data. */

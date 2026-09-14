@@ -61,18 +61,18 @@ const input = {
 const RESEARCH_ANCHOR = 'a'.repeat(64);
 
 test('retry-cap copy keeps ASAP target separate from the required limit choice', () => {
-  assert.equal(RETRY_LIMIT_QUESTION, 'Если за месяц не получится?');
+  assert.equal(RETRY_LIMIT_QUESTION, 'What if one month is not enough?');
   assert.deepEqual(RETRY_LIMIT_OPTIONS, [
-    { value: 'month', label: 'Остановиться после месяца' },
-    { value: 'half-year', label: 'Продолжать до 6 месяцев' },
-    { value: 'year', label: 'Продолжать до года' },
+    { value: 'month', label: 'Stop after one month' },
+    { value: 'half-year', label: 'Continue for up to 6 months' },
+    { value: 'year', label: 'Continue for up to a year' },
   ]);
-  assert.match(RETRY_LIMIT_HELP, /самый ранний обоснованный месяц/u);
-  assert.match(RETRY_LIMIT_HELP, /не растягивает план/u);
-  assert.equal(retryLimitLabel('month'), '1 месяц');
-  assert.equal(retryLimitLabel('half-year'), 'до 6 месяцев');
-  assert.equal(retryLimitLabel('year'), 'до года');
-  assert.equal(estimatedTargetCycleLabel(2), 'Месяц 2');
+  assert.match(RETRY_LIMIT_HELP, /earliest realistic month/u);
+  assert.match(RETRY_LIMIT_HELP, /does not stretch out the plan/u);
+  assert.equal(retryLimitLabel('month'), '1 month');
+  assert.equal(retryLimitLabel('half-year'), 'up to 6 months');
+  assert.equal(retryLimitLabel('year'), 'up to a year');
+  assert.equal(estimatedTargetCycleLabel(2), 'Month 2');
   assert.equal(estimatedTargetCycleLabel(undefined), undefined);
 });
 
@@ -120,11 +120,11 @@ test('roadmap progress ends at the estimated target and keeps later retries in r
   assert.equal(direct.primaryMilestones[0].result.measuredValue, 180);
   assert.equal(
     roadmapMilestoneMetricLabel(direct.primaryMilestones[0]),
-    'Факт 3 мин · ориентир 3:20',
+    'Actual 3 min · target 3:20',
   );
   assert.equal(
     roadmapMilestoneMetricLabel(direct.primaryMilestones[1]),
-    'Ориентир 6:40',
+    'Target 6:40',
   );
 
   const legacy = createProgramRoadmapPresentation(program, undefined);
@@ -152,7 +152,7 @@ test('roadmap progress ends at the estimated target and keeps later retries in r
   assert.equal(achieved.primaryMilestones[1].achievement.measuredValue, 600);
   assert.equal(
     roadmapMilestoneMetricLabel(achieved.primaryMilestones[1]),
-    'Факт 10 мин · ориентир 6:40',
+    'Actual 10 min · target 6:40',
   );
 });
 
@@ -332,7 +332,7 @@ test('server error mapping preserves free reuse-only and retry semantics', () =>
   );
   assert.equal(
     RESEARCH_CACHE_UNAVAILABLE_MESSAGE,
-    'Сохранённый research недоступен. Новый поиск не запускался.',
+    'Saved research is unavailable. No new search was started.',
   );
   assert.equal(
     mapServerErrorCode({ code: 'upstream_invalid_plan_contract' }, 502),
@@ -356,10 +356,10 @@ test('server error mapping preserves free reuse-only and retry semantics', () =>
   assert.equal(shouldReuseSavedResponseForRetry('RESEARCH_CACHE_UNAVAILABLE'), false);
   assert.equal(isFeasibilityPlannerError('RETRY_CAP_TOO_SHORT'), true);
   assert.equal(isFeasibilityPlannerError('GOAL_NOT_FEASIBLE'), true);
-  assert.equal(RETRY_CAP_TOO_SHORT_MESSAGE, 'Выбери более длинный срок.');
+  assert.equal(RETRY_CAP_TOO_SHORT_MESSAGE, 'Choose a longer time limit.');
   assert.equal(
     GOAL_NOT_FEASIBLE_MESSAGE,
-    'Достижимость цели в пределах года не подтверждена.',
+    'Research could not confirm that this goal is achievable within a year.',
   );
   assert.equal(shouldOfferPlannerRetry('RETRY_CAP_TOO_SHORT'), false);
   assert.equal(shouldOfferPlannerRetry('GOAL_NOT_FEASIBLE'), false);
@@ -367,11 +367,11 @@ test('server error mapping preserves free reuse-only and retry semantics', () =>
   assert.equal(shouldOfferPlannerRetry('UPSTREAM_TIMEOUT'), true);
   assert.equal(
     SAVED_RESPONSE_REVIEW_MESSAGE,
-    'Ответ сохранён и ждёт повторной проверки',
+    'The response is saved and ready for another validation attempt',
   );
   assert.equal(
     SAVED_RESPONSE_RETRY_LABEL,
-    'Проверить сохранённый ответ · без GPT',
+    'Validate saved response · no GPT request',
   );
 });
 

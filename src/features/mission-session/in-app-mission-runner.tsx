@@ -177,20 +177,20 @@ export function InAppMissionRunner({
             <View style={styles.headerCopy}>
               <Pill tone={isAwaitingCheckIn ? 'success' : run ? 'gold' : 'violet'}>
                 {readOnly
-                  ? 'просмотр'
+                  ? 'preview'
                   : isAwaitingCheckIn
-                    ? 'готово'
+                    ? 'done'
                     : run
-                      ? 'сессия'
-                      : 'план'}
+                      ? 'session'
+                      : 'plan'}
               </Pill>
               <ThemedText type="small" style={styles.muted}>
-                День {mission.dayNumber ?? mission.sequence}
+                Day {mission.dayNumber ?? mission.sequence}
                 {scheduledDate ? ` · ${scheduledDate}` : ''}
               </ThemedText>
             </View>
             <Pressable
-              accessibilityLabel={run?.status === 'running' ? 'Свернуть сессию' : 'Закрыть'}
+              accessibilityLabel={run?.status === 'running' ? 'Minimize session' : 'Close'}
               accessibilityRole="button"
               onPress={requestClose}
               style={({ pressed }) => [styles.close, pressed && styles.pressed]}>
@@ -205,8 +205,8 @@ export function InAppMissionRunner({
                   {mission.title}
                 </ThemedText>
                 <InfoPopover
-                  title="О миссии"
-                  accessibilityLabel="Показать пояснение к миссии"
+                  title="About this mission"
+                  accessibilityLabel="Show mission details"
                   sections={missionContextSections(mission)}
                 />
               </View>
@@ -215,19 +215,19 @@ export function InAppMissionRunner({
             {persistenceStatus === 'error' ? (
               <View style={[styles.persistenceCard, styles.persistenceCardError]}>
                 <View style={styles.rowBetween}>
-                  <Pill tone="danger">ошибка сохранения</Pill>
+                  <Pill tone="danger">save failed</Pill>
                   <InfoPopover
-                    title="Что сохранено?"
+                    title="What has been saved?"
                     sections={[
                       {
-                        body: 'Текущие данные остаются в памяти. Повтори локальную запись перед закрытием Actum.',
+                        body: 'Your current data is still in memory. Retry saving it locally before closing Actum.',
                         tone: 'warning',
                       },
                     ]}
                   />
                 </View>
                 <AppButton
-                  label="Повторить сохранение"
+                  label="Retry save"
                   variant="secondary"
                   onPress={async () => {
                     await onRetryPersistence();
@@ -241,9 +241,9 @@ export function InAppMissionRunner({
                 <ExecutionPlan blocks={visibleBlocks} />
                 <View style={styles.footerActions}>
                   {readOnly ? (
-                    <AppButton label="Закрыть просмотр" variant="secondary" onPress={onClose} />
+                    <AppButton label="Close preview" variant="secondary" onPress={onClose} />
                   ) : (
-                    <AppButton label="Начать и включить журнал" icon="→" onPress={onBegin} />
+                    <AppButton label="Start and record session" icon="→" onPress={onBegin} />
                   )}
                 </View>
               </>
@@ -253,7 +253,7 @@ export function InAppMissionRunner({
               <>
                 <RunSummary mission={mission} run={run} />
                 <View style={styles.footerActions}>
-                  <AppButton label="Закрыть журнал" variant="secondary" onPress={onClose} />
+                  <AppButton label="Close log" variant="secondary" onPress={onClose} />
                 </View>
               </>
             ) : null}
@@ -305,11 +305,11 @@ export function InAppMissionRunner({
                 {run.cursor.stage === 'rest' ? (
                   <View style={[styles.activeCard, styles.restCard]}>
                     <ThemedText type="eyebrow" style={styles.cyan}>
-                      отдых
+                      rest
                     </ThemedText>
                     <ThemedText style={styles.clock}>{formatClock(remainingSeconds)}</ThemedText>
                     <AppButton
-                      label="Пропустить отдых"
+                      label="Skip rest"
                       variant="secondary"
                       onPress={() => {
                         const checkpoint = startMissionRunWork(run, execution.blocks, new Date());
@@ -333,7 +333,7 @@ export function InAppMissionRunner({
 
                 <View style={styles.footerActions}>
                   <AppButton
-                    label="Остановить и сохранить"
+                    label="Stop and save"
                     variant="secondary"
                     onPress={() =>
                       onFinish(checkpointMissionRunWork(run, activeBlock, new Date()), 'stopped')
@@ -347,7 +347,7 @@ export function InAppMissionRunner({
               <>
                 <RunSummary mission={mission} run={run} />
                 <View style={styles.footerActions}>
-                  <AppButton label="Добавить итог и сохранить" icon="→" onPress={() => onCheckIn(run.id)} />
+                  <AppButton label="Check in and save" icon="→" onPress={() => onCheckIn(run.id)} />
                 </View>
               </>
             ) : null}
@@ -394,11 +394,11 @@ function PreparationCountdown({
   return (
     <View style={[styles.activeCard, styles.preparationCard]}>
       <ThemedText type="eyebrow" style={styles.muted}>
-        приготовься · подход {setIndex + 1}
+        get ready · set {setIndex + 1}
       </ThemedText>
       <ThemedText type="subtitle">{block.title}</ThemedText>
       <ThemedText
-        accessibilityLabel={`Старт через ${countdown}`}
+        accessibilityLabel={`Starting in ${countdown}`}
         accessibilityLiveRegion="assertive"
         style={styles.countdownNumber}>
         {countdown}
@@ -431,8 +431,8 @@ function ActiveBlock({
       <View style={styles.activeCard}>
         <ThemedText type="eyebrow" style={targetReached ? styles.cyan : styles.gold}>
           {targetReached
-            ? `цель выполнена · подход ${run.cursor.setIndex + 1} из ${block.sets}`
-            : `подход ${run.cursor.setIndex + 1} из ${block.sets}`}
+            ? `target reached · set ${run.cursor.setIndex + 1} of ${block.sets}`
+            : `set ${run.cursor.setIndex + 1} of ${block.sets}`}
         </ThemedText>
         <View style={styles.titleRow}>
           <ThemedText type="subtitle" style={styles.flex}>
@@ -443,19 +443,19 @@ function ActiveBlock({
         <ThemedText>{primaryInstruction(block.instruction)}</ThemedText>
         <ThemedText
           accessibilityLabel={targetReached
-            ? `Прошло ${formatClock(elapsedSeconds)}`
-            : `Осталось ${formatClock(remainingSeconds)}`}
+            ? `Elapsed ${formatClock(elapsedSeconds)}`
+            : `Remaining ${formatClock(remainingSeconds)}`}
           accessibilityLiveRegion="polite"
           style={styles.clock}>
           {formatClock(targetReached ? elapsedSeconds : remainingSeconds)}
         </ThemedText>
         {targetReached ? (
           <ThemedText type="small" style={styles.muted}>
-            План {formatClock(block.durationSecondsPerSet)} выполнен · таймер идёт вверх
+            Target of {formatClock(block.durationSecondsPerSet)} reached · timer counting up
           </ThemedText>
         ) : null}
         <AppButton
-          label={targetReached ? 'Завершить подход' : 'Остановить раньше'}
+          label={targetReached ? 'Finish set' : 'Stop early'}
           variant={targetReached ? undefined : 'secondary'}
           onPress={() => {
             const checkpoint = completeTimerMissionRunSet(run, block, false, new Date());
@@ -473,7 +473,7 @@ function ActiveBlock({
     return (
       <View style={styles.activeCard}>
         <ThemedText type="eyebrow" style={styles.gold}>
-          подход {run.cursor.setIndex + 1} из {block.sets}
+          set {run.cursor.setIndex + 1} of {block.sets}
         </ThemedText>
         <View style={styles.titleRow}>
           <ThemedText type="subtitle" style={styles.flex}>
@@ -483,12 +483,12 @@ function ActiveBlock({
         </View>
         <ThemedText>{primaryInstruction(block.instruction)}</ThemedText>
         <ThemedText type="small" style={styles.muted}>
-          Цель: {formatQuantity(block.targetPerSet)} {counterUnitLabel(block)} ·{' '}
+          Target: {formatQuantity(block.targetPerSet)} {counterUnitLabel(block)} ·{' '}
           {run.stageEndsAt && remainingSeconds > 0
-            ? `осталось ${formatClock(remainingSeconds)}`
+            ? `remaining ${formatClock(remainingSeconds)}`
             : plannedTimeElapsed
-              ? `плановое время вышло · прошло ${formatClock(elapsedSeconds)}`
-              : `прошло ${formatClock(elapsedSeconds)}`}
+              ? `planned time is up · elapsed ${formatClock(elapsedSeconds)}`
+              : `elapsed ${formatClock(elapsedSeconds)}`}
         </ThemedText>
         <Counter
           allowDecimal={block.unit === 'meters' || block.unit === 'custom'}
@@ -504,7 +504,7 @@ function ActiveBlock({
           }}
         />
         <AppButton
-          label="Записать подход"
+          label="Record set"
           onPress={() => {
             const checkpoint = completeCounterMissionRunSet(run, block, new Date());
             if (checkpoint) onSave(checkpoint);
@@ -548,7 +548,7 @@ function ActiveBlock({
         </View>
         <AppButton
           disabled={!allChecked}
-          label="Чек-лист выполнен — записать"
+          label="Checklist complete — save"
           onPress={() => {
             const checkpoint = completeSimpleMissionRunBlock(run, result.blockIndex, new Date());
             if (checkpoint) onSave(checkpoint);
@@ -579,18 +579,20 @@ function ActiveBlock({
               value,
             });
           }}
-          placeholder="Введите ответ…"
+          placeholder="Enter your answer…"
           placeholderTextColor={Palette.textDim}
           style={styles.textLog}
           value={result.value}
         />
         <ThemedText type="small" style={styles.muted}>
-          {Array.from(result.value.trim()).length}/{block.minCharacters} минимум · максимум{' '}
-          {block.maxCharacters}
+          {Array.from(result.value.trim()).length}{' '}
+          {Array.from(result.value.trim()).length === 1 ? 'character' : 'characters'} ·{' '}
+          {block.minCharacters} minimum ·{' '}
+          {block.maxCharacters} maximum
         </ThemedText>
         <AppButton
           disabled={!enough}
-          label="Сохранить ответ в Actum"
+          label="Save answer in Actum"
           onPress={() => {
             const checkpoint = completeSimpleMissionRunBlock(run, result.blockIndex, new Date());
             if (checkpoint) onSave(checkpoint);
@@ -629,18 +631,18 @@ function BlockReview({
   return (
     <View style={styles.activeCard}>
       <Pill tone={blockSuccessful ? 'success' : 'warning'}>
-        {blockSuccessful ? 'критерий выполнен' : criterionAnswered ? 'есть недочёты' : 'нужна проверка'}
+        {blockSuccessful ? 'criterion met' : criterionAnswered ? 'needs improvement' : 'review needed'}
       </Pill>
       <ThemedText type="subtitle">{block.title}</ThemedText>
       {missedTargets ? (
         <ThemedText type="small" style={styles.warningText}>
-          Ниже цели: {missedTargets}
+          Sets below target: {missedTargets}
         </ThemedText>
       ) : null}
       <View style={styles.criterionCheck}>
-        <ThemedText type="smallBold">Критерий выполнен?</ThemedText>
+        <ThemedText type="smallBold">Was the criterion met?</ThemedText>
         <ThemedText type="small" style={styles.muted}>
-          {withoutExecutionSafetyCopy(block.successCriterion) ?? 'Действие выполнено.'}
+          {withoutExecutionSafetyCopy(block.successCriterion) ?? 'The action was completed.'}
         </ThemedText>
         <View style={styles.criterionOptions}>
           <Pressable
@@ -658,7 +660,7 @@ function BlockReview({
               result.criterionMet === true && styles.criterionOptionSuccess,
               pressed && styles.pressed,
             ]}>
-            <ThemedText type="smallBold">✓ Да</ThemedText>
+            <ThemedText type="smallBold">✓ Yes</ThemedText>
           </Pressable>
           <Pressable
             accessibilityRole="radio"
@@ -675,14 +677,14 @@ function BlockReview({
               result.criterionMet === false && styles.criterionOptionWarning,
               pressed && styles.pressed,
             ]}>
-            <ThemedText type="smallBold">— Нет</ThemedText>
+            <ThemedText type="smallBold">— No</ThemedText>
           </Pressable>
         </View>
       </View>
       <View style={styles.commentBlock}>
-        <ThemedText type="smallBold">Комментарий или недочёт по блоку</ThemedText>
+        <ThemedText type="smallBold">Notes about this block</ThemedText>
         <TextInput
-          accessibilityLabel={`Комментарий к блоку ${block.title}`}
+          accessibilityLabel={`Comment on block ${block.title}`}
           maxLength={500}
           multiline
           onChangeText={(comment) => {
@@ -692,7 +694,7 @@ function BlockReview({
               value: comment,
             });
           }}
-          placeholder="Что получилось, где сбился, что помешало…"
+          placeholder="What went well, what was difficult, what got in the way…"
           placeholderTextColor={Palette.textDim}
           style={styles.commentInput}
           value={result.comment ?? ''}
@@ -700,7 +702,7 @@ function BlockReview({
       </View>
       <AppButton
         disabled={!criterionAnswered}
-        label={run.cursor.blockIndex + 1 < blocks.length ? 'Сохранить и перейти дальше' : 'Завершить сессию'}
+        label={run.cursor.blockIndex + 1 < blocks.length ? 'Save and continue' : 'Finish session'}
         icon="→"
         onPress={() => {
           const transition = continueMissionRunAfterReview(run, blocks, new Date());
@@ -759,19 +761,19 @@ export function RunSummary({ mission, run }: { mission: Mission; run: MissionRun
     <View style={styles.summaryCard}>
       <View style={styles.rowBetween}>
         <Pill tone={successful ? 'success' : 'warning'}>
-          {successful ? 'выполнено' : 'есть недочёты'}
+          {successful ? 'completed' : 'needs improvement'}
         </Pill>
         <InfoPopover
-          title="Детали журнала"
-          accessibilityLabel="Показать подробности сохранённой сессии"
+          title="Session log details"
+          accessibilityLabel="Show saved session details"
           sections={runDetailSections(mission, run)}
         />
       </View>
-      <ThemedText type="subtitle">Журнал: {mission.title}</ThemedText>
+      <ThemedText type="subtitle">Log: {mission.title}</ThemedText>
       <ThemedText type="small" style={styles.muted}>
-        {completedBlocks}/{visibleBlockIndexes.length} блоков
+        {completedBlocks}/{visibleBlockIndexes.length} {visibleBlockIndexes.length === 1 ? 'block' : 'blocks'}
         {summary.totalSets
-          ? ` · ${summary.targetMetSets}/${summary.totalSets} подходов по цели`
+          ? ` · ${summary.targetMetSets}/${summary.totalSets} ${summary.totalSets === 1 ? 'set' : 'sets'} on target`
           : ''}{' '}
         · {formatDuration(elapsed)}
       </ThemedText>
@@ -788,7 +790,7 @@ function runDetailSections(mission: Mission, run: MissionRun): ContextInfoSectio
     if (block && isSafetyOnlyExecutionBlock(block)) return [];
     const details = [
       blockResultLabel(result),
-      `Критерий: ${result.criterionMet === true ? 'да' : result.criterionMet === false ? 'нет' : 'не отмечен'}`,
+      `Criterion: ${result.criterionMet === true ? 'yes' : result.criterionMet === false ? 'no' : 'not recorded'}`,
     ];
 
     if (block?.kind === 'checklist' && result.kind === 'checklist') {
@@ -799,9 +801,9 @@ function runDetailSections(mission: Mission, run: MissionRun): ContextInfoSectio
       );
     }
     if (block?.kind === 'text_log' && result.kind === 'text_log' && result.value.trim()) {
-      details.push(`Ответ: ${result.value.trim()}`);
+      details.push(`Answer: ${result.value.trim()}`);
     }
-    if (result.comment?.trim()) details.push(`Комментарий: ${result.comment.trim()}`);
+    if (result.comment?.trim()) details.push(`Comment: ${result.comment.trim()}`);
 
     return [
       {
@@ -856,11 +858,11 @@ function Counter({
   return (
     <View style={styles.counterWrap}>
       <View style={styles.counter}>
-        <Pressable accessibilityLabel="Уменьшить на один" onPress={() => applyValue(currentDraftValue() - 1)} style={styles.counterButton}>
+        <Pressable accessibilityLabel="Decrease by one" onPress={() => applyValue(currentDraftValue() - 1)} style={styles.counterButton}>
           <ThemedText style={styles.counterGlyph}>−</ThemedText>
         </Pressable>
         <TextInput
-          accessibilityLabel="Фактическое количество"
+          accessibilityLabel="Actual quantity"
           keyboardType="decimal-pad"
           onBlur={() => {
             commit(draft);
@@ -874,7 +876,7 @@ function Counter({
           style={styles.counterInput}
           value={draft}
         />
-        <Pressable accessibilityLabel="Увеличить на один" onPress={() => applyValue(currentDraftValue() + 1)} style={styles.counterButton}>
+        <Pressable accessibilityLabel="Increase by one" onPress={() => applyValue(currentDraftValue() + 1)} style={styles.counterButton}>
           <ThemedText style={styles.counterGlyph}>+</ThemedText>
         </Pressable>
       </View>
@@ -883,7 +885,7 @@ function Counter({
           accessibilityRole="button"
           onPress={() => applyValue(target)}
           style={({ pressed }) => [styles.counterQuickButton, pressed && styles.pressed]}>
-          <ThemedText type="smallBold">Поставить цель: {formatQuantity(target)}</ThemedText>
+          <ThemedText type="smallBold">Use target: {formatQuantity(target)}</ThemedText>
         </Pressable>
         <Pressable
           accessibilityRole="button"
@@ -898,22 +900,22 @@ function Counter({
 
 function blockPrescription(block: MissionExecutionBlock) {
   if (block.kind === 'timer') {
-    return `${block.sets} × ${formatDuration(block.durationSecondsPerSet)} · отдых ${formatDuration(block.restSeconds)}`;
+    return `${block.sets} × ${formatDuration(block.durationSecondsPerSet)} · rest ${formatDuration(block.restSeconds)}`;
   }
   if (block.kind === 'counter') {
-    return `${block.sets} × ${formatQuantity(block.targetPerSet)} ${counterUnitLabel(block)} · ${formatDuration(block.workSecondsPerSet)} · отдых ${formatDuration(block.restSeconds)}${block.tempo ? ` · ${block.tempo}` : ''}`;
+    return `${block.sets} × ${formatQuantity(block.targetPerSet)} ${counterUnitLabel(block)} · ${formatDuration(block.workSecondsPerSet)} · rest ${formatDuration(block.restSeconds)}${block.tempo ? ` · ${block.tempo}` : ''}`;
   }
   if (block.kind === 'checklist') {
-    return `${block.items.length} пунктов · ~${formatDuration(block.estimatedSeconds)}`;
+    return `${block.items.length} ${block.items.length === 1 ? 'item' : 'items'} · ~${formatDuration(block.estimatedSeconds)}`;
   }
-  return `${block.minCharacters}–${block.maxCharacters} знаков · ~${formatDuration(block.estimatedSeconds)}`;
+  return `${block.minCharacters}–${block.maxCharacters} characters · ~${formatDuration(block.estimatedSeconds)}`;
 }
 
 function BlockInfoPopover({ block }: { block: MissionExecutionBlock }) {
   return (
     <InfoPopover
       title={block.title}
-      accessibilityLabel={`Показать подробности блока ${block.title}`}
+      accessibilityLabel={`Show details for block ${block.title}`}
       sections={blockContextSections(block)}
     />
   );
@@ -923,10 +925,10 @@ function blockContextSections(block: MissionExecutionBlock): ContextInfoSection[
   const sections: ContextInfoSection[] = [];
   if ('instruction' in block) {
     const details = instructionDetails(block.instruction);
-    if (details) sections.push({ heading: 'Подробнее', body: details });
+    if (details) sections.push({ heading: 'Details', body: details });
   }
   const criterion = withoutExecutionSafetyCopy(block.successCriterion);
-  if (criterion) sections.push({ heading: 'Критерий', body: criterion });
+  if (criterion) sections.push({ heading: 'Criterion', body: criterion });
   sections.push(...executionBlockContextSections(block));
   return sections;
 }
@@ -944,21 +946,23 @@ function instructionDetails(instruction: string) {
 }
 
 function startLabel(block: MissionExecutionBlock) {
-  if (block.kind === 'timer') return 'Начать таймер';
-  if (block.kind === 'counter') return 'Начать подход';
-  if (block.kind === 'checklist') return 'Открыть чек-лист';
-  return 'Открыть поле ответа';
+  if (block.kind === 'timer') return 'Start timer';
+  if (block.kind === 'counter') return 'Start set';
+  if (block.kind === 'checklist') return 'Open checklist';
+  return 'Open answer field';
 }
 
 function counterUnitLabel(block: CounterExecutionBlock) {
-  if (block.unit === 'custom') return block.unitLabel?.trim() || 'ед.';
+  if (block.unit === 'custom') {
+    return block.unitLabel?.trim() || (block.targetPerSet === 1 ? 'unit' : 'units');
+  }
   return {
-    reps: 'повт.',
-    pages: 'стр.',
-    items: 'элем.',
-    words: 'слов',
-    meters: 'м',
-    attempts: 'попыток',
+    reps: block.targetPerSet === 1 ? 'rep' : 'reps',
+    pages: block.targetPerSet === 1 ? 'page' : 'pages',
+    items: block.targetPerSet === 1 ? 'item' : 'items',
+    words: block.targetPerSet === 1 ? 'word' : 'words',
+    meters: 'm',
+    attempts: block.targetPerSet === 1 ? 'attempt' : 'attempts',
   }[block.unit];
 }
 
@@ -970,11 +974,11 @@ function blockResultLabel(result: MissionRunBlockResult) {
   }
   if (result.kind === 'counter') {
     return result.sets
-      .map((set) => `${set.setIndex + 1}: ${formatQuantity(set.actualQuantity)}/${formatQuantity(set.targetQuantity)} ${result.unitLabel || result.unit} · время ${formatDuration(set.actualDurationSeconds)}/${formatDuration(set.targetDurationSeconds)}`)
+      .map((set) => `${set.setIndex + 1}: ${formatQuantity(set.actualQuantity)}/${formatQuantity(set.targetQuantity)} ${result.unitLabel || result.unit} · time ${formatDuration(set.actualDurationSeconds)}/${formatDuration(set.targetDurationSeconds)}`)
       .join(' · ');
   }
-  if (result.kind === 'checklist') return `${result.checkedIndexes.length} пунктов отмечено`;
-  return `${Array.from(result.value.trim()).length} знаков сохранено`;
+  if (result.kind === 'checklist') return `${result.checkedIndexes.length} ${result.checkedIndexes.length === 1 ? 'item' : 'items'} checked`;
+  return `${Array.from(result.value.trim()).length} ${Array.from(result.value.trim()).length === 1 ? 'character' : 'characters'} saved`;
 }
 
 function blockResultSuccessful(result: MissionRunBlockResult) {
@@ -994,14 +998,14 @@ function formatClock(seconds: number) {
 
 function formatDuration(seconds: number) {
   const safe = Math.max(0, Math.round(seconds));
-  if (safe < 60) return `${safe} сек`;
+  if (safe < 60) return `${safe} sec`;
   const minutes = Math.floor(safe / 60);
   const rest = safe % 60;
-  return rest ? `${minutes} мин ${rest} сек` : `${minutes} мин`;
+  return rest ? `${minutes} min ${rest} sec` : `${minutes} min`;
 }
 
 function formatQuantity(value: number) {
-  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2))).replace('.', ',');
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
 }
 
 const styles = StyleSheet.create({

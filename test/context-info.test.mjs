@@ -9,6 +9,33 @@ const {
   missionContextSections,
   planContextSections,
 } = await import('@/shared/presentation/context-info');
+const { formatBaselineMetric, formatMetricValue, formatMissionDuration } = await import(
+  '@/shared/presentation/plan-formatters'
+);
+
+test('built-in presentation uses English quantities and decimal formatting', () => {
+  const mission = {
+    estimatedMinutes: 10,
+    execution: { kind: 'in_app', blocks: [{ kind: 'timer', sets: 1 }] },
+  };
+  assert.equal(formatMissionDuration(mission), '1 block · 1 record · ≈ 10 min');
+  assert.equal(
+    formatMissionDuration(mission, { inAppRecordLabel: 'check-ins' }),
+    '1 block · 1 check-in · ≈ 10 min',
+  );
+  assert.equal(formatMetricValue(1, 'pages'), '1 page');
+  assert.equal(formatMetricValue(2.5, 'meters'), '2.5 m');
+  assert.equal(formatMetricValue(30, 'seconds'), '30 sec');
+  assert.equal(formatMetricValue(90, 'seconds'), '1:30');
+  assert.equal(
+    formatBaselineMetric({ normalizedMetric: 'Distance', value: 2.5, unit: 'meters' }),
+    'Distance · 2.5 meters',
+  );
+  assert.deepEqual(executionBlockContextSections({
+    kind: 'timer',
+    loadBasis: { percentage: 12.5, baseValue: 60, baseUnit: 'seconds', result: 7.5 },
+  }), [{ heading: 'Load calculation', body: '12.5% × 60 sec = 7.5 sec' }]);
+});
 
 test('mission context keeps plan-v5 rationale but never legacy instructions', () => {
   const inAppMission = deepFreeze({
@@ -41,8 +68,8 @@ test('mission context keeps plan-v5 rationale but never legacy instructions', ()
   });
 
   assert.deepEqual(missionContextSections(inAppMission), [
-    { heading: 'О дне', body: 'Краткое объяснение роли этого дня.' },
-    { heading: 'Критерий дня', body: 'Все блоки дня завершены.' },
+    { heading: 'About this day', body: 'Краткое объяснение роли этого дня.' },
+    { heading: 'Daily completion criterion', body: 'Все блоки дня завершены.' },
   ]);
 
   const legacyMission = deepFreeze({
@@ -67,7 +94,7 @@ test('execution block context contains load provenance only', () => {
   });
 
   assert.deepEqual(executionBlockContextSections(block), [
-    { heading: 'Расчёт нагрузки', body: '50% × 80 сек = 40 сек' },
+    { heading: 'Load calculation', body: '50% × 80 sec = 40 sec' },
   ]);
   assert.equal(
     JSON.stringify(executionBlockContextSections(block)).includes(block.instruction),
@@ -160,34 +187,34 @@ test('plan context exposes rationale and provenance without traversing executabl
   assert.deepEqual(
     sections.map((section) => section.heading),
     [
-      'Версия и метод',
-      'Логика плана',
-      'Текущий цикл',
-      'Исходная точка и расчёт',
-      'Срок большой цели',
-      'Допущения',
-      'Основа методики',
-      'Источники',
-      'Метаданные генерации',
+      'Plan version and method',
+      'Plan rationale',
+      'Current cycle',
+      'Baseline and calculation',
+      'Goal timeline',
+      'Assumptions',
+      'Methodology',
+      'Sources',
+      'Generation metadata',
     ],
   );
   assert.match(
-    sections.find((section) => section.heading === 'Версия и метод')?.body ?? '',
-    /План v6[\s\S]*Web research[\s\S]*средняя/u,
+    sections.find((section) => section.heading === 'Plan version and method')?.body ?? '',
+    /Plan v6[\s\S]*Web research[\s\S]*medium/u,
   );
   assert.match(
-    sections.find((section) => section.heading === 'Текущий цикл')?.body ?? '',
-    /Цикл 1 из 6[\s\S]*Увеличить устойчивый результат/u,
+    sections.find((section) => section.heading === 'Current cycle')?.body ?? '',
+    /Cycle 1 of 6[\s\S]*Увеличить устойчивый результат/u,
   );
   assert.equal(JSON.stringify(sections).includes('Не выполнять под водой'), false);
   assert.equal(JSON.stringify(sections).includes('безопасном месте'), false);
   assert.match(
-    sections.find((section) => section.heading === 'Источники')?.body ?? '',
+    sections.find((section) => section.heading === 'Sources')?.body ?? '',
     /https:\/\/example\.com\/research/u,
   );
   assert.match(
-    sections.find((section) => section.heading === 'Метаданные генерации')?.body ?? '',
-    /response-123[\s\S]*Входных токенов: 100[\s\S]*Выходных токенов: 200/u,
+    sections.find((section) => section.heading === 'Generation metadata')?.body ?? '',
+    /response-123[\s\S]*Input tokens: 100[\s\S]*Output tokens: 200/u,
   );
   assert.equal(
     JSON.stringify(sections).includes('Не переносить эту исполняемую инструкцию'),
@@ -199,11 +226,11 @@ test('plan context exposes rationale and provenance without traversing executabl
     { baseline: plan.baseline, targetTimeline: 'Срок из сохранённой цели' },
   );
   assert.match(
-    legacySections.find((section) => section.heading === 'Исходная точка и расчёт')?.body ?? '',
+    legacySections.find((section) => section.heading === 'Baseline and calculation')?.body ?? '',
     /80 сек/u,
   );
   assert.equal(
-    legacySections.find((section) => section.heading === 'Срок большой цели')?.body,
+    legacySections.find((section) => section.heading === 'Goal timeline')?.body,
     'Срок из сохранённой цели',
   );
 });
@@ -234,15 +261,15 @@ test('plan-v7 context presents the estimated month separately from the retry lim
 
   const sections = planContextSections(plan);
   assert.equal(
-    sections.find((section) => section.heading === 'Ориентир достижения')?.body,
-    'Месяц 3',
+    sections.find((section) => section.heading === 'Estimated achievement')?.body,
+    'Month 3',
   );
   assert.equal(
-    sections.find((section) => section.heading === 'Лимит продолжения')?.body,
+    sections.find((section) => section.heading === 'Continuation limit')?.body,
     'Полгода',
   );
   assert.equal(
-    sections.some((section) => section.heading === 'Срок большой цели'),
+    sections.some((section) => section.heading === 'Goal timeline'),
     false,
   );
 });

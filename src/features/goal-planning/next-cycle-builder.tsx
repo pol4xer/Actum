@@ -61,7 +61,7 @@ export function NextCycleBuilder({
       setError(
         plannerError
           ? plannerError.message
-          : 'Не удалось собрать следующий цикл.',
+          : 'Could not create the next cycle.',
       );
     } finally {
       setLoading(false);
@@ -71,29 +71,29 @@ export function NextCycleBuilder({
   return (
     <Card accent style={styles.card}>
       <View style={styles.topRow}>
-        <Pill tone="success">цикл завершён</Pill>
+        <Pill tone="success">cycle complete</Pill>
         <InfoPopover
-          title="Следующий цикл"
+          title="Next cycle"
           sections={[
             {
               body: usesSavedResearch
-                ? 'Actum использует сохранённый web-research и отправит только новый запрос на адаптацию заданий.'
+                ? 'Actum will use the saved web research and send one new request to adapt your activities.'
                 : hasUnlinkableResearch
-                  ? 'Сохранённый web-research нельзя связать с этим циклом. Чтобы не запускать новый поиск без подтверждения, Actum отправит только запрос на адаптацию заданий.'
-                  : 'Для этой цели web-research ранее не выполнялся. Будет отправлен только запрос на адаптацию заданий.',
+                  ? 'The saved web research cannot be linked to this cycle. Actum will send only an adaptation request, without starting a new search.'
+                  : 'No web research has been done for this goal. Only an adaptation request will be sent.',
             },
           ]}
         />
       </View>
-      <ThemedText type="title">Месяц {nextCycle}</ThemedText>
+      <ThemedText type="title">Month {nextCycle}</ThemedText>
       <ThemedText type="small" style={styles.muted}>
-        Проверь текущий результат — от него будут рассчитаны следующие 30 дней.
+        Check your current result to set the starting point for the next 30 days.
       </ThemedText>
       <TextInput
-        accessibilityLabel="Текущий результат после завершённого цикла"
+        accessibilityLabel="Current result after the completed cycle"
         maxLength={500}
         onChangeText={setBaseline}
-        placeholder="Например: 1 минута 20 секунд"
+        placeholder="For example: 1 minute 20 seconds"
         placeholderTextColor={Palette.textDim}
         style={styles.input}
         value={baseline}
@@ -103,14 +103,14 @@ export function NextCycleBuilder({
           <ThemedText type="small" style={styles.error} numberOfLines={2}>
             {errorCode === 'RESEARCH_CACHE_UNAVAILABLE'
               ? RESEARCH_CACHE_UNAVAILABLE_MESSAGE
-              : 'План пока не получен'}
+              : 'Plan not received yet'}
           </ThemedText>
           <InfoPopover
-            title="Ошибка генерации"
+            title="Generation error"
             sections={[
               { body: error, tone: 'warning' },
               ...(errorCode === 'RESEARCH_CACHE_UNAVAILABLE'
-                ? [{ body: 'Новый research запускается только явно через «Настройки» → «Новая цель».' }]
+                ? [{ body: 'To start new research, choose Settings → New goal.' }]
                 : []),
             ]}
           />
@@ -118,7 +118,7 @@ export function NextCycleBuilder({
       ) : null}
       {shouldOfferPlannerRetry(errorCode) ? (
         <AppButton
-          label={`Собрать месяц ${nextCycle}`}
+          label={`Create month ${nextCycle}`}
           loading={loading}
           disabled={baseline.trim().length < 2}
           onPress={generate}
@@ -130,13 +130,13 @@ export function NextCycleBuilder({
 
 function editableBaseline(value: number, unit: string) {
   const labels: Record<string, string> = {
-    seconds: 'секунд',
-    reps: 'повторений',
-    pages: 'страниц',
-    items: 'элементов',
-    words: 'слов',
-    meters: 'метров',
-    attempts: 'попыток',
+    seconds: 'seconds',
+    reps: 'reps',
+    pages: 'pages',
+    items: 'items',
+    words: 'words',
+    meters: 'meters',
+    attempts: 'attempts',
   };
   return `${value} ${labels[unit] ?? unit}`;
 }

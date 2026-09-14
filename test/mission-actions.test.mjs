@@ -49,7 +49,7 @@ test('day presentation hides safety-only gates and keeps executable dosage', () 
       {
         id: 'timer-0',
         title: 'Рабочий подход',
-        dose: '3 × 30 сек · отдых 90 сек',
+        dose: '3 × 30 sec · rest 90 sec',
         instruction: 'Задержи дыхание. После сигнала дыши обычно.',
         criterion: 'Три подхода завершены.',
       },
@@ -91,7 +91,7 @@ test('day presentation keeps persisted routine plans readable', () => {
     {
       id: 'routine-0',
       title: 'Планка',
-      dose: '3 × 30 сек · отдых 1 мин',
+      dose: '3 × 30 sec · rest 1 min',
       instruction: 'Держи корпус ровно.',
       criterion: 'Выполнены три подхода.',
     },

@@ -20,9 +20,9 @@ import { useApp } from '@/state';
 
 const ARCHETYPES: Archetype[] = ['pathfinder', 'scholar', 'guardian'];
 const MODES: Array<{ value: StrictnessMode; label: string }> = [
-  { value: 'gentle', label: 'Спокойный' },
-  { value: 'balanced', label: 'Обычный' },
-  { value: 'strict', label: 'Строгий' },
+  { value: 'gentle', label: 'Gentle' },
+  { value: 'balanced', label: 'Balanced' },
+  { value: 'strict', label: 'Strict' },
 ];
 
 export function OnboardingScreen() {
@@ -60,10 +60,10 @@ export function OnboardingScreen() {
               <HeroSigil size={154} />
               <View style={styles.introCopy}>
                 <ThemedText type="display" style={styles.centerText}>
-                  Одна цель.{'\n'}Шаг за шагом.
+                  One goal.{'\n'}One step at a time.
                 </ThemedText>
                 <ThemedText style={[styles.lead, styles.centerText]}>
-                  Actum составит план и проведёт по нему.
+                  Actum builds your plan and guides you through it.
                 </ThemedText>
               </View>
             </View>
@@ -72,7 +72,7 @@ export function OnboardingScreen() {
           {step === 1 ? (
             <View style={styles.stage}>
               <View style={styles.copyBlock}>
-                <ThemedText type="title">Выбери героя</ThemedText>
+                <ThemedText type="title">Choose your hero</ThemedText>
               </View>
               <View style={styles.archetypes}>
                 {ARCHETYPES.map((item) => (
@@ -102,14 +102,14 @@ export function OnboardingScreen() {
                 <HeroSigil archetype={archetype} size={128} level={1} />
               </View>
               <View style={styles.copyBlock}>
-                <ThemedText type="title">Как тебя называть?</ThemedText>
+                <ThemedText type="title">What should we call you?</ThemedText>
               </View>
               <TextInput
-                accessibilityLabel="Имя героя"
+                accessibilityLabel="Hero name"
                 autoCapitalize="words"
                 maxLength={24}
                 onChangeText={setName}
-                placeholder="Например, Алекс"
+                placeholder="For example, Alex"
                 placeholderTextColor={Palette.textDim}
                 returnKeyType="done"
                 style={styles.input}
@@ -117,7 +117,7 @@ export function OnboardingScreen() {
               />
 
               <View style={styles.modeBlock}>
-                <ThemedText type="smallBold">Темп</ThemedText>
+                <ThemedText type="smallBold">Pace</ThemedText>
                 <View style={styles.modeList}>
                   {MODES.map((mode) => (
                     <Pressable
@@ -142,10 +142,10 @@ export function OnboardingScreen() {
 
         <View style={styles.footer}>
           {step > 0 ? (
-            <AppButton label="Назад" variant="ghost" onPress={() => setStep((value) => value - 1)} />
+            <AppButton label="Back" variant="ghost" onPress={() => setStep((value) => value - 1)} />
           ) : null}
           <AppButton
-            label={step === 2 ? 'Начать' : 'Продолжить'}
+            label={step === 2 ? 'Start' : 'Continue'}
             disabled={step === 2 && !name.trim()}
             onPress={step === 2 ? finish : () => setStep((value) => value + 1)}
             style={styles.continueButton}

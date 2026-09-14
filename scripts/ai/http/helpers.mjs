@@ -18,65 +18,65 @@ const INPUT_KEYS = new Set([
 ]);
 
 export function validateInput(input) {
-  if (!input || typeof input !== 'object') throw new Error('Некорректный запрос.');
+  if (!input || typeof input !== 'object') throw new Error('Invalid request.');
   if (Object.hasOwn(input, 'targetTimeline') || Object.hasOwn(input, 'horizonDays')) {
-    throw new Error('Устаревший формат запроса. Выбери предел продолжения программы.');
+    throw new Error('Outdated request format. Choose a program continuation limit.');
   }
   if (Object.keys(input).some((key) => !INPUT_KEYS.has(key))) {
-    throw new Error('Запрос содержит неподдерживаемые поля.');
+    throw new Error('The request contains unsupported fields.');
   }
   if (typeof input.prompt !== 'string' || input.prompt.trim().length < 5) {
-    throw new Error('Цель слишком короткая.');
+    throw new Error('The goal is too short.');
   }
-  if (input.prompt.trim().length > 1000) throw new Error('Цель слишком длинная.');
+  if (input.prompt.trim().length > 1000) throw new Error('The goal is too long.');
   if (![10, 20, 30, 45, 60].includes(input.dailyMinutes)) {
-    throw new Error('Некорректный лимит времени.');
+    throw new Error('Invalid time budget.');
   }
   const durationConfig = programDurationConfig(input.duration);
-  if (!durationConfig) throw new Error('Некорректный предел продолжения программы.');
+  if (!durationConfig) throw new Error('Invalid program continuation limit.');
   const cycleNumber = input.cycleNumber ?? 1;
   if (
     !Number.isInteger(cycleNumber) ||
     cycleNumber < 1 ||
     cycleNumber > durationConfig.totalCycles
   ) {
-    throw new Error('Некорректный номер цикла.');
+    throw new Error('Invalid cycle number.');
   }
   if (!['starting', 'some-experience', 'returning'].includes(input.currentLevel)) {
-    throw new Error('Некорректная точка старта.');
+    throw new Error('Invalid starting point.');
   }
   if (typeof input.baseline !== 'string' || input.baseline.trim().length < 2) {
-    throw new Error('Опиши текущую измеренную точку старта.');
+    throw new Error('Describe your current measured baseline.');
   }
   if (input.baseline.trim().length > 500) {
-    throw new Error('Описание точки старта слишком длинное.');
+    throw new Error('The baseline description is too long.');
   }
   if (input.researchMode != null && !['quick', 'web'].includes(input.researchMode)) {
-    throw new Error('Некорректный режим исследования.');
+    throw new Error('Invalid research mode.');
   }
   if (input.programContext != null) {
     if (
       typeof input.programContext !== 'object' ||
       Array.isArray(input.programContext)
     ) {
-      throw new Error('Некорректный контекст программы.');
+      throw new Error('Invalid program context.');
     }
     if (JSON.stringify(input.programContext).length > 20_000) {
-      throw new Error('Контекст программы слишком большой.');
+      throw new Error('The program context is too large.');
     }
     if (
       !input.programContext.target ||
       !Array.isArray(input.programContext.roadmap) ||
       !Array.isArray(input.programContext.completedCycles)
     ) {
-      throw new Error('Контекст программы неполный.');
+      throw new Error('The program context is incomplete.');
     }
     if (
       input.programContext.researchAnchor != null &&
       (typeof input.programContext.researchAnchor !== 'string' ||
         !/^[a-f0-9]{64}$/.test(input.programContext.researchAnchor))
     ) {
-      throw new Error('Некорректная привязка исследования программы.');
+      throw new Error('Invalid program research anchor.');
     }
     if (
       input.programContext.targetCycleNumber != null &&
@@ -84,7 +84,7 @@ export function validateInput(input) {
         input.programContext.targetCycleNumber < 1 ||
         input.programContext.targetCycleNumber > durationConfig.totalCycles)
     ) {
-      throw new Error('Некорректный целевой цикл контекста программы.');
+      throw new Error('Invalid target cycle in the program context.');
     }
   }
   if (
@@ -93,7 +93,7 @@ export function validateInput(input) {
     !/^[a-f0-9]{64}$/.test(input.programContext?.researchAnchor ?? '')
   ) {
     throw new Error(
-      'Следующий цикл без привязки исходного исследования заблокирован: новый web-поиск не запущен.',
+      'The next cycle is blocked without its original research anchor: no new web search was started.',
     );
   }
   validateAssessmentCapacity(input, cycleNumber);
@@ -132,7 +132,7 @@ function validateSupportedMetricDirection(input) {
     roadmapShowsDecrease
   ) {
     throw new Error(
-      'Цели на уменьшение числового показателя пока не поддерживаются встроенным runner. Сформулируй измеримое действие, значение которого должно расти.',
+      'Decreasing numeric goals are not yet supported by the built-in runner. Describe a measurable action whose value should increase.',
     );
   }
 }
@@ -148,7 +148,7 @@ function validateAssessmentCapacity(input, cycleNumber) {
     !isSecondsUnit(programTarget.unit)
   ) {
     throw new Error(
-      'Цель со счётчиком 0 не создаёт исполняемого действия. Укажи положительный целевой результат.',
+      'A counter goal of 0 does not create an executable action. Enter a positive target value.',
     );
   }
   const candidates = [
@@ -161,11 +161,11 @@ function validateAssessmentCapacity(input, cycleNumber) {
   for (const candidate of candidates) {
     const value = candidate.value;
     if (!Number.isInteger(value) || value < 1) {
-      throw new Error('Контрольная длительность должна быть целым числом секунд не меньше 1.');
+      throw new Error('The assessment duration must be an integer of at least 1 second.');
     }
     if (value > maximum) {
       throw new Error(
-        `Контрольный замер ${value} сек. не помещается в дневной лимит ${maximum} сек. Увеличь лимит времени.`,
+        `The ${value}-second assessment does not fit the ${maximum}-second daily budget. Increase the time budget.`,
       );
     }
   }
@@ -188,7 +188,7 @@ export function readJson(request) {
       body += chunk;
       if (body.length > 20_000) {
         settled = true;
-        reject(new Error('Запрос слишком большой.'));
+        reject(new Error('The request is too large.'));
       }
     });
     request.on('end', () => {
@@ -198,7 +198,7 @@ export function readJson(request) {
         resolve(JSON.parse(body));
       } catch {
         settled = true;
-        reject(new Error('Некорректный JSON.'));
+        reject(new Error('Invalid JSON.'));
       }
     });
     request.on('error', (error) => {

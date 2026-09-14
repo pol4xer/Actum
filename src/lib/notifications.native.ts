@@ -26,15 +26,15 @@ export async function enableDailyReminder(hour: number, minute: number, missionT
 
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
-      name: 'Миссия дня',
+      name: 'Daily mission',
       importance: Notifications.AndroidImportance.DEFAULT,
     });
   }
 
   await Notifications.scheduleNotificationAsync({
     content: {
-      title: 'Миссия ждёт, путник',
-      body: missionTitle ?? 'Открой Actum и сделай один честный шаг.',
+      title: 'Your mission is waiting',
+      body: missionTitle ?? 'Open Actum and take one step toward your goal.',
       data: { route: '/' },
     },
     trigger: {

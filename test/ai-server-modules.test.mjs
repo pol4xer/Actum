@@ -88,13 +88,13 @@ test('structured research keeps one bounded feasibility conclusion', () => {
   ]);
   assert.throws(
     () => parseResearchConclusion(JSON.stringify({ ...conclusion, earliestTargetCycleNumber: 13 })),
-    /ожидается целый номер цикла от 1 до 12 или null/,
+    /expected an integer cycle number from 1 to 12 or null/,
   );
   assert.throws(
     () => parseResearchConclusion(JSON.stringify({ ...conclusion, unknown: true })),
-    /research\.unknown: поле не поддерживается/,
+    /research\.unknown: field is not supported/,
   );
-  assert.throws(() => parseResearchConclusion('{broken'), /нечитаемый JSON/);
+  assert.throws(() => parseResearchConclusion('{broken'), /unreadable JSON/);
 });
 
 test('cache helpers separate cycle planning while reusing one program research result', () => {
@@ -254,19 +254,19 @@ test('HTTP helpers retain validation, request-size, CORS, JSON, and request-ID c
   assert.doesNotThrow(() => validateInput(webInput));
   assert.throws(
     () => validateInput({ ...webInput, dailyMinutes: 15 }),
-    /Некорректный лимит времени\./,
+    /Invalid time budget\./,
   );
   assert.throws(
     () => validateInput({ ...webInput, duration: 'two-years' }),
-    /Некорректный предел продолжения программы\./,
+    /Invalid program continuation limit\./,
   );
   assert.throws(
     () => validateInput({ ...webInput, cycleNumber: 13 }),
-    /Некорректный номер цикла\./,
+    /Invalid cycle number\./,
   );
   assert.throws(
     () => validateInput({ ...webInput, prompt: 'Complete 0 repetitions' }),
-    /Цель со счётчиком 0 не создаёт исполняемого действия/,
+    /A counter goal of 0 does not create an executable action/,
   );
   assert.throws(
     () => validateInput({
@@ -274,15 +274,15 @@ test('HTTP helpers retain validation, request-size, CORS, JSON, and request-ID c
       prompt: 'Сократить время до 40 секунд',
       baseline: 'Сейчас результат 60 секунд',
     }),
-    /Цели на уменьшение числового показателя пока не поддерживаются встроенным runner/,
+    /Decreasing numeric goals are not yet supported by the built-in runner/,
   );
   assert.throws(
     () => validateInput({ ...webInput, horizonDays: 30 }),
-    /Устаревший формат запроса\./,
+    /Outdated request format\./,
   );
   assert.throws(
     () => validateInput({ ...webInput, programContext: { roadmap: [] } }),
-    /Контекст программы неполный\./,
+    /The program context is incomplete\./,
   );
   assert.throws(
     () =>
@@ -292,7 +292,7 @@ test('HTTP helpers retain validation, request-size, CORS, JSON, and request-ID c
         duration: 'month',
         dailyMinutes: 10,
       }),
-    /Контрольный замер 900 сек\. не помещается в дневной лимит 600 сек\./,
+    /The 900-second assessment does not fit the 600-second daily budget\./,
   );
   assert.throws(
     () => validateInput({
@@ -301,7 +301,7 @@ test('HTTP helpers retain validation, request-size, CORS, JSON, and request-ID c
       duration: 'year',
       dailyMinutes: 10,
     }),
-    /Контрольный замер 900 сек\. не помещается в дневной лимит 600 сек\./,
+    /The 900-second assessment does not fit the 600-second daily budget\./,
   );
   const laterCycleContext = {
     researchAnchor: 'a'.repeat(64),
@@ -323,7 +323,7 @@ test('HTTP helpers retain validation, request-size, CORS, JSON, and request-ID c
       cycleNumber: 2,
       programContext: { ...laterCycleContext, researchAnchor: undefined },
     }),
-    /Следующий цикл без привязки исходного исследования заблокирован/,
+    /The next cycle is blocked without its original research anchor/,
   );
   assert.throws(
     () => validateInput({
@@ -331,7 +331,7 @@ test('HTTP helpers retain validation, request-size, CORS, JSON, and request-ID c
       cycleNumber: 2,
       programContext: { ...laterCycleContext, researchAnchor: 'invalid' },
     }),
-    /Некорректная привязка исследования программы/,
+    /Invalid program research anchor/,
   );
   assert.doesNotThrow(() => validateInput({
     ...webInput,
@@ -360,7 +360,7 @@ test('HTTP helpers retain validation, request-size, CORS, JSON, and request-ID c
         ],
       },
     }),
-    /Цели на уменьшение числового показателя пока не поддерживаются встроенным runner/,
+    /Decreasing numeric goals are not yet supported by the built-in runner/,
   );
   assert.throws(
     () => validateInput({
@@ -369,7 +369,7 @@ test('HTTP helpers retain validation, request-size, CORS, JSON, and request-ID c
       researchMode: 'quick',
       programContext: { ...laterCycleContext, targetCycleNumber: 13 },
     }),
-    /Некорректный целевой цикл контекста программы/,
+    /Invalid target cycle in the program context/,
   );
   assert.throws(
     () => validateInput({
@@ -379,7 +379,7 @@ test('HTTP helpers retain validation, request-size, CORS, JSON, and request-ID c
       dailyMinutes: 10,
       programContext: laterCycleContext,
     }),
-    /Контрольный замер 700 сек\. не помещается в дневной лимит 600 сек\./,
+    /The 700-second assessment does not fit the 600-second daily budget\./,
   );
   assert.equal(
     requestIdFromRequest({ headers: { 'x-actum-request-id': 'actum_12345678' } }),
@@ -392,8 +392,8 @@ test('HTTP helpers retain validation, request-size, CORS, JSON, and request-ID c
 
   const parsedRequest = Readable.from(['{"ok":true}']);
   assert.deepEqual(await readJson(parsedRequest), { ok: true });
-  await assert.rejects(readJson(Readable.from(['{broken'])), /Некорректный JSON\./);
-  await assert.rejects(readJson(Readable.from(['x'.repeat(20_001)])), /Запрос слишком большой\./);
+  await assert.rejects(readJson(Readable.from(['{broken'])), /Invalid JSON\./);
+  await assert.rejects(readJson(Readable.from(['x'.repeat(20_001)])), /The request is too large\./);
 
   const response = new FakeResponse();
   setCors(response);

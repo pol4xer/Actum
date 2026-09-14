@@ -64,7 +64,7 @@ export function createAppCommands({
       const at = timestamp();
       const profile: Profile = {
         ...input,
-        name: input.name.trim() || 'Путник',
+        name: input.name.trim() || 'Traveler',
         contractAcceptedAt: at,
       };
       dispatch({ type: 'finish-onboarding', profile, now: at });

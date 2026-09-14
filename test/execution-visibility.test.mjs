@@ -6,10 +6,61 @@ register(new URL('./typescript-extension-loader.mjs', import.meta.url));
 
 const {
   actionableExecutionBlocks,
+  containsExecutionSafetyCopy,
   isSafetyOnlyExecutionBlock,
   presentExecutionSection,
   withoutExecutionSafetyCopy,
 } = await import('@/shared/presentation/execution-visibility');
+
+test('English symptom matching preserves painting checklists and ordinary action words', () => {
+  const artChecklist = {
+    kind: 'checklist',
+    title: 'Readiness',
+    items: ['Choose a painting topic', 'Sketch a painting idea'],
+    estimatedSeconds: 120,
+    successCriterion: 'A topic and a sketch are ready.',
+  };
+
+  assert.equal(isSafetyOnlyExecutionBlock(artChecklist), false);
+  assert.deepEqual(actionableExecutionBlocks([artChecklist]), [artChecklist]);
+  for (const copy of [
+    ...artChecklist.items,
+    'Repaint the cabinet.',
+    'Seize the opportunity to practice.',
+    'Practice seizing an opportunity.',
+  ]) {
+    assert.equal(containsExecutionSafetyCopy(copy), false, copy);
+    assert.equal(withoutExecutionSafetyCopy(copy), copy);
+  }
+});
+
+test('English symptom matching still identifies real safety-only checklist items', () => {
+  const safetyChecklist = {
+    kind: 'checklist',
+    title: 'Readiness',
+    items: [
+      'No pain.',
+      'No painful movement.',
+      'No dizziness.',
+      'No nausea.',
+      'Do not start while dizzy.',
+      'Do not start while nauseous.',
+      'Do not start while nauseated.',
+      'No seizures.',
+      'No other symptoms.',
+      'Do not start while symptomatic.',
+      'Avoid hyperventilation.',
+      'Do not hyperventilate.',
+    ],
+    estimatedSeconds: 30,
+    successCriterion: 'All conditions checked.',
+  };
+  for (const copy of safetyChecklist.items) {
+    assert.equal(containsExecutionSafetyCopy(copy), true, copy);
+  }
+  assert.equal(isSafetyOnlyExecutionBlock(safetyChecklist), true);
+  assert.deepEqual(actionableExecutionBlocks([safetyChecklist]), []);
+});
 
 test('legacy safety gates are removed without hiding real instructions', () => {
   const safety = {
@@ -100,6 +151,10 @@ test('safety-themed universal work is never treated as a disposable warning gate
 });
 
 test('legacy safety-only chapters become neutral without hiding universal safety work', () => {
+  assert.deepEqual(presentExecutionSection('Safety', 'Stop if you feel dizzy.'), {
+    title: 'Start',
+    showContext: false,
+  });
   assert.deepEqual(presentExecutionSection('Безопасный старт', 'Проверь самочувствие до начала.'), {
     title: 'старт',
     showContext: false,

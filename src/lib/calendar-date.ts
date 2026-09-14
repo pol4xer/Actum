@@ -40,7 +40,7 @@ export function formatCalendarDate(value?: string, month: 'short' | 'long' = 'sh
   const parts = key ? parseDateKey(key) : undefined;
   if (!parts) return undefined;
 
-  return new Intl.DateTimeFormat('ru-RU', {
+  return new Intl.DateTimeFormat('en-US', {
     day: 'numeric',
     month,
     timeZone: 'UTC',

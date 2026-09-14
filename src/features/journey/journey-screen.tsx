@@ -36,10 +36,10 @@ import {
 import { useApp } from '@/state';
 
 const OUTCOME_META: Record<MissionOutcome, { icon: string; color: string; label: string }> = {
-  pending: { icon: '', color: Palette.textDim, label: 'Впереди' },
-  completed: { icon: '✓', color: Palette.success, label: 'Выполнено' },
-  partial: { icon: '≈', color: Palette.warning, label: 'Частично' },
-  skipped: { icon: '—', color: Palette.danger, label: 'Не выполнено' },
+  pending: { icon: '', color: Palette.textDim, label: 'Upcoming' },
+  completed: { icon: '✓', color: Palette.success, label: 'Completed' },
+  partial: { icon: '≈', color: Palette.warning, label: 'Partial' },
+  skipped: { icon: '—', color: Palette.danger, label: 'Not completed' },
 };
 
 export default function JourneyScreen() {
@@ -53,8 +53,8 @@ export default function JourneyScreen() {
   if (!state.activeGoal || !state.activePlan) {
     return (
       <Screen>
-        <ScreenHeader eyebrow="План" title="Сначала выбери цель" />
-        <AppButton label="Новая цель" onPress={() => router.push('/')} />
+        <ScreenHeader eyebrow="Plan" title="Choose a goal first" />
+        <AppButton label="New goal" onPress={() => router.push('/')} />
       </Screen>
     );
   }
@@ -97,8 +97,8 @@ export default function JourneyScreen() {
     <>
       <Screen>
         <ScreenHeader
-          eyebrow="План"
-          title="По дням"
+          eyebrow="Plan"
+          title="Day by day"
           subtitle={state.activeGoal.rawPrompt}
         />
 
@@ -108,14 +108,14 @@ export default function JourneyScreen() {
               <ThemedText type="smallBold" numberOfLines={2} style={styles.flex}>
                 {state.activePlan.cycleGoal}
               </ThemedText>
-              {!usesCurrentPlanContract ? <Pill tone="warning">старый план</Pill> : null}
+              {!usesCurrentPlanContract ? <Pill tone="warning">legacy plan</Pill> : null}
             </View>
             <InfoPopover
-              title="О плане"
-              accessibilityLabel="Показать методику и источники плана"
+              title="About this plan"
+              accessibilityLabel="Show the plan methodology and sources"
               sections={[
                 ...(!usesCurrentPlanContract
-                  ? [{ body: 'Этот сохранённый план создан по старым правилам. Ежедневная целевая практика и самый ранний месяц достижения применяются только к новому plan-v7.' }]
+                  ? [{ body: 'This saved plan uses an older format. Daily goal practice and the earliest estimated achievement month are only available in new plans.' }]
                   : []),
                 ...planInfoWithoutSafety(planPreview),
               ]}
@@ -124,25 +124,25 @@ export default function JourneyScreen() {
           <ProgressBar value={progress} />
           <View style={styles.row}>
             <ThemedText type="small" style={styles.muted}>
-              Цикл {state.activePlan.cycleNumber}/{state.activePlan.totalCycles}
+              Cycle {state.activePlan.cycleNumber}/{state.activePlan.totalCycles}
               {achievedCycle
-                ? ` · достигнута: месяц ${achievedCycle}`
+                ? ` · achieved: month ${achievedCycle}`
                 : estimatedTargetCycle
-                ? ` · цель: ${estimatedTargetCycle.toLocaleLowerCase('ru-RU')}`
+                ? ` · target: ${estimatedTargetCycle.toLocaleLowerCase('en-US')}`
                 : ''}
             </ThemedText>
             <ThemedText type="small" style={styles.muted}>
-              {reported}/{state.activePlan.missions.length} дней
+              {reported}/{state.activePlan.missions.length} {state.activePlan.missions.length === 1 ? 'day' : 'days'}
             </ThemedText>
           </View>
           {metricProgress !== undefined ? (
             <View style={styles.metricProgress}>
               <View style={styles.row}>
                 <ThemedText type="small" style={styles.muted}>
-                  Сейчас {formatMetricValue(currentValue, currentUnit)}
+                  Now {formatMetricValue(currentValue, currentUnit)}
                 </ThemedText>
                 <ThemedText type="smallBold">
-                  Цель {formatMetricValue(targetValue, targetUnit)}
+                  Target {formatMetricValue(targetValue, targetUnit)}
                 </ThemedText>
               </View>
               <ProgressBar value={metricProgress} color={Palette.accent} />
@@ -175,7 +175,7 @@ export default function JourneyScreen() {
                   {chapterPresentation.showContext ? (
                     <InfoPopover
                       title={chapterPresentation.title}
-                      accessibilityLabel={`Показать пояснение к этапу ${chapterPresentation.title}`}
+                      accessibilityLabel={`Show details about the stage ${chapterPresentation.title}`}
                       sections={[{ body: chapter.subtitle }]}
                     />
                   ) : null}
@@ -205,7 +205,7 @@ export default function JourneyScreen() {
               accessibilityState={{ expanded: historyExpanded }}
               onPress={() => setHistoryExpanded((value) => !value)}
               style={({ pressed }) => [styles.historyToggle, pressed && styles.pressed]}>
-              <ThemedText type="smallBold">История</ThemedText>
+              <ThemedText type="smallBold">History</ThemedText>
               <ThemedText type="small" style={styles.muted}>
                 {state.checkIns.length} {historyExpanded ? '⌃' : '⌄'}
               </ThemedText>
@@ -224,7 +224,7 @@ export default function JourneyScreen() {
                       <View style={styles.historyRow}>
                         <View style={[styles.historyDot, { backgroundColor: meta.color }]} />
                         <View style={styles.flex}>
-                          <ThemedText type="smallBold">{mission?.title ?? 'День'}</ThemedText>
+                          <ThemedText type="smallBold">{mission?.title ?? 'Day'}</ThemedText>
                           <ThemedText type="small" style={styles.muted}>
                             {meta.label} · {formatCheckInDate(checkIn.createdAt)}
                           </ThemedText>
@@ -306,7 +306,7 @@ function MissionRow({
       <View style={styles.dayHeaderRow}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${expanded ? 'Свернуть' : 'Раскрыть'} день ${mission.dayNumber ?? mission.sequence}: ${mission.title}`}
+          accessibilityLabel={`${expanded ? 'Collapse' : 'Expand'} day ${mission.dayNumber ?? mission.sequence}: ${mission.title}`}
           accessibilityState={{ expanded }}
           onPress={onToggle}
           style={({ pressed }) => [styles.dayHeaderButton, pressed && styles.pressed]}>
@@ -318,10 +318,10 @@ function MissionRow({
           <View style={styles.flex}>
             <View style={styles.titleRow}>
               <ThemedText type="eyebrow" style={styles.dayLabel}>
-                День {mission.dayNumber ?? mission.sequence}
+                Day {mission.dayNumber ?? mission.sequence}
                 {scheduledDate ? ` · ${scheduledDate}` : ''}
               </ThemedText>
-              {isCurrent ? <Pill tone="violet">сейчас</Pill> : null}
+              {isCurrent ? <Pill tone="violet">now</Pill> : null}
             </View>
             <ThemedText type="smallBold" style={mission.outcome === 'skipped' && styles.strike}>
               {mission.title}
@@ -334,8 +334,8 @@ function MissionRow({
         </Pressable>
         {expanded ? (
           <InfoPopover
-            title={`О дне ${mission.dayNumber ?? mission.sequence}`}
-            accessibilityLabel={`Показать пояснение к дню ${mission.dayNumber ?? mission.sequence}`}
+            title={`About day ${mission.dayNumber ?? mission.sequence}`}
+            accessibilityLabel={`Show details about day ${mission.dayNumber ?? mission.sequence}`}
             sections={context}
           />
         ) : null}
@@ -345,7 +345,7 @@ function MissionRow({
         <View style={styles.expandedDay}>
           <MissionActionDetails mission={mission} />
           <AppButton
-            label={isCurrent ? 'Начать день' : 'Открыть день'}
+            label={isCurrent ? 'Start day' : 'Open day'}
             variant={isCurrent ? 'primary' : 'secondary'}
             onPress={onOpen}
           />
@@ -400,7 +400,7 @@ function Criterion({ text, day = false }: { text?: string; day?: boolean }) {
   return (
     <View style={day ? styles.dayCriterion : styles.criterion}>
       <ThemedText type="eyebrow" style={styles.muted}>
-        {day ? 'День выполнен' : 'Готово, если'}
+        {day ? 'Day complete when' : 'Complete when'}
       </ThemedText>
       <ThemedText type="small">{text}</ThemedText>
     </View>
@@ -409,7 +409,7 @@ function Criterion({ text, day = false }: { text?: string; day?: boolean }) {
 
 function missionInfoWithoutSafety(mission: Mission): ContextInfoSection[] {
   const sections = missionContextSections(mission).filter(
-    (section) => section.heading !== 'Предупреждение' && section.heading !== 'Критерий дня',
+    (section) => section.heading !== 'Warning' && section.heading !== 'Daily completion criterion',
   );
   if (mission.execution?.kind !== 'in_app') return sections;
 
@@ -418,7 +418,7 @@ function missionInfoWithoutSafety(mission: Mission): ContextInfoSection[] {
     ...actionableExecutionBlocks(mission.execution.blocks).flatMap((block) =>
       executionBlockContextSections(block).map((section) => ({
         ...section,
-        heading: `${block.title} · ${section.heading ?? 'расчёт'}`,
+        heading: `${block.title} · ${section.heading ?? 'calculation'}`,
       })),
     ),
   ];
@@ -428,13 +428,13 @@ function planInfoWithoutSafety(preview: GeneratedGoal): ContextInfoSection[] {
   return planContextSections(preview.plan, {
     baseline: preview.goal.baseline,
     targetTimeline: preview.goal.targetTimeline,
-  }).filter((section) => section.heading !== 'Безопасность' && section.tone !== 'warning');
+  }).filter((section) => section.heading !== 'Safety' && section.tone !== 'warning');
 }
 
 function formatCheckInDate(value: string) {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'в Actum';
-  return new Intl.DateTimeFormat('ru-RU', {
+  if (Number.isNaN(date.getTime())) return 'in Actum';
+  return new Intl.DateTimeFormat('en-US', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',

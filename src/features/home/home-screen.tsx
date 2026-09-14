@@ -76,7 +76,7 @@ export default function HomeScreen() {
     state.activePlan.targetCycleNumber,
   );
   const achievedCycle = state.activeGoal.program.achievement?.cycleNumber;
-  const today = new Intl.DateTimeFormat('ru-RU', {
+  const today = new Intl.DateTimeFormat('en-US', {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
@@ -87,11 +87,11 @@ export default function HomeScreen() {
       <Screen>
         <ScreenHeader
           eyebrow={today}
-          title="Сегодня"
+          title="Today"
           action={
             <View style={styles.levelChip}>
               <ThemedText type="smallBold" style={styles.gold}>
-                Ур. {state.character.level}
+                Lv. {state.character.level}
               </ThemedText>
             </View>
           }
@@ -99,12 +99,12 @@ export default function HomeScreen() {
 
         <View style={styles.statusStrip}>
           <View style={styles.statusItem}>
-            <ThemedText type="small" style={styles.muted}>Серия</ThemedText>
-            <ThemedText type="smallBold">{state.character.streak} дн.</ThemedText>
+            <ThemedText type="small" style={styles.muted}>Streak</ThemedText>
+            <ThemedText type="smallBold">{state.character.streak} {state.character.streak === 1 ? 'day' : 'days'}</ThemedText>
           </View>
           <View style={styles.statusDivider} />
           <View style={styles.statusItem}>
-            <ThemedText type="small" style={styles.muted}>Опыт</ThemedText>
+            <ThemedText type="small" style={styles.muted}>Experience</ThemedText>
             <ThemedText type="smallBold">{xpInLevel}/100</ThemedText>
           </View>
           <View style={styles.statusProgress}>
@@ -116,8 +116,8 @@ export default function HomeScreen() {
           <Card accent style={styles.missionCard}>
             <View style={styles.sectionTop}>
               <Pill tone="gold">
-                {missionTiming === 'today' ? 'сегодня · ' : ''}день{' '}
-                {currentMission.dayNumber ?? currentMission.sequence} из {total}
+                {missionTiming === 'today' ? 'today · ' : ''}day{' '}
+                {currentMission.dayNumber ?? currentMission.sequence} of {total}
               </Pill>
               <ThemedText type="small" style={styles.muted}>
                 {missionDate ? `${missionDate} · ` : ''}
@@ -130,8 +130,8 @@ export default function HomeScreen() {
                   {currentMission.title}
                 </ThemedText>
                 <InfoPopover
-                  title="О сегодняшнем шаге"
-                  accessibilityLabel="Показать пояснение к сегодняшнему шагу"
+                  title="About today’s step"
+                  accessibilityLabel="Show details about today’s step"
                   sections={missionContextSections(currentMission)}
                 />
               </View>
@@ -139,10 +139,10 @@ export default function HomeScreen() {
             <AppButton
               label={
                 currentRun?.status === 'running'
-                  ? 'Продолжить'
+                  ? 'Continue'
                   : currentRun?.status === 'awaiting_checkin'
-                    ? 'Записать результат'
-                    : 'Начать'
+                    ? 'Record result'
+                    : 'Start'
               }
               onPress={() => setRunnerVisible(true)}
               icon="→"
@@ -160,21 +160,21 @@ export default function HomeScreen() {
               <ThemedText style={styles.victoryGlyph}>✦</ThemedText>
             </View>
             <Pill tone={state.activeGoal.status === 'completed' ? 'success' : 'warning'}>
-              {state.activeGoal.status === 'completed' ? 'цель достигнута' : 'лимит исчерпан'}
+              {state.activeGoal.status === 'completed' ? 'goal achieved' : 'cycle limit reached'}
             </Pill>
             <ThemedText type="title" style={styles.center}>
               {state.activeGoal.status === 'completed'
-                ? 'Маршрут пройден'
-                : 'Выбери новую цель'}
+                ? 'Journey complete'
+                : 'Choose a new goal'}
             </ThemedText>
             <View style={styles.buttonRow}>
               <AppButton
-                label="Сравнить двойников"
+                label="Compare twins"
                 variant="secondary"
                 onPress={() => router.push('/twin')}
                 style={styles.flex}
               />
-              <AppButton label="Новая цель" onPress={startNewGoal} style={styles.flex} />
+              <AppButton label="New goal" onPress={startNewGoal} style={styles.flex} />
             </View>
           </Card>
         )}
@@ -189,11 +189,11 @@ export default function HomeScreen() {
                 {state.activeGoal.rawPrompt}
               </ThemedText>
               <ThemedText type="small" style={styles.muted}>
-                цикл {state.activePlan.cycleNumber}/{state.activePlan.totalCycles}
+                cycle {state.activePlan.cycleNumber}/{state.activePlan.totalCycles}
                 {achievedCycle
-                  ? ` · достигнута: месяц ${achievedCycle}`
+                  ? ` · achieved: month ${achievedCycle}`
                   : estimatedTargetCycle
-                  ? ` · цель: ${estimatedTargetCycle.toLocaleLowerCase('ru-RU')}`
+                  ? ` · target: ${estimatedTargetCycle.toLocaleLowerCase('en-US')}`
                   : ` · ${reported}/${total}`}
               </ThemedText>
             </View>

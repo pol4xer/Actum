@@ -21,7 +21,7 @@ type VisibleSection = Readonly<{
 /** A compact trigger for presentation-only context that works on native and web. */
 export function InfoPopover({
   sections,
-  title = 'Почему так?',
+  title = 'Why this?',
   accessibilityLabel,
 }: InfoPopoverProps): ReactElement | null {
   const [visible, setVisible] = useState(false);
@@ -43,12 +43,12 @@ export function InfoPopover({
   if (!visibleSections.length) return null;
 
   const close = () => setVisible(false);
-  const triggerLabel = accessibilityLabel ?? `Показать: ${title}`;
+  const triggerLabel = accessibilityLabel ?? `Show: ${title}`;
 
   return (
     <>
       <Pressable
-        accessibilityHint="Открывает пояснение."
+        accessibilityHint="Opens an explanation."
         accessibilityLabel={triggerLabel}
         accessibilityRole="button"
         accessibilityState={{ expanded: visible }}
@@ -92,7 +92,7 @@ export function InfoPopover({
                 {title}
               </ThemedText>
               <Pressable
-                accessibilityLabel="Закрыть пояснение"
+                accessibilityLabel="Close explanation"
                 accessibilityRole="button"
                 hitSlop={8}
                 onPress={close}
@@ -125,11 +125,11 @@ export function InfoPopover({
 
 function InfoSection({ section }: { section: VisibleSection }) {
   const warning = section.tone === 'warning';
-  const heading = section.heading || (warning ? 'Предупреждение' : undefined);
+  const heading = section.heading || (warning ? 'Warning' : undefined);
   const warningLabel =
-    heading?.trim().toLocaleLowerCase('ru-RU') === 'предупреждение'
-      ? `Предупреждение. ${section.body}`
-      : `Предупреждение. ${heading ? `${heading}. ` : ''}${section.body}`;
+    heading?.trim().toLocaleLowerCase('en-US') === 'warning'
+      ? `Warning. ${section.body}`
+      : `Warning. ${heading ? `${heading}. ` : ''}${section.body}`;
 
   return (
     <View

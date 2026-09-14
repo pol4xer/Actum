@@ -15,9 +15,9 @@ export default function TwinScreen() {
   if (!state.activeGoal || !state.activePlan) {
     return (
       <Screen>
-        <ScreenHeader title="Двойник" />
+        <ScreenHeader title="Twin" />
         <Card>
-          <ThemedText type="subtitle">Сначала создай цель</ThemedText>
+          <ThemedText type="subtitle">Create a goal first</ThemedText>
         </Card>
       </Screen>
     );
@@ -39,24 +39,24 @@ export default function TwinScreen() {
   const adherencePercent = Math.round(adherence * 100);
   const info: ContextInfoSection[] = [
     {
-      heading: 'Как считается',
-      body: `Сравниваются только уже прошедшие дни текущего плана: ${completed} выполнено, ${partial} частично, ${skipped} пропущено.`,
+      heading: 'How it is calculated',
+      body: `Only past days in the current plan are compared: ${completed} completed, ${partial} partial, and ${skipped} skipped.`,
     },
     {
-      heading: 'Что означает',
+      heading: 'What it means',
       body:
-        'Линия «По плану» показывает игровые очки при полном выполнении. Это ориентир внутри Actum, а не прогноз реального результата.',
+        'The “On plan” projection shows the game points you would earn by completing every day. It is a reference within Actum, not a prediction of real-world results.',
     },
   ];
 
   return (
     <Screen>
       <ScreenHeader
-        title="Двойник"
+        title="Twin"
         action={
           <InfoPopover
-            title="О двойнике"
-            accessibilityLabel="Как считается двойник"
+            title="About your twin"
+            accessibilityLabel="How the twin is calculated"
             sections={info}
           />
         }
@@ -65,13 +65,13 @@ export default function TwinScreen() {
       <Card style={styles.scoreCard}>
         <View style={styles.rowBetween}>
           <View style={styles.flex}>
-            <ThemedText type="subtitle">{adherencePercent}% плана</ThemedText>
+            <ThemedText type="subtitle">{adherencePercent}% adherence</ThemedText>
             <ThemedText type="small" style={styles.muted}>
-              {reported ? `${completed} из ${reported} дней полностью` : 'Начни первый день'}
+              {reported ? `${completed} of ${reported} ${reported === 1 ? 'day' : 'days'} completed in full` : 'Start your first day'}
             </ThemedText>
           </View>
           <Pill tone={adherenceBand === 'aligned' ? 'success' : 'neutral'}>
-            {adherenceBand === 'aligned' ? 'в ритме' : 'есть разрыв'}
+            {adherenceBand === 'aligned' ? 'on track' : 'behind plan'}
           </Pill>
         </View>
         <ProgressBar
@@ -83,28 +83,28 @@ export default function TwinScreen() {
 
       <Card style={styles.twinsCard}>
         <Twin
-          label="Сейчас"
+          label="Now"
           level={state.character.level}
           archetype={state.profile?.archetype}
           dimmed={state.character.worldLight < 20}
         />
         <ThemedText style={styles.arrow}>→</ThemedText>
         <Twin
-          label="По плану"
+          label="On plan"
           level={potentialLevel}
           archetype={state.profile?.archetype}
         />
       </Card>
 
       <View style={styles.comparisons}>
-        <ComparisonRow title="Опыт" actual={`${actualXp} XP`} potential={`${projectedXp} XP`} />
+        <ComparisonRow title="Experience" actual={`${actualXp} XP`} potential={`${projectedXp} XP`} />
         <ComparisonRow
-          title="Энергия"
+          title="Energy"
           actual={`${state.character.energy}%`}
           potential={`${potentialEnergy}%`}
         />
         <ComparisonRow
-          title="Свет"
+          title="Light"
           actual={`${state.character.worldLight}%`}
           potential={`${potentialLight}%`}
         />
@@ -130,7 +130,7 @@ function Twin({
       <ThemedText type="small" style={styles.muted}>
         {label}
       </ThemedText>
-      <ThemedText type="smallBold">Ур. {level}</ThemedText>
+      <ThemedText type="smallBold">Lv. {level}</ThemedText>
     </View>
   );
 }

@@ -37,12 +37,12 @@ export function presentMissionDay(mission: Mission): MissionDayPresentation {
         id: `routine-${index}`,
         title: action.title,
         dose: joinParts([
-          `${action.sets} × ${action.quantity} ${routineUnitLabel(action.unit, action.unitLabel)}`,
+          `${action.sets} × ${action.quantity} ${routineUnitLabel(action.unit, action.unitLabel, action.quantity)}`,
           action.workSecondsPerSet && action.unit !== 'seconds' && action.unit !== 'minutes'
-            ? `до ${formatCompactDuration(action.workSecondsPerSet)} на подход`
+            ? `up to ${formatCompactDuration(action.workSecondsPerSet)} per set`
             : undefined,
           action.restSeconds > 0
-            ? `отдых ${formatCompactDuration(action.restSeconds)}`
+            ? `rest ${formatCompactDuration(action.restSeconds)}`
             : undefined,
           clean(action.tempo),
         ]),
@@ -66,7 +66,7 @@ export function presentMissionDay(mission: Mission): MissionDayPresentation {
         title: mission.title,
         dose:
           mission.execution?.kind === 'timer'
-            ? `Таймер · ${formatCompactDuration(mission.execution.durationSeconds)}`
+            ? `Timer · ${formatCompactDuration(mission.execution.durationSeconds)}`
             : undefined,
         ...(items.length > 1
           ? { items }
@@ -89,7 +89,7 @@ function presentExecutionBlock(
       dose: joinParts([
         `${block.sets} × ${formatCompactDuration(block.durationSecondsPerSet)}`,
         block.restSeconds > 0
-          ? `отдых ${formatCompactDuration(block.restSeconds)}`
+          ? `rest ${formatCompactDuration(block.restSeconds)}`
           : undefined,
       ]),
       instruction: withoutExecutionSafetyCopy(block.instruction),
@@ -102,12 +102,12 @@ function presentExecutionBlock(
       id: `counter-${index}`,
       title: block.title,
       dose: joinParts([
-        `${block.sets} × ${block.targetPerSet} ${routineUnitLabel(block.unit, block.unitLabel)}`,
+        `${block.sets} × ${block.targetPerSet} ${routineUnitLabel(block.unit, block.unitLabel, block.targetPerSet)}`,
         block.workSecondsPerSet > 0
-          ? `до ${formatCompactDuration(block.workSecondsPerSet)} на подход`
+          ? `up to ${formatCompactDuration(block.workSecondsPerSet)} per set`
           : undefined,
         block.restSeconds > 0
-          ? `отдых ${formatCompactDuration(block.restSeconds)}`
+          ? `rest ${formatCompactDuration(block.restSeconds)}`
           : undefined,
         clean(block.tempo),
       ]),
@@ -120,7 +120,7 @@ function presentExecutionBlock(
     return {
       id: `checklist-${index}`,
       title: block.title,
-      dose: `${block.items.length} действий`,
+      dose: `${block.items.length} ${block.items.length === 1 ? 'action' : 'actions'}`,
       items: block.items.map(clean).filter(isString),
       criterion: withoutExecutionSafetyCopy(block.successCriterion),
     };
@@ -129,30 +129,31 @@ function presentExecutionBlock(
   return {
     id: `text-log-${index}`,
     title: block.title,
-    dose: `${block.minCharacters}–${block.maxCharacters} знаков`,
+    dose: `${block.minCharacters}–${block.maxCharacters} characters`,
     instruction: withoutExecutionSafetyCopy(block.prompt),
     criterion: withoutExecutionSafetyCopy(block.successCriterion),
   };
 }
 
-function routineUnitLabel(unit: RoutineUnit, custom?: string) {
-  if (unit === 'custom') return clean(custom) ?? 'ед.';
+function routineUnitLabel(unit: RoutineUnit, custom: string | undefined, quantity: number) {
+  if (unit === 'custom') return clean(custom) ?? (quantity === 1 ? 'unit' : 'units');
   const labels: Record<Exclude<RoutineUnit, 'custom'>, string> = {
-    reps: 'повт.',
-    seconds: 'сек',
-    minutes: 'мин',
-    pages: 'стр.',
-    items: 'элем.',
-    words: 'слов',
-    meters: 'м',
-    attempts: 'попыток',
+    reps: 'reps',
+    seconds: 'sec',
+    minutes: 'min',
+    pages: 'pages',
+    items: 'items',
+    words: 'words',
+    meters: 'm',
+    attempts: 'attempts',
   };
-  return labels[unit];
+  const label = labels[unit];
+  return quantity === 1 && label.endsWith('s') ? label.slice(0, -1) : label;
 }
 
 function formatCompactDuration(seconds: number) {
-  if (seconds >= 60 && seconds % 60 === 0) return `${seconds / 60} мин`;
-  return `${seconds} сек`;
+  if (seconds >= 60 && seconds % 60 === 0) return `${seconds / 60} min`;
+  return `${seconds} sec`;
 }
 
 function joinParts(values: readonly (string | undefined)[]) {

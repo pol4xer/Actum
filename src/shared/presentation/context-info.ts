@@ -37,13 +37,13 @@ export function missionContextSections(mission: Mission): ContextInfoSection[] {
   const inAppExecution = mission.execution?.kind === 'in_app' ? mission.execution : undefined;
 
   if (inAppExecution) {
-    appendSection(sections, 'О дне', withoutExecutionSafetyCopy(mission.description));
+    appendSection(sections, 'About this day', withoutExecutionSafetyCopy(mission.description));
 
     // execution.successCriterion is the source of truth for an in-app day. The
     // persisted completionCriterion is retained as a fallback for older records.
     appendSection(
       sections,
-      'Критерий дня',
+      'Daily completion criterion',
       withoutExecutionSafetyCopy(
         firstNonEmpty(inAppExecution.successCriterion, mission.completionCriterion),
       ),
@@ -64,7 +64,7 @@ export function executionBlockContextSections(
 
   return [
     {
-      heading: 'Расчёт нагрузки',
+      heading: 'Load calculation',
       body: formatLoadProvenance(block.loadBasis, targetUnit(block)),
     },
   ];
@@ -81,22 +81,22 @@ export function planContextSections(
 
   appendSection(
     sections,
-    'Версия и метод',
+    'Plan version and method',
     joinLines([
-      `План v${plan.version}`,
-      `Метод: ${researchMethodLabel(plan.research.method)}`,
-      `Уверенность: ${plan.research.confidence === 'high' ? 'высокая' : 'средняя'}`,
+      `Plan v${plan.version}`,
+      `Method: ${researchMethodLabel(plan.research.method)}`,
+      `Confidence: ${plan.research.confidence === 'high' ? 'high' : 'medium'}`,
     ]),
   );
 
-  appendSection(sections, 'Логика плана', withoutExecutionSafetyCopy(plan.summary));
+  appendSection(sections, 'Plan rationale', withoutExecutionSafetyCopy(plan.summary));
 
   if (plan.cycleNumber && plan.totalCycles) {
     appendSection(
       sections,
-      'Текущий цикл',
+      'Current cycle',
       joinLines([
-        `Цикл ${plan.cycleNumber} из ${plan.totalCycles}`,
+        `Cycle ${plan.cycleNumber} of ${plan.totalCycles}`,
         withoutExecutionSafetyCopy(plan.cycleGoal),
       ]),
     );
@@ -105,15 +105,15 @@ export function planContextSections(
   if (plan.targetCycleNumber) {
     appendSection(
       sections,
-      'Ориентир достижения',
-      `Месяц ${plan.targetCycleNumber}`,
+      'Estimated achievement',
+      `Month ${plan.targetCycleNumber}`,
     );
   }
 
   if (baseline) {
     appendSection(
       sections,
-      'Исходная точка и расчёт',
+      'Baseline and calculation',
       joinLines([
         baseline.userStatement,
         formatBaselineMetric(baseline),
@@ -124,43 +124,43 @@ export function planContextSections(
 
   appendSection(
     sections,
-    plan.targetCycleNumber ? 'Лимит продолжения' : 'Срок большой цели',
+    plan.targetCycleNumber ? 'Continuation limit' : 'Goal timeline',
     targetTimeline,
   );
   appendListSection(
     sections,
-    'Допущения',
+    'Assumptions',
     plan.research.assumptions.filter((value) => !containsExecutionSafetyCopy(value)),
   );
   appendListSection(
     sections,
-    'Основа методики',
+    'Methodology',
     plan.research.sourceLabels.filter((value) => !containsExecutionSafetyCopy(value)),
   );
 
   const sources = plan.research.sources
     ?.filter((source) => !containsExecutionSafetyCopy(source.title))
     .map((source) => joinLines([source.title, source.url]));
-  appendListSection(sections, 'Источники', sources);
+  appendListSection(sections, 'Sources', sources);
 
   if (plan.research.request) {
     const request = plan.research.request;
     appendSection(
       sections,
-      'Метаданные генерации',
+      'Generation metadata',
       joinLines([
-        `Модель: ${request.model}`,
-        `Версия промпта: ${request.promptVersion}`,
-        `ID запроса: ${request.requestId}`,
-        request.providerResponseId ? `ID ответа провайдера: ${request.providerResponseId}` : undefined,
-        `Длительность: ${formatNumber(request.durationMs)} мс`,
-        `Web-поисков: ${formatNumber(request.webSearchCount)}`,
+        `Model: ${request.model}`,
+        `Prompt version: ${request.promptVersion}`,
+        `Request ID: ${request.requestId}`,
+        request.providerResponseId ? `Provider response ID: ${request.providerResponseId}` : undefined,
+        `Duration: ${formatNumber(request.durationMs)} ms`,
+        `Web searches: ${formatNumber(request.webSearchCount)}`,
         request.inputTokens === undefined
           ? undefined
-          : `Входных токенов: ${formatNumber(request.inputTokens)}`,
+          : `Input tokens: ${formatNumber(request.inputTokens)}`,
         request.outputTokens === undefined
           ? undefined
-          : `Выходных токенов: ${formatNumber(request.outputTokens)}`,
+          : `Output tokens: ${formatNumber(request.outputTokens)}`,
       ]),
     );
   }
@@ -171,7 +171,7 @@ export function planContextSections(
 function researchMethodLabel(method: PlanVersion['research']['method']) {
   if (method === 'openai-web-research-v1') return 'Web research · Responses API';
   if (method === 'openai-responses-v1') return 'GPT · Responses API';
-  return 'Локальный план';
+  return 'Local plan';
 }
 
 function appendSection(
@@ -212,39 +212,39 @@ function formatLoadProvenance(basis: RoutineLoadBasis, unit: string) {
 }
 
 function targetUnit(block: Extract<MissionExecutionBlock, { kind: 'timer' | 'counter' }>) {
-  return block.kind === 'timer' ? 'сек' : counterUnitLabel(block);
+  return block.kind === 'timer' ? 'sec' : counterUnitLabel(block);
 }
 
 function counterUnitLabel(block: CounterExecutionBlock) {
-  if (block.unit === 'custom') return block.unitLabel?.trim() || 'ед.';
+  if (block.unit === 'custom') return block.unitLabel?.trim() || 'units';
   return {
-    reps: 'повт.',
-    pages: 'стр.',
-    items: 'элем.',
-    words: 'слов',
-    meters: 'м',
-    attempts: 'попыток',
+    reps: 'reps',
+    pages: 'pages',
+    items: 'items',
+    words: 'words',
+    meters: 'm',
+    attempts: 'attempts',
   }[block.unit];
 }
 
 function displayUnit(unit: string) {
   const normalized = unit.trim();
   const labels: Record<string, string> = {
-    seconds: 'сек',
-    minutes: 'мин',
-    reps: 'повт.',
-    pages: 'стр.',
-    items: 'элем.',
-    words: 'слов',
-    meters: 'м',
-    attempts: 'попыток',
+    seconds: 'sec',
+    minutes: 'min',
+    reps: 'reps',
+    pages: 'pages',
+    items: 'items',
+    words: 'words',
+    meters: 'm',
+    attempts: 'attempts',
   };
   return labels[normalized] ?? normalized;
 }
 
 function formatNumber(value: number) {
   if (!Number.isFinite(value)) return String(value);
-  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(4))).replace('.', ',');
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(4)));
 }
 
 function joinLines(values: readonly (string | undefined)[]) {

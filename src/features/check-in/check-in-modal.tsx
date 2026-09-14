@@ -74,22 +74,22 @@ export function CheckInModal({
           <View style={styles.handle} />
           <View style={styles.header}>
             <View style={styles.headerCopy}>
-              <ThemedText type="title">Итог</ThemedText>
+              <ThemedText type="title">Check-in</ThemedText>
               <View style={styles.missionRow}>
                 <ThemedText type="small" numberOfLines={2} style={[styles.muted, styles.flex]}>
                   {mission?.title}
                 </ThemedText>
                 {mission?.completionCriterion ? (
                   <InfoPopover
-                    title="Критерий выполнения"
-                    accessibilityLabel="Показать критерий выполнения"
+                    title="Completion criterion"
+                    accessibilityLabel="Show the completion criterion"
                     sections={[{ body: mission.completionCriterion }]}
                   />
                 ) : null}
               </View>
             </View>
             <Pressable
-              accessibilityLabel="Закрыть"
+              accessibilityLabel="Close"
               accessibilityRole="button"
               onPress={onClose}
               style={styles.close}>
@@ -105,13 +105,13 @@ export function CheckInModal({
               <View style={styles.unavailableCard}>
                 <View style={styles.rowBetween}>
                   <ThemedText type="smallBold" style={styles.flex}>
-                    Сначала заверши сессию
+                    Finish your session first
                   </ThemedText>
                   <InfoPopover
-                    title="Почему check-in недоступен?"
+                    title="Why is check-in unavailable?"
                     sections={[
                       {
-                        body: 'Check-in привязывается к сохранённому журналу, поэтому пустой результат не будет принят.',
+                        body: 'Check-in is linked to a saved session log, so an empty result cannot be submitted.',
                       },
                     ]}
                   />
@@ -121,19 +121,19 @@ export function CheckInModal({
 
             <View style={styles.options}>
               <View style={styles.rowBetween}>
-                <ThemedText type="subtitle">Результат</ThemedText>
+                <ThemedText type="subtitle">Result</ThemedText>
                 <InfoPopover
-                  title="Как считается результат?"
+                  title="How is the result scored?"
                   sections={[
-                    { heading: 'Выполнено', body: `Полная награда: +${mission?.xp ?? 0} XP.` },
-                    { heading: 'Частично', body: 'Часть награды; серия не увеличивается.' },
-                    { heading: 'Не выполнено', body: 'Результат сохранится без награды.' },
+                    { heading: 'Completed', body: `Full reward: +${mission?.xp ?? 0} XP.` },
+                    { heading: 'Partial', body: 'Partial reward; your streak does not increase.' },
+                    { heading: 'Not completed', body: 'Your result is saved without a reward.' },
                   ]}
                 />
               </View>
               <OutcomeChoice
                 icon="✓"
-                title="Выполнено"
+                title="Completed"
                 selected={outcome === 'completed'}
                 disabled={!canSubmit || !runSuccessful}
                 tone="success"
@@ -141,7 +141,7 @@ export function CheckInModal({
               />
               <OutcomeChoice
                 icon="≈"
-                title="Частично"
+                title="Partial"
                 selected={outcome === 'partial'}
                 disabled={!canSubmit}
                 tone="warning"
@@ -149,7 +149,7 @@ export function CheckInModal({
               />
               <OutcomeChoice
                 icon="—"
-                title="Не выполнено"
+                title="Not completed"
                 selected={outcome === 'skipped'}
                 disabled={!canSubmit}
                 tone="danger"
@@ -159,20 +159,20 @@ export function CheckInModal({
 
             <View style={styles.noteBlock}>
               <ThemedText type="smallBold">
-                Комментарий{' '}
+                Comment{' '}
                 <ThemedText type="small" style={styles.muted}>
-                  (необязательно)
+                  (optional)
                 </ThemedText>
               </ThemedText>
               <TextInput
-                accessibilityLabel="Заметка о результате"
+                accessibilityLabel="Result note"
                 maxLength={280}
                 multiline
                 onChangeText={(value) => {
                   setNote(value);
                   if (run && onSaveComment) onSaveComment(run.id, value);
                 }}
-                placeholder="Короткий комментарий…"
+                placeholder="A short note…"
                 placeholderTextColor={Palette.textDim}
                 style={styles.input}
                 value={note}
@@ -180,7 +180,7 @@ export function CheckInModal({
             </View>
 
             <AppButton
-              label="Сохранить"
+              label="Save"
               disabled={!canSubmit}
               onPress={submit}
             />

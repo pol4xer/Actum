@@ -89,10 +89,10 @@ export class HttpGoalPlanner implements GoalPlanner {
       const raw: unknown = await response.json().catch(() => null);
 
       if (!response.ok) {
-        const message = readServerErrorMessage(raw) ?? 'AI-сервер не смог собрать план.';
+        const message = readServerErrorMessage(raw) ?? 'The AI server could not create a plan.';
         const serverRequestId = readTopLevelRequestId(raw);
         throw new AIPlannerError(
-          `${message}\nЗапрос: ${serverRequestId || requestId}`,
+          `${message}\nRequest: ${serverRequestId || requestId}`,
           mapServerErrorCode(raw, response.status),
         );
       }
@@ -106,7 +106,7 @@ export class HttpGoalPlanner implements GoalPlanner {
           `[actum-ai] incompatible response request=${responseRequestId} field=${issuePath} issue=${firstIssue?.code || 'unknown'}`,
         );
         throw new AIPlannerError(
-          `План создан, но приложение не смогло прочитать поле «${issuePath}».\nЗапрос: ${responseRequestId}`,
+          `The plan was created, but the app could not read the "${issuePath}" field.\nRequest: ${responseRequestId}`,
           'INVALID_RESPONSE',
         );
       }
@@ -116,7 +116,7 @@ export class HttpGoalPlanner implements GoalPlanner {
       if (error instanceof AIPlannerError) throw error;
       if (timeoutTriggered || controller.signal.aborted) {
         throw new AIPlannerError(
-          `Генерация превысила время ожидания приложения. Сервер может продолжать работу; повтор с теми же параметрами присоединится к ней или возьмёт результат из кэша.\nЗапрос: ${requestId}`,
+          `The app timed out while waiting for the plan. The server may still be working; retrying with the same settings will reconnect to that request or use its cached result.\nRequest: ${requestId}`,
           'TIMEOUT',
         );
       }
@@ -124,8 +124,8 @@ export class HttpGoalPlanner implements GoalPlanner {
       const gatewayReachable = await this.probeGateway();
       throw new AIPlannerError(
         gatewayReachable
-          ? `Связь с AI-сервером оборвалась, но сам сервер доступен. Проверь окно «Actum - AI server» и повтори: уже выполненная работа будет переиспользована.\nЗапрос: ${requestId}`
-          : `AI-сервер недоступен по адресу ${this.baseUrl}. Запусти проект через \`./scripts/dev-ios.sh\` и проверь окно «Actum - AI server».\nЗапрос: ${requestId}`,
+          ? `The connection to the AI server was interrupted, but the server is reachable. Check the "Actum - AI server" window and retry; completed work will be reused.\nRequest: ${requestId}`
+          : `The AI server is unavailable at ${this.baseUrl}. Start the project with \`./scripts/dev-ios.sh\` and check the "Actum - AI server" window.\nRequest: ${requestId}`,
         gatewayReachable ? 'CONNECTION_INTERRUPTED' : 'GATEWAY_UNREACHABLE',
       );
     } finally {
@@ -146,14 +146,14 @@ export class HttpGoalPlanner implements GoalPlanner {
         signal: controller.signal,
       });
       if (response.status === 404) return undefined;
-      if (!response.ok) throw new Error('Локальный AI-сервер не вернул сохранённый план.');
+      if (!response.ok) throw new Error('The local AI server did not return a saved plan.');
 
       const raw: unknown = await response.json();
       const envelope = savedPlanEnvelopeDtoSchema.safeParse(raw);
-      if (!envelope.success) throw new Error('Сохранённый план имеет несовместимый формат.');
+      if (!envelope.success) throw new Error('The saved plan has an incompatible format.');
       const { input, plan, meta } = envelope.data;
       const parsed = createPlanResponseDtoSchema(input).safeParse({ plan, meta });
-      if (!parsed.success) throw new Error('Сохранённый plan-v7 не прошёл клиентскую проверку.');
+      if (!parsed.success) throw new Error('The saved plan-v7 did not pass client validation.');
       return this.mapper(input, parsed.data.plan, parsed.data.meta);
     } finally {
       clearTimeout(timeout);

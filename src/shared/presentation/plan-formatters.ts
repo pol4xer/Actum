@@ -1,7 +1,7 @@
 import type { Mission, PlanBaseline } from '@/domain/types';
 
 export type MissionDurationFormat = {
-  inAppRecordLabel?: 'записей' | 'отметок';
+  inAppRecordLabel?: 'records' | 'check-ins';
   approximateFallback?: boolean;
 };
 
@@ -15,25 +15,28 @@ export function formatMissionDuration(
         total + (block.kind === 'timer' || block.kind === 'counter' ? block.sets : 1),
       0,
     );
-    return `${mission.execution.blocks.length} блоков · ${records} ${options.inAppRecordLabel ?? 'записей'} · ≈ ${mission.estimatedMinutes} мин`;
+    const blockCount = mission.execution.blocks.length;
+    const recordLabel = options.inAppRecordLabel ?? 'records';
+    return `${blockCount} ${blockCount === 1 ? 'block' : 'blocks'} · ${records} ${records === 1 ? recordLabel.slice(0, -1) : recordLabel} · ≈ ${mission.estimatedMinutes} min`;
   }
   if (mission.execution?.kind === 'routine') {
     const sets = mission.execution.actions.reduce((total, action) => total + action.sets, 0);
-    return `${mission.execution.actions.length} действий · ${sets} подходов · ≈ ${mission.estimatedMinutes} мин`;
+    const actionCount = mission.execution.actions.length;
+    return `${actionCount} ${actionCount === 1 ? 'action' : 'actions'} · ${sets} ${sets === 1 ? 'set' : 'sets'} · ≈ ${mission.estimatedMinutes} min`;
   }
   if (mission.execution?.kind === 'timer') {
     const seconds = mission.execution.durationSeconds;
-    const timer = seconds >= 60 && seconds % 60 === 0 ? `${seconds / 60} мин` : `${seconds} сек`;
-    return `${timer} таймер · ≈ ${mission.estimatedMinutes} мин всего`;
+    const timer = seconds >= 60 && seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds} sec`;
+    return `${timer} timer · ≈ ${mission.estimatedMinutes} min total`;
   }
-  return `${options.approximateFallback ? '≈ ' : ''}${mission.estimatedMinutes} мин`;
+  return `${options.approximateFallback ? '≈ ' : ''}${mission.estimatedMinutes} min`;
 }
 
 export function formatBaselineMetric(baseline: PlanBaseline): string {
   if (baseline.value == null || baseline.unit == null) {
-    return `${baseline.normalizedMetric} · числовое значение не выделено`;
+    return `${baseline.normalizedMetric} · no numeric value identified`;
   }
-  const value = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 4 }).format(
+  const value = new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 }).format(
     baseline.value,
   );
   return `${baseline.normalizedMetric} · ${value} ${baseline.unit}`;
@@ -48,26 +51,27 @@ export function formatMetricValue(
     const rounded = Math.max(0, Math.round(value));
     const minutes = Math.floor(rounded / 60);
     const seconds = rounded % 60;
-    if (!minutes) return `${seconds} сек`;
-    if (!seconds) return `${minutes} мин`;
+    if (!minutes) return `${seconds} sec`;
+    if (!seconds) return `${minutes} min`;
     return `${minutes}:${String(seconds).padStart(2, '0')}`;
   }
-  const formatted = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(value);
+  const formatted = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
   const labels: Record<string, string> = {
-    reps: 'повт.',
-    pages: 'стр.',
-    items: 'шт.',
-    words: 'слов',
-    meters: 'м',
-    attempts: 'попыток',
+    reps: 'reps',
+    pages: 'pages',
+    items: 'items',
+    words: 'words',
+    meters: 'm',
+    attempts: 'attempts',
   };
-  return `${formatted} ${labels[unit] ?? unit}`;
+  const label = labels[unit] ?? unit;
+  return `${formatted} ${value === 1 && labels[unit] && label.endsWith('s') ? label.slice(0, -1) : label}`;
 }
 
 export function formatSourceDomain(url: string): string {
   try {
     return new URL(url).hostname.replace(/^www\./u, '');
   } catch {
-    return 'источник сохранён в плане';
+    return 'source saved in plan';
   }
 }

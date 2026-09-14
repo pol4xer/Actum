@@ -121,7 +121,7 @@ function ensureGeneratedProgram(generated: GeneratedGoal): GeneratedGoal {
     || generated.plan.missions[0]?.title?.trim()
     || generated.plan.chapters?.[0]?.title?.trim()
     || generated.goal.title.trim()
-    || `Цикл ${cycleNumber}`;
+    || `Cycle ${cycleNumber}`;
   return {
     goal: {
       ...generated.goal,
@@ -333,7 +333,7 @@ export function appStateReducer(state: AppState, action: AppStateAction): AppSta
         character: {
           ...state.character,
           energy: Math.max(state.character.energy, REWARD_POLICY.initialEnergy),
-          buffs: ['Ясное намерение'],
+          buffs: ['Clear intention'],
           debuffs: [],
         },
       },
@@ -521,8 +521,8 @@ export function appStateReducer(state: AppState, action: AppStateAction): AppSta
     );
     const debuffs =
       action.outcome === 'skipped'
-        ? Array.from(new Set([...state.character.debuffs, 'Туман сомнений']))
-        : state.character.debuffs.filter((debuff) => debuff !== 'Туман сомнений');
+        ? Array.from(new Set([...state.character.debuffs, 'Fog of doubt']))
+        : state.character.debuffs.filter((debuff) => debuff !== 'Fog of doubt');
     const reportedRun: MissionRun | undefined = run
       ? { ...run, status: 'reported', updatedAt: action.now }
       : undefined;
@@ -607,8 +607,8 @@ export function appStateReducer(state: AppState, action: AppStateAction): AppSta
           worldLight: clampCharacterMeter(state.character.worldLight + worldLightDelta),
           buffs:
             action.outcome === 'completed'
-              ? Array.from(new Set([...state.character.buffs, 'Импульс']))
-              : state.character.buffs.filter((buff) => buff !== 'Импульс'),
+              ? Array.from(new Set([...state.character.buffs, 'Momentum']))
+              : state.character.buffs.filter((buff) => buff !== 'Momentum'),
           debuffs,
         },
         recovery: undefined,
@@ -632,7 +632,7 @@ export function appStateReducer(state: AppState, action: AppStateAction): AppSta
     );
     const missionRuns = { ...state.missionRuns };
     delete missionRuns[action.missionId];
-    const note = 'Пропущено в DEV-режиме.';
+    const note = 'Skipped in development mode.';
     const checkIn = {
       id: action.checkInId,
       missionId: action.missionId,

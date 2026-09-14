@@ -81,7 +81,7 @@ const {
   skipMissionRunBlock,
   startMissionRunWork,
 } = await import(pathToFileURL(join(compiledDirectory, 'mission-run-machine.mjs')).href);
-const { addCalendarDaysToKey } = await import(
+const { addCalendarDaysToKey, formatCalendarDate } = await import(
   pathToFileURL(join(compiledDirectory, 'calendar-date.mjs')).href
 );
 const {
@@ -496,20 +496,63 @@ function reportFirstProgramMission(
   });
 }
 
+test('English built-in labels migrate without translating user content or losing state', () => {
+  const original = stateWithGoal();
+  original.character.buffs = ['Первый шаг', 'Ясное намерение', 'Импульс'];
+  original.character.debuffs = ['Туман сомнений'];
+  original.activeGoal.rawPrompt = 'Моя личная цель';
+  original.activePlan.summary = 'Мой сохранённый план';
+  const note = 'Пропущено в DEV-режиме.';
+  original.checkIns = ['dev-skip', 'user'].map((provenance) => ({
+    id: provenance,
+    missionId: 'mission-1',
+    outcome: 'skipped',
+    comment: note,
+    note,
+    provenance,
+    xpDelta: 0,
+    energyDelta: 0,
+    createdAt: T0,
+  }));
+
+  const persisted = JSON.parse(JSON.stringify(original));
+  const restored = restoreAppState(JSON.stringify(persisted));
+  assert.equal(restored.status, 'ready');
+  assert.equal(restored.migrated, true);
+  assert.deepEqual(restored.state.character.buffs, ['First step', 'Clear intention', 'Momentum']);
+  assert.deepEqual(restored.state.character.debuffs, ['Fog of doubt']);
+  assert.equal(restored.state.checkIns[0].note, 'Skipped in development mode.');
+  assert.equal(restored.state.checkIns[0].comment, 'Skipped in development mode.');
+  assert.deepEqual(restored.state.checkIns[1], original.checkIns[1]);
+  assert.deepEqual(restored.state.activeGoal, persisted.activeGoal);
+  assert.deepEqual(restored.state.activePlan, persisted.activePlan);
+  assert.deepEqual(restored.state.missionRuns, persisted.missionRuns);
+  assert.equal(original.character.buffs[0], 'Первый шаг');
+  assert.equal(restoreAppState(JSON.stringify(restored.state)).migrated, false);
+});
+
+test('calendar labels use English month names without shifting calendar days', () => {
+  assert.equal(formatCalendarDate('2026-09-14'), 'Sep 14');
+  assert.equal(formatCalendarDate('2026-09-14', 'long'), 'September 14');
+  assert.equal(formatCalendarDate('2026-02-30'), undefined);
+});
+
 test('goal duration domain keeps the three fixed product choices and inclusive end dates', () => {
   assert.deepEqual(GOAL_DURATION_CONFIG, {
     month: { totalDays: 30, totalCycles: 1 },
     'half-year': { totalDays: 180, totalCycles: 6 },
     year: { totalDays: 365, totalCycles: 12 },
   });
-  assert.equal(goalDurationLabel('month'), 'Месяц');
-  assert.equal(goalDurationLabel('half-year'), 'Полгода');
-  assert.equal(goalDurationLabel('year'), 'Год');
+  assert.equal(goalDurationLabel('month'), '1 month');
+  assert.equal(goalDurationLabel('half-year'), '6 months');
+  assert.equal(goalDurationLabel('year'), '1 year');
   assert.equal(goalDurationEndDate(T0, 'month'), '2026-08-30T09:00:00.000Z');
   assert.equal(goalDurationEndDate(T0, 'year'), '2027-07-31T09:00:00.000Z');
   assert.equal(goalDurationEndDate('invalid', 'year'), undefined);
   assert.equal(inferGoalDuration('Шесть месяцев'), 'half-year');
   assert.equal(inferGoalDuration('пол года'), 'half-year');
+  assert.equal(inferGoalDuration('6 months'), 'half-year');
+  assert.equal(inferGoalDuration('12 months'), 'year');
   assert.equal(inferGoalDuration('half year'), 'half-year');
   assert.equal(inferGoalDuration('half a year'), 'half-year');
   assert.equal(inferGoalDuration('six months'), 'half-year');
@@ -1398,8 +1441,8 @@ test('schema v2 migrates the saved one-year ten-minute goal without inventing pr
   );
   assert.deepEqual(restored.state.activeGoal.program.roadmap.at(-1), {
     cycleNumber: 12,
-    title: 'Цикл 12',
-    focus: 'Итоговый цикл и контрольный замер',
+    title: 'Cycle 12',
+    focus: 'Final cycle and assessment',
     targetValue: 600,
     targetUnit: 'seconds',
   });
@@ -1910,8 +1953,8 @@ test('DEV skip advances only the current day without changing RPG metrics', () =
     id: 'dev-skip-1',
     missionId: 'mission-1',
     outcome: 'skipped',
-    comment: 'Пропущено в DEV-режиме.',
-    note: 'Пропущено в DEV-режиме.',
+    comment: 'Skipped in development mode.',
+    note: 'Skipped in development mode.',
     provenance: 'dev-skip',
     xpDelta: 0,
     energyDelta: 0,

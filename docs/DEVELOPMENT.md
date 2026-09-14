@@ -41,6 +41,8 @@ Select model identifiers that your API account can access and that support the g
 
 Planning sends the goal, baseline, and relevant program context to the provider. Accepted plans, sessions, and check-ins remain in the app's local storage. The gateway separately keeps request metadata, research, and completed responses in `.actum/`; this directory can contain personal inputs and must remain private.
 
+The interface and new planning instructions use English. Existing user notes and saved plans keep their original text. Built-in labels from older app state are translated when restored; this does not regenerate a plan. To update a reminder scheduled before the English interface, turn Reminder off and on in Settings.
+
 ## Web and native development
 
 The web UI can start without a running gateway:
@@ -114,7 +116,7 @@ Do not delete `.actum/` to bypass these guards. Preserve the file while diagnosi
 
 ## Reusing a plan while testing
 
-In Settings, **«Начать текущий месяц заново»** restarts the active 30-day cycle without creating an AI request. It clears that cycle's results, sessions, check-ins, and comments; it retains the program, roadmap, research association, profile, level, and XP, and moves Day 1 to the current date.
+In Settings, **Restart this month** restarts the active 30-day cycle without creating an AI request. It clears that cycle's results, sessions, check-ins, and comments; it retains the program, roadmap, research association, profile, level, and XP, and moves Day 1 to the current date.
 
 To step through days during local development, set:
 
@@ -122,7 +124,7 @@ To step through days during local development, set:
 EXPO_PUBLIC_ACTUM_MODE=development
 ```
 
-Restart Metro, then use **«Настройки» → «Тестирование» → «Пропустить день»**. Skipping unlocks the next day without awarding XP or fabricating a measured result. Restarting the month also clears test skips. Test controls require both this exact setting and `__DEV__`; preview and production bundles hide them. Set the variable to `production` or omit it for normal behavior.
+Restart Metro, then use **Settings → Testing → Skip day**. Skipping unlocks the next day without awarding XP or fabricating a measured result. Restarting the month also clears test skips. Test controls require both this exact setting and `__DEV__`; preview and production bundles hide them. Set the variable to `production` or omit it for normal behavior.
 
 Older locally saved plans remain readable through the compatibility layer. They are not silently regenerated or upgraded to the new plan contract; guarantees added by newer contracts require an explicitly requested new plan.
 

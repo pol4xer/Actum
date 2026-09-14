@@ -142,13 +142,19 @@ export function createDurableState({
     if (cache.delete(key)) persistState();
   }
 
-  function latestCompletedStage(stage, completedBefore = Number.POSITIVE_INFINITY) {
+  function latestCompletedStage(
+    stage,
+    completedBefore = Number.POSITIVE_INFINITY,
+    matches = () => true,
+  ) {
     const prefix = `${stage}\u0000`;
     return [...stageResults]
       .filter(
         ([key, entry]) =>
           key.startsWith(prefix) &&
+          entry.expiresAt > now() &&
           entry?.payload?.status === 'completed' &&
+          matches(entry) &&
           Number(entry.payload?.completed_at || entry.payload?.created_at || 0) <= completedBefore,
       )
       .map(([, entry]) => entry)
@@ -234,7 +240,7 @@ export function createDurableState({
       } catch {
         // The temporary file may not have been created.
       }
-      throw new Error('Не удалось надёжно сохранить состояние AI-запроса.', { cause });
+      throw new Error('Could not reliably save the AI request state.', { cause });
     }
   }
 
