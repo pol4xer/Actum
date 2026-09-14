@@ -9,7 +9,6 @@ Actum is an iPhone-first life RPG that connects AI-assisted planning with the wo
 **Status: local MVP.** This repository contains the app and its local AI gateway. There is no hosted service or store release. The interface and newly generated plans are in English; the web version provides a way to explore the UI.
 
 <p>
-  <img src="docs/images/actum-web-onboarding.png" width="280" alt="English Actum onboarding: one goal, one step at a time" />
   <img src="docs/images/actum-web-planning.png" width="280" alt="English goal setup with an example reading baseline, time budget, and continuation limit" />
 </p>
 
